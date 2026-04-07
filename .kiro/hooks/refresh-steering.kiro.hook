@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Manual: Refresh Steering Files",
+  "description": "手动触发，检查项目当前状态与 steering 文件（product.md、tech.md、structure.md）是否一致，更新过时的内容。",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "用户触发了 steering 文件刷新。请用中文检查以下三个文件是否与项目当前状态一致，如有过时内容则更新。\n\n## 检查 1：product.md\n\n1. 读取 `.kiro/steering/product.md`\n2. 对比项目当前的功能范围、核心流程、硬件环境\n3. 如果有新增功能、移除功能、或描述与实际不符 → 更新\n\n## 检查 2：tech.md\n\n1. 读取 `.kiro/steering/tech.md`\n2. 扫描项目中的构建配置（CMakeLists.txt、package.json、pyproject.toml、requirements.txt 等）\n3. 检查：\n   - 是否有新引入的依赖未记录\n   - 是否有已移除的依赖仍在列表中\n   - 构建命令是否与实际一致\n   - 常用命令是否需要更新\n4. 如有差异 → 更新\n\n## 检查 3：structure.md\n\n1. 读取 `.kiro/steering/structure.md`\n2. 扫描项目实际目录结构（深度 2-3 层）\n3. 对比文档中的结构描述与实际\n4. 如有新增目录、目录职责变化 → 更新\n\n## 报告格式\n\n```\nproduct.md：✅ 无需更新 / 🔄 已更新 [变更摘要]\ntech.md：✅ 无需更新 / 🔄 已更新 [变更摘要]\nstructure.md：✅ 无需更新 / 🔄 已更新 [变更摘要]\n```"
+  }
+}

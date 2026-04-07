@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Git Clean Check",
+  "description": "在 Spec 任务开始前检查 git 工作区是否有未提交的变更，如果有则提醒用户先 commit",
+  "version": "1",
+  "when": {
+    "type": "preTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "运行 `git status --short` 检查工作区。如果有未提交的变更，判断这些变更是否属于当前正在执行的 Spec（即当前任务所在的 Spec）。如果变更属于上一个已完成的 Spec（不同 spec 目录下的文件、或 device/ 下已完成功能的代码），则提醒用户：'检测到上一个 Spec 的未提交变更，建议先 git commit 再继续。' 如果变更属于当前 Spec 正在进行的工作，则不需要提醒，直接继续。"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Manual: Vibe Coding Trace",
+  "description": "Vibe coding 后手动触发，回顾本次对话中的代码变更，执行简化版的 trace 归档和 SHALL NOT 检查。",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "用户刚完成一轮 vibe coding（非 Spec 流程的代码修改）。请用中文执行以下简化版 trace 归档。\n\n## 第一步：识别变更\n\n1. 通过 `git diff` 和 `git status` 识别本次所有代码变更\n2. 列出新增、修改、删除的文件\n3. 简要描述每个变更的目的\n\n## 第二步：测试检查\n\n1. 识别变更文件对应的测试\n2. 如果有对应测试，运行测试并记录结果\n3. 如果缺少测试覆盖，提醒但不强制生成（vibe coding 可能是探索性的）\n\n## 第三步：安全快检\n\n检查变更中是否有：\n- 硬编码的密钥、凭证、token\n- 敏感信息出现在日志输出中\n- .pem / .key / .env 文件被修改或新增\n\n如有问题立即警告。\n\n## 第四步：写入 trace\n\n检查 `docs/development-trace.md` 是否存在（如不存在则创建）。追加条目：\n\n```markdown\n### [日期] — Vibe Coding\n\n**完成概要：** 简要描述。\n\n**变更文件：** [文件列表]\n\n**测试状态：** [通过/失败/未运行]\n\n**问题与发现：**\n（如有问题，按失败归因表分类；如无，写「无异常」）\n\n**提炼的禁止项（SHALL NOT）：**\n（如有，按三层分类；如无，写「本次无新增」）\n\n---\n```\n\n## 第五步：SHALL NOT 检查\n\n回顾最近 trace 条目，如果有新的系统性问题（≥ 3 次），同步到 `.kiro/steering/shall-not.md`。\n\n保持简洁，vibe coding 的 trace 不需要和 Spec task 一样详细。"
+  }
+}

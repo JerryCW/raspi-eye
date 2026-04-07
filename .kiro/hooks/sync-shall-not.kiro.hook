@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Manual: Sync SHALL-NOT from Trace",
+  "description": "手动触发的兜底机制。扫描 development-trace.md，检查是否有遗漏的系统性禁止项需要同步到 shall-not.md。",
+  "version": "2",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "用户手动触发了 SHALL NOT 同步检查。请用中文执行以下操作。\n\n## 同步流程\n\n1. 读取 `docs/development-trace.md` 的全部 trace 条目\n2. 读取 `.kiro/steering/shall-not.md` 的当前内容\n3. 统计每种归因类别和症状的出现次数\n4. 对比检查：\n   - 同一归因类别或症状出现 ≥ 3 次，但尚未记录在 shall-not.md 中 → 需要同步\n   - 已记录在 shall-not.md 中但 trace 中不再出现（已解决） → 建议标记为已解决\n5. 如果有需要同步的项，按三层分类写入 `.kiro/steering/shall-not.md`：\n   - Requirements 层 → 功能边界、用户交互、场景覆盖\n   - Design 层 → 架构模式、API 选择、依赖兼容、接口契约\n   - Tasks 层 → 实现写法、性能预算、安全校验、边界处理\n6. 每条格式：\n   ```\n   - SHALL NOT [具体禁止内容]（来源：[日期1], [日期2], [日期3]）\n     - 原因：[为什么这是反复出现的问题]\n     - 建议：[在 Spec 中如何避免]\n   ```\n7. 同步完成后，报告：新增了几条、建议移除几条、当前各层级总数\n\n如果没有需要同步的变更，报告「SHALL NOT 池已是最新状态」。"
+  }
+}

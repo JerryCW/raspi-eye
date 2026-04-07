@@ -1,0 +1,44 @@
+# Build
+build/
+build-pi/
+*.o
+*.a
+*.so
+*.dylib
+
+# Python
+.venv-raspi-eye/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node (viewer)
+node_modules/
+
+# Secrets
+*.pem
+*.key
+.env
+.env.*
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# vcpkg
+vcpkg_installed/
+
+# Test artifacts
+Testing/
