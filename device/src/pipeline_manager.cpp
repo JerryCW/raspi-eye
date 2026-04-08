@@ -1,6 +1,7 @@
 // pipeline_manager.cpp
-// PipelineManager implementation — wraps GStreamer C API with RAII.
+// PipelineManager implementation - wraps GStreamer C API with RAII.
 #include "pipeline_manager.h"
+#include <spdlog/spdlog.h>
 
 // --- Factory -----------------------------------------------------------
 
@@ -53,6 +54,9 @@ std::unique_ptr<PipelineManager> PipelineManager::create(
         return nullptr;
     }
 
+    auto pl = spdlog::get("pipeline");
+    if (pl) pl->info("Pipeline created: {}", pipeline_desc);
+
     return std::unique_ptr<PipelineManager>(new PipelineManager(pipeline));
 }
 
@@ -93,8 +97,13 @@ bool PipelineManager::start(std::string* error_msg) {
     GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         if (error_msg) *error_msg = "Failed to set pipeline to PLAYING";
+        auto pl = spdlog::get("pipeline");
+        if (pl && error_msg) pl->error("Failed to start pipeline: {}", *error_msg);
         return false;
     }
+
+    auto pl = spdlog::get("pipeline");
+    if (pl) pl->info("Pipeline started");
     return true;
 }
 
@@ -104,6 +113,9 @@ void PipelineManager::stop() {
     gst_element_set_state(pipeline_, GST_STATE_NULL);
     gst_object_unref(pipeline_);
     pipeline_ = nullptr;
+
+    auto pl = spdlog::get("pipeline");
+    if (pl) pl->info("Pipeline stopped");
 }
 
 GstState PipelineManager::current_state() const {

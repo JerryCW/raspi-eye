@@ -1,9 +1,11 @@
 // main.cpp
-// Application entry point — creates a test pipeline and runs GMainLoop.
+// Application entry point - creates a test pipeline and runs GMainLoop.
 #include "pipeline_manager.h"
+#include "log_init.h"
+#include <spdlog/spdlog.h>
 #include <gst/gst.h>
 #include <csignal>
-#include <cstdlib>
+#include <string>
 
 static GMainLoop* loop = nullptr;
 
@@ -19,34 +21,52 @@ static gboolean bus_callback(GstBus* /*bus*/, GstMessage* msg, gpointer /*data*/
             GError* err = nullptr;
             gchar* dbg = nullptr;
             gst_message_parse_error(msg, &err, &dbg);
-            g_printerr("Error from %s: %s\n",
-                        GST_OBJECT_NAME(msg->src),
-                        err ? err->message : "unknown error");
-            if (dbg) {
-                g_printerr("Debug info: %s\n", dbg);
-                g_free(dbg);
+
+            auto logger = spdlog::get("main");
+            if (logger) {
+                logger->error("Error from {}: {}",
+                              GST_OBJECT_NAME(msg->src),
+                              err ? err->message : "unknown error");
+                if (dbg) {
+                    logger->debug("Debug info: {}", dbg);
+                }
             }
+
+            if (dbg) g_free(dbg);
             if (err) g_error_free(err);
             if (loop) g_main_loop_quit(loop);
             break;
         }
-        case GST_MESSAGE_EOS:
-            g_printerr("End of stream\n");
+        case GST_MESSAGE_EOS: {
+            auto logger = spdlog::get("main");
+            if (logger) {
+                logger->info("End of stream");
+            }
             if (loop) g_main_loop_quit(loop);
             break;
+        }
         default:
             break;
     }
     return TRUE;
 }
 
-// Pipeline run logic — called by gst_macos_main on macOS or directly on Linux.
-static int run_pipeline(int /*argc*/, char* /*argv*/[]) {
+// Pipeline run logic - called by gst_macos_main on macOS or directly on Linux.
+static int run_pipeline(int argc, char* argv[]) {
+    // Parse --log-json argument
+    bool use_json = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--log-json") use_json = true;
+    }
+    log_init::init(use_json);
+    auto logger = spdlog::get("main");
+
     std::string err_msg;
     auto pm = PipelineManager::create(
         "videotestsrc ! videoconvert ! autovideosink", &err_msg);
     if (!pm) {
-        g_printerr("Failed to create pipeline: %s\n", err_msg.c_str());
+        if (logger) logger->error("Failed to create pipeline: {}", err_msg);
+        log_init::shutdown();
         return 1;
     }
 
@@ -63,9 +83,10 @@ static int run_pipeline(int /*argc*/, char* /*argv*/[]) {
 
     // Start pipeline
     if (!pm->start(&err_msg)) {
-        g_printerr("Failed to start pipeline: %s\n", err_msg.c_str());
+        if (logger) logger->error("Failed to start pipeline: {}", err_msg);
         g_main_loop_unref(loop);
         loop = nullptr;
+        log_init::shutdown();
         return 1;
     }
 
@@ -77,6 +98,7 @@ static int run_pipeline(int /*argc*/, char* /*argv*/[]) {
     g_main_loop_unref(loop);
     loop = nullptr;
 
+    log_init::shutdown();
     return 0;
 }
 

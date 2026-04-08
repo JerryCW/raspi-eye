@@ -144,3 +144,132 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-08 — Spec: spec-1-spdlog-logging / 任务: 1. CMake 集成（1.1 + 1.2 + 1.3）
+
+**完成概要：** 在 CMakeLists.txt 中添加 spdlog v1.15.0 和 RapidCheck FetchContent，创建 log_module 静态库 target 和 log_test 测试 target，4 个骨架文件就位，pipeline_manager 已链接 log_module。
+
+**测试状态：** 全部通过（2/2：smoke_test + log_test）— 新增 1 个占位测试（log_test Placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/src/json_formatter.h, device/src/json_formatter.cpp, device/src/log_init.h, device/src/log_init.cpp, device/tests/log_test.cpp
+
+---
+
+### 2026-04-08 — Spec: spec-1-spdlog-logging / 任务: 2. Checkpoint — 验证 CMake 配置和编译
+
+**完成概要：** cmake configure + build + ctest 全部通过，spdlog + RapidCheck 自动下载，编译零错误，2/2 测试通过（smoke_test + log_test），ASan 无报告。
+
+**测试状态：** 全部通过（2/2）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-08 — Spec: spec-1-spdlog-logging / 任务: 3. 实现 JsonFormatter（3.1 + 3.2）
+
+**完成概要：** 实现 JsonFormatter（json_formatter.h + json_formatter.cpp），输出单行 JSON 格式日志，手动 JSON 转义。编写 Property Test JsonFormatValidity.MsgRoundTrips（100+ 迭代），验证任意字符串消息的 JSON 格式有效性和 msg 字段 round-trip 正确性。
+
+**测试状态：** 全部通过（2/2：smoke_test + log_test[1 property test]）— 新增 1 个 property test
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/json_formatter.h, device/src/json_formatter.cpp, device/tests/log_test.cpp
+
+---
+
+### 2026-04-08 — Spec: spec-1-spdlog-logging / 任务: 4. 实现 log_init 模块（4.1 + 4.2 + 4.3 + 4.4）
+
+**完成概要：** 实现 log_init 模块（init/create_logger/shutdown），编写 4 个 example-based 单元测试和 2 个 property tests（日志级别过滤 + Logger 工厂函数），全部通过。
+
+**测试状态：** 全部通过（7/7：smoke_test 8 tests + log_test 7 tests）— 新增 4 个单元测试 + 2 个 property tests
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | spdlog v1.15.0 的 stderr_color_sink.h 路径变更 | Spec 缺少信息 | `#include <spdlog/sinks/stderr_color_sink.h>` 编译失败，需要 `<spdlog/sinks/stdout_color_sinks.h>` | 修改 include 路径 | Design 文档中 spdlog include 示例应使用 v1.15.0 实际路径 |
+| 2 | spdlog v1.15.0 需要显式 include pattern_formatter | Spec 缺少信息 | `spdlog::pattern_formatter` 未声明，需要 `#include <spdlog/pattern_formatter.h>` | 添加显式 include | 同上 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（spdlog header 路径问题为单次问题，已在实现中修复）
+
+**涉及文件：** device/src/log_init.h, device/src/log_init.cpp, device/tests/log_test.cpp
+
+---
+
+### 2026-04-08 — Spec: spec-1-spdlog-logging / 任务: 5. Checkpoint — 验证日志核心模块
+
+**完成概要：** 全量验证通过，7/7 测试通过（smoke_test + log_test），ASan 无报告。
+
+**测试状态：** 全部通过（2 test executables, 15 total tests）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-08 — Spec: spec-1-spdlog-logging / 任务: 6. 迁移现有代码（6.1 + 6.2）
+
+**完成概要：** main.cpp 中所有 g_printerr 替换为 spdlog 调用（含 --log-json 参数解析），pipeline_manager.cpp 添加 create/start/stop 诊断日志，Spec 0 smoke_test 回归通过。
+
+**测试状态：** 全部通过（smoke_test 8 tests + log_test 7 tests）— 无新增测试（由 smoke_test 回归覆盖）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/main.cpp, device/src/pipeline_manager.cpp
+
+---
+
+### 2026-04-08 — Spec: spec-1-spdlog-logging / 任务: 7. 最终 Checkpoint — 全量验证
+
+**完成概要：** 干净构建全量验证通过，smoke_test 8/8 + log_test 7/7，编译零错误，ASan 无报告，总耗时 2.91s。
+
+**测试状态：** 全部通过（15/15 total tests across 2 executables）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
