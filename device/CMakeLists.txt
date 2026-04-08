@@ -31,7 +31,8 @@ FetchContent_MakeAvailable(spdlog)
 # RapidCheck（FetchContent）
 FetchContent_Declare(rapidcheck
     GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-    GIT_TAG master)
+    GIT_TAG master
+    GIT_SUBMODULES "")
 set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(rapidcheck)
 
