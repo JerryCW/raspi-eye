@@ -30,11 +30,11 @@ sudo apt update && sudo apt install -y \
 ## 2. Clone Repository
 
 ```bash
-git clone <repo-url> ~/raspi-eye
+git clone https://github.com/JerryCW/raspi-eye.git ~/raspi-eye
 cd ~/raspi-eye
 ```
 
-Replace `<repo-url>` with the actual repository URL.
+Replace `https://github.com/JerryCW/raspi-eye.git` with your fork URL if applicable.
 
 ## 3. First Build Verification
 

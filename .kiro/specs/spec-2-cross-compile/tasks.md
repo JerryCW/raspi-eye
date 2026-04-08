@@ -27,21 +27,12 @@
     - 包含 SSH 免密登录配置步骤（`ssh-copy-id pi@raspberrypi.local` + 验证命令）
     - _需求：1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-- [x] 2. 创建 SSH 远程构建脚本
+- [x] 2. 创建构建脚本（双模式：本地 + SSH 远程）
   - [x] 2.1 创建 `scripts/pi-build.sh`
     - 脚本开头 `#!/usr/bin/env bash` + `set -euo pipefail`
-    - 读取环境变量 `PI_HOST`（默认 `raspberrypi.local`）、`PI_USER`（默认 `pi`）、`PI_REPO_DIR`（默认 `~/raspi-eye`）
-    - 输出 `[pi-build] Starting build on ${PI_HOST}...`
-    - SSH 连接检测：`ssh -o ConnectTimeout=5 -o BatchMode=yes "${PI_USER}@${PI_HOST}" true`，失败输出 `[pi-build] ERROR: Cannot connect to ${PI_USER}@${PI_HOST}` 到 stderr 并 exit 1
-    - 通过 SSH heredoc（`bash -s -- "${PI_REPO_DIR}" <<'REMOTE'`）在 Pi 5 上依次执行：
-      - `git pull`
-      - `cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release`
-      - `cmake --build device/build`
-      - `ctest --test-dir device/build --output-on-failure`
-    - 远程命令块使用 `set -euo pipefail`，任一步骤失败立即退出
-    - 全部成功输出 `[pi-build] All steps passed.`
-    - 设置 `chmod +x`
-    - _需求：2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9_
+    - 通过 `uname -s` 检测平台：Linux → 本地模式，Darwin → SSH 远程模式
+    - **本地模式（Pi 5）**：`cd` 到项目根目录，依次执行 git pull、cmake Release、build、ctest
+    - **远程模式（macOS）**：读取环境变量 `PI_HOST`（默认 `raspberrypi.local`）、`PI_USER`（默认 `pi`）、`PI_REPO_DIR`（默认 `~/raspi-eye`），SSH 连接检测后通过 heredoc 远程执行相同构建流程
 
 - [x] 3. 创建双平台验证脚本
   - [x] 3.1 创建 `scripts/build-all.sh`

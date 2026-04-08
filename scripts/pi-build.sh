@@ -1,25 +1,20 @@
 #!/usr/bin/env bash
-# pi-build.sh — Build and test on Pi 5 via SSH
+# pi-build.sh — Build and test on Pi 5 (remote via SSH from macOS, or locally on Pi 5)
 set -euo pipefail
 
-# 环境变量（带默认值）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 PI_HOST="${PI_HOST:-raspberrypi.local}"
 PI_USER="${PI_USER:-pi}"
 PI_REPO_DIR="${PI_REPO_DIR:-~/raspi-eye}"
 
-echo "[pi-build] Starting build on ${PI_HOST}..."
+OS="$(uname -s)"
 
-# SSH 连接检测
-ssh -o ConnectTimeout=5 -o BatchMode=yes "${PI_USER}@${PI_HOST}" true || {
-    echo "[pi-build] ERROR: Cannot connect to ${PI_USER}@${PI_HOST}" >&2
-    exit 1
-}
-
-# 远程执行：git pull + cmake + build + ctest
-ssh "${PI_USER}@${PI_HOST}" bash -s -- "${PI_REPO_DIR}" <<'REMOTE'
-    set -euo pipefail
-    REPO_DIR="$1"
-    cd "${REPO_DIR}"
+if [ "${OS}" = "Linux" ]; then
+    # ── Local mode: running on Pi 5 directly ──
+    echo "[pi-build] Local mode: building on Pi 5"
+    cd "${PROJECT_ROOT}"
 
     echo "[pi-build] git pull..."
     git pull
@@ -32,6 +27,36 @@ ssh "${PI_USER}@${PI_HOST}" bash -s -- "${PI_REPO_DIR}" <<'REMOTE'
 
     echo "[pi-build] ctest..."
     ctest --test-dir device/build --output-on-failure
+
+    # TODO: deploy step, e.g. sudo systemctl restart raspi-eye
+
+    echo "[pi-build] All steps passed. (local)"
+else
+    # ── Remote mode: SSH from macOS to Pi 5 ──
+    echo "[pi-build] Remote mode: building on ${PI_HOST} via SSH"
+
+    ssh -o ConnectTimeout=5 -o BatchMode=yes "${PI_USER}@${PI_HOST}" true || {
+        echo "[pi-build] ERROR: Cannot connect to ${PI_USER}@${PI_HOST}" >&2
+        exit 1
+    }
+
+    ssh "${PI_USER}@${PI_HOST}" bash -s -- "${PI_REPO_DIR}" <<'REMOTE'
+        set -euo pipefail
+        REPO_DIR="$1"
+        cd "${REPO_DIR}"
+
+        echo "[pi-build] git pull..."
+        git pull
+
+        echo "[pi-build] cmake configure (Release)..."
+        cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release
+
+        echo "[pi-build] cmake build..."
+        cmake --build device/build
+
+        echo "[pi-build] ctest..."
+        ctest --test-dir device/build --output-on-failure
 REMOTE
 
-echo "[pi-build] All steps passed."
+    echo "[pi-build] All steps passed. (remote)"
+fi

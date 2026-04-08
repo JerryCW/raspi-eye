@@ -15,7 +15,7 @@
 
 ## 术语表
 
-- **Pi_Build_Script**：SSH 远程构建脚本（`scripts/pi-build.sh`），通过 SSH 连接 Pi 5 执行 git pull + cmake 配置 + 编译 + ctest 一键完成
+- **Pi_Build_Script**：构建脚本（`scripts/pi-build.sh`），自动检测平台：macOS 上通过 SSH 连接 Pi 5 执行远程构建，Pi 5（Linux）上直接本地执行 git pull + cmake 配置 + 编译 + ctest
 - **Build_All_Script**：双平台验证脚本（`scripts/build-all.sh`），依次执行 macOS 本地 Debug 编译测试和 SSH 到 Pi 5 远程 Release 编译测试
 - **Pi_Setup_Doc**：Pi 5 环境配置文档（`docs/pi-setup.md`），记录 Pi 5 上需要安装的 apt 依赖和构建工具
 - **FetchContent**：CMake 模块，用于在配置阶段自动下载和集成外部依赖（GTest、spdlog、RapidCheck）
@@ -103,11 +103,11 @@
 
 ### 需求 2：SSH 远程构建脚本
 
-**用户故事：** 作为开发者，我需要一个 SSH 远程构建脚本，以便在 macOS 上一键触发 Pi 5 上的 git pull + cmake + build + ctest。
+**用户故事：** 作为开发者，我需要一个构建脚本，以便在 macOS 上通过 SSH 远程触发 Pi 5 构建，或在 Pi 5 上直接本地一键编译测试。
 
 #### 验收标准
 
-1. WHEN 执行 `scripts/pi-build.sh` 时，THE Pi_Build_Script SHALL 通过 SSH 连接到 Pi 5（使用 `PI_USER@PI_HOST`），在 `PI_REPO_DIR` 目录下依次执行：git pull、cmake 配置（Release 构建）、cmake 编译、ctest 运行
+1. WHEN 在 macOS 上执行 `scripts/pi-build.sh` 时，THE Pi_Build_Script SHALL 通过 SSH 连接到 Pi 5（使用 `PI_USER@PI_HOST`），在 `PI_REPO_DIR` 目录下依次执行：git pull、cmake 配置（Release 构建）、cmake 编译、ctest 运行；WHEN 在 Pi 5（Linux）上执行时，THE Pi_Build_Script SHALL 直接在本地执行相同的构建流程（无需 SSH）
 2. THE Pi_Build_Script SHALL 通过环境变量 `PI_HOST`（默认 `raspberrypi.local`）、`PI_USER`（默认 `pi`）、`PI_REPO_DIR`（默认 `~/raspi-eye`）确定连接目标和仓库路径
 3. WHEN Pi 5 上 cmake 配置执行时，THE Pi_Build_Script SHALL 使用 `-DCMAKE_BUILD_TYPE=Release` 构建类型（不开启 ASan）
 4. WHEN Pi 5 上 ctest 执行时，THE Pi_Build_Script SHALL 使用 `ctest --test-dir device/build --output-on-failure` 运行所有测试

@@ -4,7 +4,7 @@
 
 本设计为 device 模块搭建 Pi 5 原生编译流程和双平台验证基础设施。核心交付物包括：
 
-1. **pi-build.sh** — SSH 远程构建脚本，从 macOS 一键触发 Pi 5 上的 git pull → cmake 配置 → 编译 → ctest
+1. **pi-build.sh** — 构建脚本，自动检测平台：macOS 上通过 SSH 远程触发 Pi 5 构建，Pi 5（Linux）上直接本地执行 git pull → cmake 配置 → 编译 → ctest
 2. **build-all.sh** — 双平台验证脚本，依次执行 macOS 本地 Debug 编译测试和 Pi 5 远程 Release 编译测试
 3. **docs/pi-setup.md** — Pi 5 环境配置文档，记录 apt 依赖安装、git clone、首次构建验证、SSH 免密配置步骤
 4. **CMakeLists.txt 平台适配验证** — 确认现有 CMakeLists.txt 在 Pi 5 上无需修改即可编译通过
@@ -65,31 +65,26 @@ raspi-eye/
 
 ## 组件与接口
 
-### pi-build.sh — SSH 远程构建脚本
+### pi-build.sh — 构建脚本（双模式：本地 + 远程）
 
 ```bash
 #!/usr/bin/env bash
-# pi-build.sh — Build and test on Pi 5 via SSH
+# pi-build.sh — Build and test on Pi 5 (remote via SSH from macOS, or locally on Pi 5)
 set -euo pipefail
 
-# 环境变量（带默认值）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 PI_HOST="${PI_HOST:-raspberrypi.local}"
 PI_USER="${PI_USER:-pi}"
 PI_REPO_DIR="${PI_REPO_DIR:-~/raspi-eye}"
 
-echo "[pi-build] Starting build on ${PI_HOST}..."
+OS="$(uname -s)"
 
-# SSH 连接检测
-ssh -o ConnectTimeout=5 -o BatchMode=yes "${PI_USER}@${PI_HOST}" true || {
-    echo "[pi-build] ERROR: Cannot connect to ${PI_USER}@${PI_HOST}" >&2
-    exit 1
-}
-
-# 远程执行：git pull + cmake + build + ctest
-ssh "${PI_USER}@${PI_HOST}" bash -s -- "${PI_REPO_DIR}" <<'REMOTE'
-    set -euo pipefail
-    REPO_DIR="$1"
-    cd "${REPO_DIR}"
+if [ "${OS}" = "Linux" ]; then
+    # ── Local mode: running on Pi 5 directly ──
+    echo "[pi-build] Local mode: building on Pi 5"
+    cd "${PROJECT_ROOT}"
 
     echo "[pi-build] git pull..."
     git pull
@@ -102,26 +97,56 @@ ssh "${PI_USER}@${PI_HOST}" bash -s -- "${PI_REPO_DIR}" <<'REMOTE'
 
     echo "[pi-build] ctest..."
     ctest --test-dir device/build --output-on-failure
+
+    # TODO: deploy step, e.g. sudo systemctl restart raspi-eye
+
+    echo "[pi-build] All steps passed. (local)"
+else
+    # ── Remote mode: SSH from macOS to Pi 5 ──
+    echo "[pi-build] Remote mode: building on ${PI_HOST} via SSH"
+
+    ssh -o ConnectTimeout=5 -o BatchMode=yes "${PI_USER}@${PI_HOST}" true || {
+        echo "[pi-build] ERROR: Cannot connect to ${PI_USER}@${PI_HOST}" >&2
+        exit 1
+    }
+
+    ssh "${PI_USER}@${PI_HOST}" bash -s -- "${PI_REPO_DIR}" <<'REMOTE'
+        set -euo pipefail
+        REPO_DIR="$1"
+        cd "${REPO_DIR}"
+
+        echo "[pi-build] git pull..."
+        git pull
+
+        echo "[pi-build] cmake configure (Release)..."
+        cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release
+
+        echo "[pi-build] cmake build..."
+        cmake --build device/build
+
+        echo "[pi-build] ctest..."
+        ctest --test-dir device/build --output-on-failure
 REMOTE
 
-echo "[pi-build] All steps passed."
+    echo "[pi-build] All steps passed. (remote)"
+fi
 ```
 
 脚本执行流程：
 
-1. 读取环境变量 `PI_HOST`、`PI_USER`、`PI_REPO_DIR`，使用默认值兜底
-2. 输出开始信息 `[pi-build] Starting build on {PI_HOST}...`
-3. SSH 连接检测：`ssh -o ConnectTimeout=5 -o BatchMode=yes` 测试连通性，失败则输出错误信息并退出（exit 1）
-4. 通过 SSH 在 Pi 5 上依次执行：
-   - `git pull` — 拉取最新代码
-   - `cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release` — 配置 Release 构建
-   - `cmake --build device/build` — 编译
-   - `ctest --test-dir device/build --output-on-failure` — 运行测试
-5. 远程命令块使用 `set -euo pipefail`，任一步骤失败立即退出，SSH 返回非零退出码
-6. 全部成功后输出 `[pi-build] All steps passed.`
+1. 检测 `uname -s`，Linux → 本地模式，其他（Darwin/macOS）→ SSH 远程模式
+2. **本地模式（Pi 5 上直接运行）**：
+   - `cd` 到项目根目录
+   - 依次执行 git pull → cmake Release → build → ctest
+   - 预留部署步骤（TODO）
+3. **远程模式（macOS SSH 到 Pi 5）**：
+   - 读取环境变量 `PI_HOST`、`PI_USER`、`PI_REPO_DIR`，使用默认值兜底
+   - SSH 连接检测，失败则输出错误信息并退出
+   - 通过 SSH heredoc 在 Pi 5 上执行相同的构建流程
 
 设计决策：
-- **SSH heredoc 传递命令**：使用 `bash -s -- "${PI_REPO_DIR}" <<'REMOTE'` 将整个构建流程作为一个 SSH 会话执行，通过位置参数 `$1` 传递仓库路径，heredoc 使用单引号防止本地展开
+- **双模式自动检测**：通过 `uname -s` 检测平台，Linux 上直接本地构建（无需 SSH），macOS 上走 SSH 远程。一个脚本覆盖两种使用场景
+- **SSH heredoc 传递命令（远程模式）**：使用 `bash -s -- "${PI_REPO_DIR}" <<'REMOTE'` 将整个构建流程作为一个 SSH 会话执行，通过位置参数 `$1` 传递仓库路径，heredoc 使用单引号防止本地展开
 - **`-o BatchMode=yes` 连接检测**：禁止交互式密码提示，如果 SSH key 未配置会立即失败而非挂起
 - **`-o ConnectTimeout=5`**：5 秒超时，避免 Pi 5 不可达时长时间等待
 - **不使用 `-t` 伪终端**：heredoc 方式下 `-t` 会导致 `Pseudo-terminal will not be allocated` 警告，去掉后输出仍然实时回显
