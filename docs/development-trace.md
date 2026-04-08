@@ -273,3 +273,113 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-08 — Spec: spec-2-cross-compile / 任务: 1.1 创建 docs/pi-setup.md
+
+**完成概要：** 创建 Pi 5 环境配置文档（英文），包含 Prerequisites、Install Build Dependencies、Clone Repository、First Build Verification、SSH Key Setup 五个章节。
+
+**测试状态：** 未运行（轻量模式，纯文档变更）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** docs/pi-setup.md
+
+---
+
+### 2026-04-08 — Spec: spec-2-cross-compile / 任务: 2.1 创建 scripts/pi-build.sh
+
+**完成概要：** 创建 SSH 远程构建脚本，包含环境变量默认值、SSH 连接检测、heredoc 远程执行（git pull + cmake Release + build + ctest），`bash -n` 语法检查通过，`chmod +x` 已设置。
+
+**测试状态：** 未运行（轻量模式，纯 Bash 脚本创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/pi-build.sh
+
+---
+
+### 2026-04-08 — Spec: spec-2-cross-compile / 任务: 3.1 创建 scripts/build-all.sh
+
+**完成概要：** 创建双平台验证脚本，包含 SCRIPT_DIR/PROJECT_ROOT 推导、Pi 5 可达性缓存、Phase 1 macOS Debug + Phase 2 Pi 5 Release、摘要输出，`bash -n` 语法检查通过，`chmod +x` 已设置。
+
+**测试状态：** 未运行（轻量模式，纯 Bash 脚本创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/build-all.sh
+
+---
+
+### 2026-04-08 — Spec: spec-2-cross-compile / 任务: 4.1 脚本语法检查 + 4.2 macOS 本地编译回归验证
+
+**完成概要：** `bash -n` 两个脚本语法检查通过；macOS Debug cmake configure + build + ctest 全部通过（smoke_test 0.45s + log_test 0.09s），ASan 无报告。
+
+**测试状态：** 全部通过（2/2：smoke_test + log_test）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | cmake configure 首次因 GitHub SSL 瞬时错误失败（FetchContent 下载） | 网络问题 | SSL connect error，重试成功 | 重试 | 无需行动（网络瞬断） |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-08 — Spec: spec-2-cross-compile / 任务: 4.3 验证 CMakeLists.txt 平台适配（代码审查）
+
+**完成概要：** 审查 CMakeLists.txt 和源码的 Pi 5 兼容性，5 个维度全部通过（pkg-config、FetchContent、ASan、条件编译、GCC 兼容），确认无需修改 CMakeLists.txt。
+
+**测试状态：** 未运行（轻量模式，纯代码审查）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯审查）
+
+---
+
+### 2026-04-08 — Spec: spec-2-cross-compile / 任务: 5. 最终检查点 — 全量验证
+
+**完成概要：** 全量验证 6/6 项通过：bash -n 两脚本语法正确、cmake configure + build + ctest 全部通过（smoke_test + log_test）、ASan 无报告、docs/pi-setup.md 存在且完整。Pi 5 远程验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（2/2：smoke_test + log_test）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
