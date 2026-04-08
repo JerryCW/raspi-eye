@@ -30,7 +30,7 @@
     - 创建 `device/src/pipeline_manager.h`、`device/src/pipeline_manager.cpp`、`device/src/main.cpp`、`device/tests/smoke_test.cpp` 的最小占位内容（确保 CMake 配置和编译通过）
     - _需求：2.3_
 
-- [-] 2. 实现 PipelineManager
+- [x] 2. 实现 PipelineManager
   - [x] 2.1 实现 `device/src/pipeline_manager.h` 接口声明
     - 声明 `PipelineManager` 类：工厂函数 `create()`、`start()`、`stop()`、`current_state()`、析构函数
     - 禁止拷贝（`= delete`），允许移动
@@ -46,12 +46,12 @@
     - GError 资源通过 `g_error_free()` 释放
     - _需求：2.1, 2.2, 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.3_
 
-- [~] 3. 检查点 — 确认 PipelineManager 编译通过
+- [x] 3. 检查点 — 确认 PipelineManager 编译通过
   - 执行 `cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device/build`
   - 确认配置成功、编译无错误
   - 如有问题，询问用户
 
-- [~] 4. 实现 main.cpp 应用入口
+- [x] 4. 实现 main.cpp 应用入口
   - 使用 PipelineManager 创建 `videotestsrc ! videoconvert ! autovideosink` 管道
   - 创建 GMainLoop，注册 SIGINT handler（退出主循环）
   - 获取 bus，注册 `bus_callback` 处理 `GST_MESSAGE_ERROR` 和 `GST_MESSAGE_EOS`
@@ -60,8 +60,8 @@
   - 所有 `g_printerr` 输出使用英文，禁止非 ASCII 字符
   - _需求：5.1, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 5. 实现冒烟测试
-  - [~] 5.1 实现 `device/tests/smoke_test.cpp`
+- [x] 5. 实现冒烟测试
+  - [x] 5.1 实现 `device/tests/smoke_test.cpp`
     - `CreateValidPipeline`：`create("videotestsrc ! fakesink")` 返回非 nullptr — _需求：2.1, 6.2_
     - `CreateInvalidPipeline`：`create("")` 返回 nullptr，error_msg 非空 — _需求：2.2, 6.2_
     - `CreateUnknownElement`：`create("nonexistent_element ! fakesink")` 返回 nullptr 或状态异常 — _需求：2.2_
@@ -73,7 +73,7 @@
     - 所有测试仅使用 `fakesink`，不使用 `autovideosink` — _需求：6.6_
     - _需求：6.1, 6.7_
 
-- [~] 6. 最终检查点 — 全量验证
+- [x] 6. 最终检查点 — 全量验证
   - 执行 `cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device/build && ctest --test-dir device/build --output-on-failure`
   - 确认：CMake 配置成功、编译无错误、所有冒烟测试通过、ASan 无报告
   - 如有问题，询问用户

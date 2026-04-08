@@ -34,6 +34,10 @@ public:
     // Query the current pipeline state.
     GstState current_state() const;
 
+    // Access the underlying GstElement* pipeline (non-owning).
+    // Returns nullptr if the pipeline has been stopped.
+    GstElement* pipeline() const { return pipeline_; }
+
 private:
     explicit PipelineManager(GstElement* pipeline);
     GstElement* pipeline_ = nullptr;
