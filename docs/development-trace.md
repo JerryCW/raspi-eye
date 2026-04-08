@@ -7,7 +7,7 @@
 
 _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 
-暂无。
+- SHALL NOT 直接运行测试可执行文件（如 `./build/log_test`），必须通过 `ctest --test-dir device/build --output-on-failure` 统一运行（来源：spec-0, spec-1 共 3 次违规）
 
 ---
 
