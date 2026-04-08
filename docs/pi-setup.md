@@ -52,26 +52,52 @@ downloads dependencies; subsequent builds are incremental.
 
 ## 4. SSH Key Setup
 
-Passwordless SSH login is required by `scripts/pi-build.sh` and
+Passwordless SSH login is required by `scripts/pi-build.sh` (remote mode) and
 `scripts/build-all.sh`. Run the following commands **on your macOS development
 machine**.
 
-### Copy your public key to the Pi
+### Generate SSH key (if you don't have one)
 
 ```bash
-ssh-copy-id pi@raspberrypi.local
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
 ```
 
-If your Pi uses a different hostname or user, adjust accordingly:
+### Add Pi's host key and copy your public key
 
 ```bash
-ssh-copy-id <user>@<hostname>
+ssh-keyscan <PI_IP> >> ~/.ssh/known_hosts
+ssh-copy-id pi@<PI_IP>
 ```
+
+You will be prompted for the Pi's password once.
 
 ### Verify passwordless login
 
 ```bash
-ssh pi@raspberrypi.local "echo OK"
+ssh pi@<PI_IP> "echo OK"
 ```
 
 You should see `OK` printed without being prompted for a password.
+
+## 5. Using pi-build.sh
+
+`scripts/pi-build.sh` auto-detects the platform:
+- On Pi 5 (Linux): runs build locally
+- On macOS: builds remotely on Pi 5 via SSH
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_HOST` | `raspberrypi.local` | Pi 5 hostname or IP |
+| `PI_USER` | `pi` | Pi 5 username |
+| `PI_REPO_DIR` | `~/raspi-eye` | Repo path on Pi 5 |
+
+### Example (remote from macOS)
+
+```bash
+PI_HOST=192.168.x.x PI_REPO_DIR='~/Workspace/raspi-eye' ./scripts/pi-build.sh
+```
+
+> **Important:** Use single quotes for `PI_REPO_DIR` to prevent `~` from
+> expanding on macOS. It must expand on the Pi side.

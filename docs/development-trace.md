@@ -383,3 +383,29 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-08 — Spec: spec-2-cross-compile / Pi 5 实机验证
+
+**完成概要：** Pi 5 实机验证 pi-build.sh 双模式脚本，过程中发现并解决多个环境问题，最终远程和本地模式均跑通。
+
+**测试状态：** Pi 5 远程构建通过 — 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | Pi 5 上 RapidCheck FetchContent 拉 submodule 时 TLS 握手失败 | Spec 缺少信息 | `gnutls_handshake() failed: The TLS connection was non-properly terminated.` clone ext/catch 和 ext/googletest 失败 | CMakeLists.txt 中 RapidCheck 的 FetchContent_Declare 加 `GIT_SUBMODULES ""` | Design 层禁止项：FetchContent 引入第三方库时必须加 `GIT_SUBMODULES ""` 防止不必要的 submodule 下载 |
+| 2 | macOS 上 `PI_REPO_DIR=~/Workspace/raspi-eye` 被本地展开为 `/Users/wangcjer/...` 传到 Pi 5 上找不到 | Spec 缺少信息 | `bash: line 3: cd: /Users/wangcjer/Workspace/raspi-eye: No such file or directory` | 使用单引号 `PI_REPO_DIR='~/Workspace/raspi-eye'` 防止本地展开 | 文档中说明 PI_REPO_DIR 必须用单引号设置 |
+| 3 | macOS 和 Pi 5 上都没有 SSH key，`ssh-copy-id` 报 `No identities found` | Spec 缺少信息 | `/usr/bin/ssh-copy-id: ERROR: No identities found` | 先 `ssh-keygen -t ed25519` 再 `ssh-copy-id` | pi-setup.md 中补充 macOS 端也需要先生成 SSH key |
+| 4 | Pi 5 仓库路径为 `~/Workspace/raspi-eye` 而非默认的 `~/raspi-eye` | 用户环境差异 | `cd: /home/pi/raspi-eye: No such file or directory` | 通过 `PI_REPO_DIR` 环境变量覆盖 | 文档中说明默认值和覆盖方式 |
+| 5 | pi-build.sh 原设计为纯 SSH 远程脚本，Pi 5 上无法直接使用 | Spec 不够精确 | 用户需要在 Pi 5 上一键编译，但脚本只支持远程模式 | 改为双模式：`uname -s` 检测平台，Linux 本地 / macOS SSH 远程 | 后续脚本设计时考虑双平台使用场景 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在 FetchContent_Declare 中省略 `GIT_SUBMODULES ""`（除非确实需要 submodule），Pi 5 网络不稳定时 submodule clone 容易 TLS 失败
+
+本次无新增禁止项。（FetchContent submodule 问题为首次出现，观察后续是否反复）
+
+**涉及文件：** scripts/pi-build.sh, device/CMakeLists.txt, docs/pi-setup.md
+
+---
