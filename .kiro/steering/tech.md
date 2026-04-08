@@ -102,4 +102,8 @@ cmake --build device/build-pi
 
 ## Spec 创建规则
 
-- **Backlog 检查：** 创建新 Spec 前，必须读取 `docs/spec-backlog.md`，检查是否有到期的延迟待办项应纳入当前 Spec。匹配的项纳入后在 backlog 中标注对应 Spec 编号。
+- **Backlog 检查：** 创建新 Spec 前，必须读取 `docs/spec-backlog.md`，该文件包含两部分内容：
+  1. **路线图规划：** 按阶段排列的完整 Spec 列表及依赖关系，作为参考而非硬性约束，实际 Spec 内容可根据需要调整
+  2. **延迟待办项：** 开发过程中推迟到后续 Spec 的事项，检查是否有到期的待办应纳入当前 Spec
+- 匹配的延迟待办项纳入后，在 backlog 的延迟待办项列表中标注对应 Spec 编号
+- **反向同步：** 如果实际创建的 Spec 与 backlog 中的规划有差异（范围变化、依赖调整、拆分合并），必须反向更新 `docs/spec-backlog.md` 保持一致
