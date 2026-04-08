@@ -70,7 +70,7 @@ ctest --test-dir device/build --output-on-failure
 # 一条命令验证（配置 + 编译 + 测试）
 cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device/build && ctest --test-dir device/build --output-on-failure
 
-# 交叉编译（Pi 5，Spec 16 之后可用）
+# 交叉编译（Pi 5，Spec 2 之后可用）
 cmake -B device/build-pi -S device -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-toolchain.cmake
 cmake --build device/build-pi
 ```
