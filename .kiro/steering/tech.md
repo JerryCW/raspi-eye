@@ -13,7 +13,7 @@ inclusion: always
 
 ## 编译器
 
-- GCC aarch64-linux-gnu（Pi 5 交叉编译）
+- GCC（Pi 5 原生编译，Debian Bookworm aarch64）
 - Apple Clang（macOS 开发）
 
 ## 构建系统
@@ -21,27 +21,30 @@ inclusion: always
 - CMake（最低 3.16）
 - 默认生成 `compile_commands.json`（`CMAKE_EXPORT_COMPILE_COMMANDS ON`）
 - 平台检测：macOS x86_64 / macOS aarch64 / Linux aarch64
-- 包管理：FetchContent（GTest、spdlog 等），GStreamer 走系统包（pkg-config）
+- 包管理：FetchContent（GTest、spdlog、RapidCheck），GStreamer 走系统包（pkg-config）
 - 未来计划：vcpkg（vcpkg.json manifest）管理 AWS SDK 等复杂依赖
 
 ## 核心依赖
 
-| 库 | 用途 |
-|----|------|
-| GStreamer | 视频采集、编码、tee 分流 |
-| AWS KVS Producer SDK | 视频上传到 KVS（kvssink） |
-| AWS KVS WebRTC C SDK | 实时信令和媒体（Linux only，macOS stub） |
-| libcurl | HTTPS 请求 |
-| OpenSSL | mTLS、证书处理 |
-| libcamera | CSI 摄像头（Linux aarch64 only） |
-| V4L2 | USB 摄像头（Linux only） |
-| systemd | 看门狗、服务集成（Linux only） |
-| ONNX Runtime + YOLOv11s | 设备端目标检测 |
-| SageMaker Serverless | 云端种类识别（DINOv2 等，支持模型切换） |
+| 库 | 版本/来源 | 用途 |
+|----|-----------|------|
+| GStreamer | 系统包（pkg-config） | 视频采集、编码、tee 分流 |
+| Google Test | v1.14.0（FetchContent） | C++ 单元测试框架 |
+| spdlog | v1.15.0（FetchContent） | 结构化日志（同步模式，stderr sink） |
+| RapidCheck | master（FetchContent） | Property-based testing |
+| AWS KVS Producer SDK | 未引入 | 视频上传到 KVS（kvssink） |
+| AWS KVS WebRTC C SDK | 未引入 | 实时信令和媒体（Linux only，macOS stub） |
+| libcurl | 未引入 | HTTPS 请求 |
+| OpenSSL | 未引入 | mTLS、证书处理 |
+| libcamera | 未引入 | CSI 摄像头（Linux aarch64 only） |
+| V4L2 | 未引入 | USB 摄像头（Linux only） |
+| systemd | 未引入 | 看门狗、服务集成（Linux only） |
+| ONNX Runtime + YOLOv11s | 未引入 | 设备端目标检测 |
+| SageMaker Serverless | 未引入 | 云端种类识别（DINOv2 等，支持模型切换） |
 
 ## 测试框架
 
-- C++：Google Test + CTest 统一管理
+- C++：Google Test + CTest 统一管理 + RapidCheck（PBT）
 - Python：pytest
 
 ## 硬件约束
@@ -60,7 +63,7 @@ pip install -r requirements.txt
 # Python 测试（必须在 venv 中）
 source .venv-raspi-eye/bin/activate && pytest
 
-# 构建（开发 - macOS）
+# 构建（开发 - macOS Debug + ASan）
 cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug
 cmake --build device/build
 
@@ -70,23 +73,38 @@ ctest --test-dir device/build --output-on-failure
 # 一条命令验证（配置 + 编译 + 测试）
 cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device/build && ctest --test-dir device/build --output-on-failure
 
-# 交叉编译（Pi 5，Spec 2 之后可用）
-cmake -B device/build-pi -S device -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-toolchain.cmake
-cmake --build device/build-pi
+# Pi 5 远程构建（SSH，从 macOS 触发）
+scripts/pi-build.sh
+
+# 双平台一键验证（macOS Debug + Pi 5 Release）
+scripts/build-all.sh
+
+# Pi 5 上手动构建（SSH 登录后）
+cd ~/raspi-eye && git pull
+cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release
+cmake --build device/build
+ctest --test-dir device/build --output-on-failure
 ```
+
+## 部署方式
+
+- Pi 5 采用原生编译：git push → SSH 到 Pi 5 → git pull → cmake + build + ctest
+- 不使用交叉编译（当前项目规模小，Pi 5 编译速度可接受）
+- 后续编译时间超过 5 分钟时再考虑交叉编译
+- 环境变量：`PI_HOST`（默认 raspberrypi.local）、`PI_USER`（默认 pi）、`PI_REPO_DIR`（默认 ~/raspi-eye）
 
 ## 开发环境差异
 
-| 环境 | 视频源 | WebRTC | AI 推理 |
-|------|--------|--------|---------|
-| macOS（开发） | videotestsrc | stub | 可选（本地 ONNX） |
-| Pi 5（生产） | IMX216/IMX678 | 完整实现 | YOLO + 云端识别 |
+| 环境 | 构建类型 | ASan | 视频源 | WebRTC | AI 推理 |
+|------|---------|------|--------|--------|---------|
+| macOS（开发） | Debug | 开启 | videotestsrc | stub | 可选（本地 ONNX） |
+| Pi 5（生产） | Release | 关闭 | IMX216/IMX678 | 完整实现 | YOLO + 云端识别 |
 
 ## 各模块技术栈
 
 | 模块 | 语言 | 构建/包管理 | 测试 |
 |------|------|-----------|------|
-| device | C++17 | CMake + vcpkg | GTest + CTest |
+| device | C++17 | CMake + FetchContent（未来 vcpkg） | GTest + CTest + RapidCheck |
 | viewer | 待定 | 待定 | 待定 |
 | model | Python ≥ 3.11 | pip + venv | pytest |
 | infra | 待定（CDK/CFN/Terraform） | 待定 | 待定 |
