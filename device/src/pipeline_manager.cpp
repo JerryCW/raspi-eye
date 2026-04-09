@@ -119,14 +119,18 @@ bool PipelineManager::start(std::string* error_msg) {
     }
 
     GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
+
+    auto pl = spdlog::get("pipeline");
+    if (pl) {
+        pl->debug("set_state(PLAYING) returned: {}", static_cast<int>(ret));
+    }
+
     if (ret == GST_STATE_CHANGE_FAILURE) {
         if (error_msg) *error_msg = "Failed to set pipeline to PLAYING";
-        auto pl = spdlog::get("pipeline");
-        if (pl && error_msg) pl->error("Failed to start pipeline: {}", *error_msg);
+        if (pl) pl->error("Failed to start pipeline: {}", error_msg ? *error_msg : "unknown");
         return false;
     }
 
-    auto pl = spdlog::get("pipeline");
     if (pl) pl->info("Pipeline started (state change: {})",
                       ret == GST_STATE_CHANGE_ASYNC ? "async" : "immediate");
     return true;
@@ -151,18 +155,29 @@ GstState PipelineManager::current_state() const {
     GstStateChangeReturn ret = gst_element_get_state(
         pipeline_, &state, &pending, 10 * GST_SECOND);
 
+    // Diagnostic logging for Pi 5 debugging
+    auto pl = spdlog::get("pipeline");
+    if (pl) {
+        pl->debug("get_state returned: ret={}, state={}, pending={}",
+                  static_cast<int>(ret),
+                  gst_element_state_get_name(state),
+                  gst_element_state_get_name(pending));
+    }
+
     // Handle live sources: NO_PREROLL with PAUSED means effectively PLAYING
     if (ret == GST_STATE_CHANGE_NO_PREROLL &&
         state == GST_STATE_PAUSED &&
         pending == GST_STATE_VOID_PENDING) {
+        if (pl) pl->debug("NO_PREROLL detected, treating as PLAYING");
         return GST_STATE_PLAYING;
     }
 
     // If async and still transitioning to a target, poll briefly
     // This handles Pi 5 where PAUSED->PLAYING is slow (x264enc init)
     if (state == GST_STATE_PAUSED && pending == GST_STATE_PLAYING) {
-        // Re-query with full timeout to wait for PLAYING
+        if (pl) pl->debug("PAUSED with pending PLAYING, re-querying...");
         gst_element_get_state(pipeline_, &state, nullptr, 10 * GST_SECOND);
+        if (pl) pl->debug("Re-query result: state={}", gst_element_state_get_name(state));
     }
 
     return state;
