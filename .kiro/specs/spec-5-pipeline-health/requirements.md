@@ -48,7 +48,7 @@
 | CMake 最低版本 | 3.16 |
 | 目标平台 | macOS（Debug + ASan）/ Linux aarch64（Pi 5 Release） |
 | Debug 构建 | 开启 ASan（`-fsanitize=address -fno-omit-frame-pointer`） |
-| 单个测试耗时 | ≤ 5 秒 |
+| 单个测试耗时 | ≤ 10 秒 |
 | 代码组织 | .h + .cpp 分离模式 |
 | GStreamer 资源管理 | RAII，所有引用计数必须配对 |
 | 向后兼容 | 不修改 PipelineManager 核心接口（create/start/stop/current_state/pipeline） |

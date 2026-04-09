@@ -2,6 +2,7 @@
 // Application entry point - creates a test pipeline and runs GMainLoop.
 #include "pipeline_manager.h"
 #include "pipeline_builder.h"
+#include "pipeline_health.h"
 #include "camera_source.h"
 #include "log_init.h"
 #include <spdlog/spdlog.h>
@@ -14,43 +15,6 @@ static GMainLoop* loop = nullptr;
 // SIGINT handler: quit the main loop on Ctrl+C.
 static void sigint_handler(int /*sig*/) {
     if (loop) g_main_loop_quit(loop);
-}
-
-// Bus callback: handle ERROR and EOS messages from the pipeline.
-static gboolean bus_callback(GstBus* /*bus*/, GstMessage* msg, gpointer /*data*/) {
-    switch (GST_MESSAGE_TYPE(msg)) {
-        case GST_MESSAGE_ERROR: {
-            GError* err = nullptr;
-            gchar* dbg = nullptr;
-            gst_message_parse_error(msg, &err, &dbg);
-
-            auto logger = spdlog::get("main");
-            if (logger) {
-                logger->error("Error from {}: {}",
-                              GST_OBJECT_NAME(msg->src),
-                              err ? err->message : "unknown error");
-                if (dbg) {
-                    logger->debug("Debug info: {}", dbg);
-                }
-            }
-
-            if (dbg) g_free(dbg);
-            if (err) g_error_free(err);
-            if (loop) g_main_loop_quit(loop);
-            break;
-        }
-        case GST_MESSAGE_EOS: {
-            auto logger = spdlog::get("main");
-            if (logger) {
-                logger->info("End of stream");
-            }
-            if (loop) g_main_loop_quit(loop);
-            break;
-        }
-        default:
-            break;
-    }
-    return TRUE;
 }
 
 // Pipeline run logic - called by gst_macos_main on macOS or directly on Linux.
@@ -126,11 +90,6 @@ static int run_pipeline(int argc, char* argv[]) {
     // Create main loop
     loop = g_main_loop_new(nullptr, FALSE);
 
-    // Get bus and register watch (bus_callback dispatched via GMainLoop)
-    GstBus* bus = gst_element_get_bus(pm->pipeline());
-    gst_bus_add_watch(bus, bus_callback, nullptr);
-    gst_object_unref(bus);
-
     // Register SIGINT handler
     std::signal(SIGINT, sigint_handler);
 
@@ -143,10 +102,48 @@ static int run_pipeline(int argc, char* argv[]) {
         return 1;
     }
 
+    // Create health monitor (bus watch is managed by monitor, not main)
+    PipelineHealthMonitor health_monitor(pm->pipeline());
+
+    // Register rebuild callback: rebuild pipeline and update PipelineManager
+    health_monitor.set_rebuild_callback([&pm, &cam_config]() -> GstElement* {
+        std::string err;
+        GstElement* p = PipelineBuilder::build_tee_pipeline(&err, cam_config);
+        if (!p) return nullptr;
+        auto new_pm = PipelineManager::create(p, &err);
+        if (!new_pm) {
+            gst_object_unref(p);
+            return nullptr;
+        }
+        if (!new_pm->start(&err)) {
+            return nullptr;
+        }
+        pm = std::move(new_pm);
+        return pm->pipeline();
+    });
+
+    // Register health callback: log state changes, quit on FATAL
+    health_monitor.set_health_callback(
+        [](HealthState old_s, HealthState new_s) {
+            auto lg = spdlog::get("main");
+            if (lg) {
+                lg->info("Health state: {} -> {}",
+                         health_state_name(old_s),
+                         health_state_name(new_s));
+            }
+            if (new_s == HealthState::FATAL && loop) {
+                g_main_loop_quit(loop);
+            }
+        });
+
+    // Start health monitoring (installs bus watch, probe, timers)
+    health_monitor.start("src");
+
     // Run event loop (blocks until quit)
     g_main_loop_run(loop);
 
     // Cleanup
+    health_monitor.stop();
     pm->stop();
     g_main_loop_unref(loop);
     loop = nullptr;

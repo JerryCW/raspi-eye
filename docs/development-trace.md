@@ -685,3 +685,151 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/pipeline_manager.cpp
 
 ---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 1. PipelineHealthMonitor 头文件与实现（1.1 + 1.2）
+
+**完成概要：** 创建 pipeline_health.h（HealthState 枚举 + HealthConfig/HealthStats POD + PipelineHealthMonitor 类声明）和 pipeline_health.cpp（完整实现：状态机转换、buffer probe、bus watch、watchdog/heartbeat 定时器、两级恢复引擎、指数退避、probe 安装/移除），getDiagnostics 零错误。
+
+**测试状态：** 未运行（CMakeLists.txt 尚未更新，测试覆盖将在任务 4 health_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/pipeline_health.h, device/src/pipeline_health.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 2. CMakeLists.txt 更新与编译验证（2.1 + 2.2）
+
+**完成概要：** pipeline_manager 库添加 pipeline_health.cpp，新增 health_test 测试目标（GTest::gtest + rapidcheck + rapidcheck_gtest），macOS Debug 编译零错误。
+
+**测试状态：** 未运行（编译验证任务）— 新增 1 个占位测试（health_test Placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/health_test.cpp（占位）
+
+---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 3. 检查点 — 编译通过，现有测试回归
+
+**完成概要：** ctest 5/5 套件全部通过（smoke_test 1.89s + log_test 1.83s + tee_test 0.67s + camera_test 1.17s + health_test 1.07s = 6.65s），ASan 无报告。
+
+**测试状态：** 全部通过（5/5 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 4.1 health_test.cpp — 基础结构与 example-based 测试
+
+**完成概要：** 创建 health_test.cpp 包含 9 个 example-based 测试（InitialStateIsHealthy、BusErrorTriggersRecovery、ConsecutiveFailuresReachFatal、HealthCallbackInvoked、NoCallbackNoCrash、CallbackOutsideMutex、StatsIncrementOnRecovery、WarningNoStateChange、FullRebuildAfterStateResetFails），全部通过（1.71s），ASan 无报告。
+
+**测试状态：** 全部通过（9/9）— 新增 9 个测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | ConsecutiveFailuresReachFatal 和 FullRebuildAfterStateResetFails 失败：state reset 对 videotestsrc 管道总是成功，无法触发连续失败 | Spec 缺少信息 | `State: HEALTHY`（期望 FATAL），`rebuild_count: 0`（期望 ≥1）。GStreamer 的 `set_state(PLAYING)` 对大多数管道返回 ASYNC 而非 FAILURE，原始 `try_state_reset` 只检查 FAILURE 不等待确认 | 1. 修复 `try_state_reset`：添加 `get_state` 等待 PLAYING 确认（1s 超时），超时或状态不对返回 false。2. 测试中使用 `create_broken_pipeline()`：unlinked 的 audiotestsrc + fakesink，caps 协商永远不完成，get_state 超时 | Design 文档中 `try_state_reset` 的伪代码应包含 PLAYING 状态确认等待，不能只检查 `set_state` 返回值 |
+| 2 | 单个测试超时约束 5 秒不够：多轮恢复 + get_state 等待 1s × 多次 | Spec 不够精确 | ConsecutiveFailuresReachFatal 需要 max_retries 次恢复尝试，每次 get_state 等待 1s × 2（NULL + PLAYING），5 秒不够 | 将单个测试超时从 5 秒延长到 10 秒（用户确认） | 涉及多轮恢复的测试，约束应考虑 get_state 等待时间的累积 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在 `try_state_reset` 中仅检查 `gst_element_set_state` 返回值而不等待状态确认——GStreamer 对大多数管道返回 ASYNC 而非 FAILURE，必须用 `gst_element_get_state` 等待并确认目标状态
+- **Tasks 层：** SHALL NOT 使用 `cat <<` heredoc 方式写入文件（已写入 shall-not.md）
+
+**涉及文件：** device/tests/health_test.cpp, device/src/pipeline_health.cpp（修复 try_state_reset）
+
+---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 4.2 + 4.3 + 4.4 PBT 属性测试
+
+**完成概要：** 在 health_test.cpp 中添加 3 个 PBT 属性测试（ExponentialBackoffAndFatal、RecoveryCounterAccuracy、StateTransitionCallbackCorrectness），编译通过，ctest health_test 全部通过（10.95s），ASan 无报告。
+
+**测试状态：** 全部通过（12/12：9 example-based + 3 PBT）— 新增 3 个 PBT 测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/health_test.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 5. 检查点 — health_test 全量通过
+
+**完成概要：** ctest 5/5 套件全部通过（smoke_test 1.30s + log_test 0.06s + tee_test 0.68s + camera_test 0.77s + health_test 6.83s = 9.66s），ASan 无报告。
+
+**测试状态：** 全部通过（5/5 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 6. main.cpp 集成 PipelineHealthMonitor（6.1 + 6.2）
+
+**完成概要：** main.cpp 集成 PipelineHealthMonitor：移除 bus_callback，添加 health_monitor 创建/rebuild 回调/health 回调/start/stop，编译零错误，5/5 套件全部通过（4.77s），ASan 无报告。
+
+**测试状态：** 全部通过（5/5 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/main.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / 任务: 7. 最终检查点 — 全量验证
+
+**完成概要：** 干净 build 全量验证通过，CMake 配置成功（GStreamer 1.28.1）、编译零错误、5/5 套件全部通过（smoke_test 3.83s + log_test 1.48s + tee_test 1.73s + camera_test 2.60s + health_test 11.33s = 20.98s）、ASan 无报告。Pi 5 Release 验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（5/5 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

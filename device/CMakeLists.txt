@@ -42,7 +42,7 @@ target_include_directories(log_module PUBLIC src)
 target_link_libraries(log_module PUBLIC spdlog::spdlog)
 
 # 主程序库（供测试和 main 共用）
-add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/camera_source.cpp)
+add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/camera_source.cpp src/pipeline_health.cpp)
 target_include_directories(pipeline_manager PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_LIBRARY_DIRS})
 target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module)
@@ -69,3 +69,7 @@ add_test(NAME tee_test COMMAND tee_test)
 add_executable(camera_test tests/camera_test.cpp)
 target_link_libraries(camera_test PRIVATE pipeline_manager GTest::gtest)
 add_test(NAME camera_test COMMAND camera_test)
+
+add_executable(health_test tests/health_test.cpp)
+target_link_libraries(health_test PRIVATE pipeline_manager GTest::gtest rapidcheck rapidcheck_gtest)
+add_test(NAME health_test COMMAND health_test)
