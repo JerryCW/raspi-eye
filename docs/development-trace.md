@@ -665,3 +665,23 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / Pi 5 Release 验证
+
+**完成概要：** Pi 5 Release 构建通过，但 tee_test.TeePipelinePlaying 和 camera_test.TeePipelineDefaultConfig 失败。根因：`current_state()` 中 `gst_element_get_state` 超时 1 秒不够，Pi 5 上 x264enc 软编码器初始化需要 ~1.8 秒。修复：超时从 1s 改为 3s，Pi 5 全部通过。
+
+**测试状态：** 修复后全部通过（4/4 套件：smoke 8 + log 7 + tee 8 + camera 9）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | Pi 5 上 TeePipelinePlaying 和 TeePipelineDefaultConfig 失败，current_state() 返回 3（PAUSED）而非 4（PLAYING） | Spec 缺少信息 | `Expected equality: pm->current_state() Which is: 3, GST_STATE_PLAYING Which is: 4`，耗时 1815ms / 1615ms | `gst_element_get_state` 超时从 1s 改为 3s（pipeline_manager.cpp） | 后续 Spec 中涉及 `gst_element_get_state` 超时时，考虑 Pi 5 硬件编码器初始化延迟，默认使用 3s 超时 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（首次出现 Pi 5 状态转换超时问题，观察后续是否反复）
+
+**涉及文件：** device/src/pipeline_manager.cpp
+
+---
