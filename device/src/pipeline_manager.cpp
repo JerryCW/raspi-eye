@@ -126,6 +126,19 @@ bool PipelineManager::start(std::string* error_msg) {
         return false;
     }
 
+    // Wait for PLAYING state (Pi 5 x264enc init can take several seconds)
+    if (ret == GST_STATE_CHANGE_ASYNC) {
+        GstState actual = GST_STATE_NULL;
+        ret = gst_element_get_state(pipeline_, &actual, nullptr, 10 * GST_SECOND);
+        if (ret == GST_STATE_CHANGE_FAILURE || actual != GST_STATE_PLAYING) {
+            if (error_msg) *error_msg = "Pipeline did not reach PLAYING state";
+            auto pl = spdlog::get("pipeline");
+            if (pl) pl->error("Pipeline stuck in state {} after start",
+                              gst_element_state_get_name(actual));
+            return false;
+        }
+    }
+
     auto pl = spdlog::get("pipeline");
     if (pl) pl->info("Pipeline started");
     return true;
