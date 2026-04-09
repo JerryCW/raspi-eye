@@ -2,7 +2,6 @@
 // PipelineManager implementation - wraps GStreamer C API with RAII.
 #include "pipeline_manager.h"
 #include <spdlog/spdlog.h>
-#include <chrono>
 
 // --- GStreamer init (shared by both create() overloads) ----------------
 
@@ -127,6 +126,39 @@ bool PipelineManager::start(std::string* error_msg) {
         return false;
     }
 
+    // For ASYNC state changes (live sources, complex pipelines with encoders),
+    // briefly run a GMainLoop to let GStreamer dispatch the async completion.
+    // Without this, get_state returns FAILURE on GStreamer 1.22 (Pi 5)
+    // because the async-done message never gets dispatched.
+    if (ret == GST_STATE_CHANGE_ASYNC || ret == GST_STATE_CHANGE_NO_PREROLL) {
+        GMainLoop* tmp_loop = g_main_loop_new(nullptr, FALSE);
+        GstBus* bus = gst_element_get_bus(pipeline_);
+        if (bus) {
+            // Wait for ASYNC_DONE or ERROR on the bus (up to 10 seconds)
+            GstMessage* msg = gst_bus_timed_pop_filtered(
+                bus, 10 * GST_SECOND,
+                static_cast<GstMessageType>(GST_MESSAGE_ASYNC_DONE | GST_MESSAGE_ERROR));
+            if (msg) {
+                if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
+                    GError* err = nullptr;
+                    gst_message_parse_error(msg, &err, nullptr);
+                    if (error_msg) {
+                        *error_msg = "Pipeline error during start: ";
+                        if (err) *error_msg += err->message;
+                    }
+                    if (err) g_error_free(err);
+                    gst_message_unref(msg);
+                    gst_object_unref(bus);
+                    g_main_loop_unref(tmp_loop);
+                    return false;
+                }
+                gst_message_unref(msg);
+            }
+            gst_object_unref(bus);
+        }
+        g_main_loop_unref(tmp_loop);
+    }
+
     auto pl = spdlog::get("pipeline");
     if (pl) pl->info("Pipeline started");
     return true;
@@ -147,30 +179,6 @@ GstState PipelineManager::current_state() const {
     if (!pipeline_) return GST_STATE_NULL;
 
     GstState state = GST_STATE_NULL;
-    GstState pending = GST_STATE_VOID_PENDING;
-
-    // Poll with short iterations to allow GLib main context to dispatch
-    // async state-change completions. On Pi 5 (GStreamer 1.22), get_state
-    // returns FAILURE when async completion hasn't been dispatched yet
-    // because no GMainLoop is running (common in test environments).
-    GMainContext* ctx = g_main_context_default();
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-
-    while (std::chrono::steady_clock::now() < deadline) {
-        // Pump pending GLib events (dispatches async state-change messages)
-        while (g_main_context_iteration(ctx, FALSE)) {}
-
-        GstStateChangeReturn ret = gst_element_get_state(
-            pipeline_, &state, &pending, 50 * GST_MSECOND);
-
-        if (ret == GST_STATE_CHANGE_SUCCESS || ret == GST_STATE_CHANGE_NO_PREROLL) {
-            return state;
-        }
-        // If we got the target state even with ASYNC/FAILURE, return it
-        if (state == GST_STATE_PLAYING) {
-            return state;
-        }
-    }
-
+    gst_element_get_state(pipeline_, &state, nullptr, 5 * GST_SECOND);
     return state;
 }
