@@ -126,21 +126,9 @@ bool PipelineManager::start(std::string* error_msg) {
         return false;
     }
 
-    // Wait for PLAYING state (Pi 5 x264enc init can take several seconds)
-    if (ret == GST_STATE_CHANGE_ASYNC) {
-        GstState actual = GST_STATE_NULL;
-        ret = gst_element_get_state(pipeline_, &actual, nullptr, 10 * GST_SECOND);
-        if (ret == GST_STATE_CHANGE_FAILURE || actual != GST_STATE_PLAYING) {
-            if (error_msg) *error_msg = "Pipeline did not reach PLAYING state";
-            auto pl = spdlog::get("pipeline");
-            if (pl) pl->error("Pipeline stuck in state {} after start",
-                              gst_element_state_get_name(actual));
-            return false;
-        }
-    }
-
     auto pl = spdlog::get("pipeline");
-    if (pl) pl->info("Pipeline started");
+    if (pl) pl->info("Pipeline started (state change: {})",
+                      ret == GST_STATE_CHANGE_ASYNC ? "async" : "immediate");
     return true;
 }
 
@@ -159,7 +147,24 @@ GstState PipelineManager::current_state() const {
     if (!pipeline_) return GST_STATE_NULL;
 
     GstState state = GST_STATE_NULL;
-    // 5-second timeout for state query (Pi 5 x264enc init may take >3s)
-    gst_element_get_state(pipeline_, &state, nullptr, 5 * GST_SECOND);
+    GstState pending = GST_STATE_VOID_PENDING;
+    // 10-second timeout for state query (Pi 5 x264enc init can be slow)
+    GstStateChangeReturn ret = gst_element_get_state(
+        pipeline_, &state, &pending, 10 * GST_SECOND);
+
+    // NO_PREROLL is returned for live sources — the pipeline is effectively
+    // in the target state even though get_state reports PAUSED.
+    // If we requested PLAYING and got NO_PREROLL with state=PAUSED and
+    // no pending state, the pipeline is actually playing.
+    if (ret == GST_STATE_CHANGE_NO_PREROLL &&
+        state == GST_STATE_PAUSED &&
+        pending == GST_STATE_VOID_PENDING) {
+        return GST_STATE_PLAYING;
+    }
+
+    // If still async after timeout, return the pending target state
+    if (ret == GST_STATE_CHANGE_ASYNC && pending != GST_STATE_VOID_PENDING) {
+        return pending;
+    }
     return state;
 }
