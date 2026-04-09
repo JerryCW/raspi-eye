@@ -6,7 +6,7 @@
 ## 依赖关系图
 
 ```
-spec-0 → spec-1 → spec-2（交叉编译）→ spec-3（H.264 + tee）→ spec-4（摄像头抽象）
+spec-0 → spec-1 → spec-2（Pi 5 原生编译）→ spec-3（H.264 + tee）→ spec-4（摄像头抽象）
                                               │
                                               ├→ spec-5（管道健康监控，仅依赖 spec-3）
                                               │
@@ -34,8 +34,8 @@ spec-17 + spec-13 → spec-19（前端 MVP，可选）
 |------|------|------|------|------|------|
 | 0 | gstreamer-capture | CMake 骨架 + PipelineManager（gst_parse_launch）+ 冒烟测试 | 无 | device | ✅ |
 | 1 | spdlog-logging | 结构化诊断基准：spdlog 替换 g_print，支持 JSON 单行非阻塞输出 | spec-0 | device | ✅ |
-| 2 | cross-compile | Pi 5 原生编译流程 + SSH 远程构建脚本 + 双平台验证 | spec-1 | device | ⬜ |
-| 3 | h264-tee-pipeline | H.264 编码 + tee 分流（3 路 fakesink 占位），手动构建管道 | spec-2 | device | ⬜ |
+| 2 | cross-compile | Pi 5 原生编译流程 + SSH 远程构建脚本 + 双平台验证 | spec-1 | device | ✅ |
+| 3 | h264-tee-pipeline | H.264 编码 + tee 分流（3 路 fakesink 占位），手动构建管道 | spec-2 | device | 🔄 |
 | 4 | camera-abstraction | 摄像头接口抽象层（videotestsrc / libcamera / V4L2 统一接口） | spec-3 | device | ⬜ |
 
 为什么 Pi 5 原生编译放 spec-2：spec-0 + spec-1 完成后有完整的 CMake + GStreamer + spdlog + GTest 项目，复杂度刚好够验证双平台编译。Pi 5 原生编译维护成本低，项目规模小时编译速度可接受。从 spec-3 开始每个 Spec 都双平台验证，H.264 编码在 Pi 5 上的 CPU 表现第一时间可见。后续编译时间超过 5 分钟时再考虑交叉编译。
@@ -146,4 +146,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ✅, spec-1 ✅ 已完成
+当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅ 已完成，spec-3 🔄 进行中

@@ -42,7 +42,7 @@ target_include_directories(log_module PUBLIC src)
 target_link_libraries(log_module PUBLIC spdlog::spdlog)
 
 # 主程序库（供测试和 main 共用）
-add_library(pipeline_manager STATIC src/pipeline_manager.cpp)
+add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp)
 target_include_directories(pipeline_manager PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_LIBRARY_DIRS})
 target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module)
@@ -61,3 +61,7 @@ add_test(NAME smoke_test COMMAND smoke_test)
 add_executable(log_test tests/log_test.cpp)
 target_link_libraries(log_test PRIVATE log_module GTest::gtest_main rapidcheck rapidcheck_gtest)
 add_test(NAME log_test COMMAND log_test)
+
+add_executable(tee_test tests/tee_test.cpp)
+target_link_libraries(tee_test PRIVATE pipeline_manager GTest::gtest)
+add_test(NAME tee_test COMMAND tee_test)

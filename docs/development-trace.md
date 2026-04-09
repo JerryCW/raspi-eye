@@ -409,3 +409,131 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** scripts/pi-build.sh, device/CMakeLists.txt, docs/pi-setup.md
 
 ---
+
+### 2026-04-08 — Spec: spec-3-h264-tee-pipeline / 任务: 1. PipelineManager 新工厂方法（1.1 + 1.2）
+
+**完成概要：** 提取 `ensure_gst_init()` 私有静态方法，添加 `create(GstElement*, std::string*)` 工厂方法重载，编译通过，15 个现有测试回归通过。
+
+**测试状态：** 全部通过（15/15：smoke_test 8 + log_test 7）— 无新增测试（测试覆盖将在任务 4 tee_test 中实现）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/pipeline_manager.h, device/src/pipeline_manager.cpp
+
+---
+
+### 2026-04-08 — Spec: spec-3-h264-tee-pipeline / 任务: 2. PipelineBuilder 实现（2.1 + 2.2 + 2.3）
+
+**完成概要：** 创建 pipeline_builder.h（namespace + 函数声明 + 拓扑注释）和 pipeline_builder.cpp（EncoderCandidate 候选列表 + create_encoder + link_tee_to_element + build_tee_pipeline 完整实现），getDiagnostics 无语法问题。
+
+**测试状态：** 未运行（源文件创建，CMakeLists.txt 更新在任务 3，测试在任务 4）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/pipeline_builder.h, device/src/pipeline_builder.cpp
+
+---
+
+### 2026-04-08 — Spec: spec-3-h264-tee-pipeline / 任务: 3. CMakeLists.txt 更新与编译验证（3.1 + 3.2）
+
+**完成概要：** pipeline_manager 静态库添加 pipeline_builder.cpp，新增 tee_test 测试目标（占位），macOS Debug 编译通过，16 个测试全部通过（8 smoke + 7 log + 1 tee placeholder）。
+
+**测试状态：** 全部通过（16/16）— 新增 1 个占位测试（tee_test Placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/tee_test.cpp（占位）
+
+---
+
+### 2026-04-08 — Spec: spec-3-h264-tee-pipeline / 任务: 4. tee_test 冒烟测试（4.1 + 4.2）
+
+**完成概要：** 实现 8 个 GTest 冒烟测试（AdoptValidPipeline、AdoptNullPipeline、AdoptedPipelineStart、TeePipelinePlaying、TeePipelineNamedSinks、TeePipelineStop、TeePipelineRAII、EncoderDetection），自定义 main() 先调用 gst_init，CMakeLists.txt 改为链接 GTest::gtest。ctest 23 个测试全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（23/23：8 smoke + 7 log + 8 tee）— 新增 8 个测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | tee_test 需要自定义 main() 先调用 gst_init，因为测试直接调用 gst_pipeline_new | Spec 缺少信息 | 使用 GTest::gtest_main 时 gst_init 未被调用，gst_pipeline_new 返回 nullptr | 改为自定义 main() + GTest::gtest，先 gst_init 再 RUN_ALL_TESTS | 后续 Spec 中如果测试直接调用 GStreamer C API，在 tasks.md 中明确说明需要自定义 main() |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（gst_init 问题为首次出现，观察后续是否反复）
+
+**涉及文件：** device/tests/tee_test.cpp, device/CMakeLists.txt
+
+---
+
+### 2026-04-08 — Spec: spec-3-h264-tee-pipeline / 任务: 5. 检查点 — 确认现有测试回归通过
+
+**完成概要：** 确认 23 个测试全部通过（8 smoke + 7 log + 8 tee），行为不变，ASan 无报告。
+
+**测试状态：** 全部通过（23/23）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-09 — Spec: spec-3-h264-tee-pipeline / 任务: 6. main.cpp 管道升级（6.1 + 6.2）
+
+**完成概要：** main.cpp 中 `gst_parse_launch` 单路管道替换为 `PipelineBuilder::build_tee_pipeline()` + `PipelineManager::create(GstElement*)`，编译零错误，23 个测试全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（23/23：8 smoke + 7 log + 8 tee）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/main.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-3-h264-tee-pipeline / 任务: 7. 最终检查点 — 全量验证
+
+**完成概要：** 干净 build 全量验证通过，CMake 配置成功、编译无错误、23 个测试全部通过（8 smoke + 7 log + 8 tee）、ASan 无报告。Pi 5 Release 验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（23/23）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

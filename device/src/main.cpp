@@ -1,6 +1,7 @@
 // main.cpp
 // Application entry point - creates a test pipeline and runs GMainLoop.
 #include "pipeline_manager.h"
+#include "pipeline_builder.h"
 #include "log_init.h"
 #include <spdlog/spdlog.h>
 #include <gst/gst.h>
@@ -62,10 +63,16 @@ static int run_pipeline(int argc, char* argv[]) {
     auto logger = spdlog::get("main");
 
     std::string err_msg;
-    auto pm = PipelineManager::create(
-        "videotestsrc ! videoconvert ! autovideosink", &err_msg);
+    GstElement* raw_pipeline = PipelineBuilder::build_tee_pipeline(&err_msg);
+    if (!raw_pipeline) {
+        if (logger) logger->error("Failed to build tee pipeline: {}", err_msg);
+        log_init::shutdown();
+        return 1;
+    }
+
+    auto pm = PipelineManager::create(raw_pipeline, &err_msg);
     if (!pm) {
-        if (logger) logger->error("Failed to create pipeline: {}", err_msg);
+        if (logger) logger->error("Failed to adopt pipeline: {}", err_msg);
         log_init::shutdown();
         return 1;
     }

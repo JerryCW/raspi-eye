@@ -3,6 +3,28 @@
 #include "pipeline_manager.h"
 #include <spdlog/spdlog.h>
 
+// --- GStreamer init (shared by both create() overloads) ----------------
+
+bool PipelineManager::ensure_gst_init(std::string* error_msg) {
+    static bool gst_initialised = false;
+    if (gst_initialised) return true;
+
+    GError* init_err = nullptr;
+    if (!gst_init_check(nullptr, nullptr, &init_err)) {
+        if (error_msg) {
+            *error_msg = "Failed to initialize GStreamer";
+            if (init_err) {
+                *error_msg += ": ";
+                *error_msg += init_err->message;
+            }
+        }
+        if (init_err) g_error_free(init_err);
+        return false;
+    }
+    gst_initialised = true;
+    return true;
+}
+
 // --- Factory -----------------------------------------------------------
 
 std::unique_ptr<PipelineManager> PipelineManager::create(
@@ -16,22 +38,7 @@ std::unique_ptr<PipelineManager> PipelineManager::create(
     }
 
     // One-time GStreamer init
-    static bool gst_initialised = false;
-    if (!gst_initialised) {
-        GError* init_err = nullptr;
-        if (!gst_init_check(nullptr, nullptr, &init_err)) {
-            if (error_msg) {
-                *error_msg = "Failed to initialize GStreamer";
-                if (init_err) {
-                    *error_msg += ": ";
-                    *error_msg += init_err->message;
-                }
-            }
-            if (init_err) g_error_free(init_err);
-            return nullptr;
-        }
-        gst_initialised = true;
-    }
+    if (!ensure_gst_init(error_msg)) return nullptr;
 
     // Parse the pipeline description
     GError* parse_err = nullptr;
@@ -56,6 +63,23 @@ std::unique_ptr<PipelineManager> PipelineManager::create(
 
     auto pl = spdlog::get("pipeline");
     if (pl) pl->info("Pipeline created: {}", pipeline_desc);
+
+    return std::unique_ptr<PipelineManager>(new PipelineManager(pipeline));
+}
+
+std::unique_ptr<PipelineManager> PipelineManager::create(
+    GstElement* pipeline,
+    std::string* error_msg)
+{
+    if (!pipeline) {
+        if (error_msg) *error_msg = "Pipeline pointer is null";
+        return nullptr;
+    }
+
+    if (!ensure_gst_init(error_msg)) return nullptr;
+
+    auto pl = spdlog::get("pipeline");
+    if (pl) pl->info("Pipeline adopted from pre-built GstElement*");
 
     return std::unique_ptr<PipelineManager>(new PipelineManager(pipeline));
 }

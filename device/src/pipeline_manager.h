@@ -14,6 +14,13 @@ public:
         const std::string& pipeline_desc,
         std::string* error_msg = nullptr);
 
+    // Factory function: adopt a pre-built GstElement* pipeline.
+    // Takes ownership of the pipeline pointer.
+    // Returns unique_ptr on success, nullptr on failure (null input).
+    static std::unique_ptr<PipelineManager> create(
+        GstElement* pipeline,
+        std::string* error_msg = nullptr);
+
     ~PipelineManager();
 
     // No copy
@@ -40,5 +47,9 @@ public:
 
 private:
     explicit PipelineManager(GstElement* pipeline);
+
+    // GStreamer 一次性初始化，两个 create() 重载共享
+    static bool ensure_gst_init(std::string* error_msg);
+
     GstElement* pipeline_ = nullptr;
 };
