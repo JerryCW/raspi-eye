@@ -126,24 +126,6 @@ bool PipelineManager::start(std::string* error_msg) {
         return false;
     }
 
-    // For ASYNC state changes (live sources, complex pipelines with encoders),
-    // wait for the async state change to complete by polling the bus for
-    // ASYNC_DONE. This is needed on GStreamer 1.22 (Pi 5) where get_state
-    // returns FAILURE without a running GMainLoop.
-    if (ret == GST_STATE_CHANGE_ASYNC || ret == GST_STATE_CHANGE_NO_PREROLL) {
-        GstBus* bus = gst_element_get_bus(pipeline_);
-        if (bus) {
-            // Wait only for ASYNC_DONE (up to 10 seconds).
-            // Ignore ERROR messages here — x264enc on Pi 5 may post
-            // transient memory errors that don't prevent the pipeline
-            // from actually working (confirmed via gst-launch-1.0).
-            GstMessage* msg = gst_bus_timed_pop_filtered(
-                bus, 10 * GST_SECOND, GST_MESSAGE_ASYNC_DONE);
-            if (msg) gst_message_unref(msg);
-            gst_object_unref(bus);
-        }
-    }
-
     auto pl = spdlog::get("pipeline");
     if (pl) pl->info("Pipeline started");
     return true;
@@ -164,6 +146,6 @@ GstState PipelineManager::current_state() const {
     if (!pipeline_) return GST_STATE_NULL;
 
     GstState state = GST_STATE_NULL;
-    gst_element_get_state(pipeline_, &state, nullptr, 5 * GST_SECOND);
+    gst_element_get_state(pipeline_, &state, nullptr, 3 * GST_SECOND);
     return state;
 }
