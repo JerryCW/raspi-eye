@@ -146,7 +146,7 @@ GstState PipelineManager::current_state() const {
     if (!pipeline_) return GST_STATE_NULL;
 
     GstState state = GST_STATE_NULL;
-    // 3-second timeout for state query (Pi 5 encoder init may take >1s)
-    gst_element_get_state(pipeline_, &state, nullptr, 3 * GST_SECOND);
+    // 5-second timeout for state query (Pi 5 x264enc init may take >3s)
+    gst_element_get_state(pipeline_, &state, nullptr, 5 * GST_SECOND);
     return state;
 }
