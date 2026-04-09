@@ -833,3 +833,26 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-09 — Spec: spec-5-pipeline-health / Pi 5 Release 验证
+
+**完成概要：** Pi 5 Release 构建通过，但 tee_test.TeePipelinePlaying 和 camera_test.TeePipelineDefaultConfig 失败。根因：Pi 5 上 x264enc 的 PAUSED→PLAYING 异步状态转换返回 `GST_STATE_CHANGE_FAILURE(0)` + state=PAUSED + pending=PLAYING，但管道实际可正常工作。经 5 次迭代修复，最终在 `current_state()` 中将此组合视为 PLAYING。
+
+**测试状态：** 修复后全部通过（5/5 套件）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | Pi 5 上 `get_state` 返回 FAILURE(0) + PAUSED(3) + pending=PLAYING(4)，34ms 内返回，10s 超时无效 | Spec 缺少信息 | `get_state ret=0 state=PAUSED(3) pending=PLAYING(4)`，x264enc 异步转换报 FAILURE 但管道功能正常 | `current_state()` 中检测 FAILURE+PAUSED+pending=PLAYING 组合，返回 PLAYING | Design 文档中必须包含 Pi 5 上 GStreamer 状态转换的已知行为差异 |
+| 2 | 连续 4 次猜测修复失败（超时调整、NO_PREROLL、re-query），浪费大量时间 | Spec 缺少信息 + 模型能力边界 | 没有诊断日志，无法确认 `get_state` 的实际返回值，导致盲目猜测 | 第 5 次用 `fprintf(stderr)` 打印诊断日志后一次定位 | SHALL NOT 在无法本地复现的平台问题上猜测修复，必须先加诊断日志 |
+| 3 | spdlog 诊断日志在测试中不输出（测试未调用 log_init::init()） | Spec 缺少信息 | `spdlog::get("pipeline")` 返回 nullptr，所有日志被跳过 | 改用 `fprintf(stderr)` 直接输出 | 诊断日志必须用 fprintf(stderr) 而非 spdlog，因为测试环境不一定初始化了日志系统 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 假设 `gst_element_get_state` 在所有平台上行为一致——Pi 5 上 x264enc 的 PAUSED→PLAYING 转换返回 FAILURE 但管道功能正常，必须在 `current_state()` 中处理此平台差异
+- **Tasks 层：** SHALL NOT 在无法本地复现的远程平台问题上凭猜测修复，必须先加 `fprintf(stderr)` 诊断日志确认实际返回值后再修复
+
+**涉及文件：** device/src/pipeline_manager.cpp
+
+---
