@@ -13,12 +13,16 @@
 #pragma once
 #include <gst/gst.h>
 #include <string>
+#include "camera_source.h"
 
 namespace PipelineBuilder {
 
 // Build the dual-tee pipeline and return the top-level GstPipeline.
 // Caller takes ownership via PipelineManager::create(GstElement*).
 // Returns nullptr on failure; error_msg receives the detail.
-GstElement* build_tee_pipeline(std::string* error_msg = nullptr);
+// error_msg in front to keep compatibility with existing build_tee_pipeline(&err) calls.
+GstElement* build_tee_pipeline(
+    std::string* error_msg = nullptr,
+    CameraSource::CameraConfig config = CameraSource::CameraConfig{});
 
 } // namespace PipelineBuilder

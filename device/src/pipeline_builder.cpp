@@ -1,6 +1,7 @@
 // pipeline_builder.cpp
 // Dual-tee pipeline construction using GStreamer C API.
 #include "pipeline_builder.h"
+#include "camera_source.h"
 #include <spdlog/spdlog.h>
 #include <array>
 
@@ -101,7 +102,8 @@ bool link_tee_to_element(GstElement* tee, GstElement* element,
 
 // --- build_tee_pipeline ------------------------------------------------
 
-GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg) {
+GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
+                                                CameraSource::CameraConfig config) {
     // 1. Pipeline container
     GstElement* pipeline = gst_pipeline_new("tee-pipeline");
     if (!pipeline) {
@@ -110,7 +112,7 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg) {
     }
 
     // 2. Create all 14 elements
-    GstElement* src       = gst_element_factory_make("videotestsrc",  "src");
+    GstElement* src       = CameraSource::create_source(config, error_msg);
     GstElement* convert   = gst_element_factory_make("videoconvert",  "convert");
     GstElement* capsfilter= gst_element_factory_make("capsfilter",    "capsfilter");
     GstElement* raw_tee   = gst_element_factory_make("tee",           "raw-tee");
@@ -139,7 +141,7 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg) {
         q_web, web_sink
     };
     const char* names[] = {
-        "videotestsrc", "videoconvert", "capsfilter", "raw-tee",
+        "src", "videoconvert", "capsfilter", "raw-tee",
         "q-ai", "ai-sink",
         "q-enc", "encoder", "h264parse", "encoded-tee",
         "q-kvs", "kvs-sink",

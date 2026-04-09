@@ -537,3 +537,131 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / 任务: 1.1 + 1.2 CameraSource 模块创建
+
+**完成概要：** 创建 camera_source.h（CameraType 枚举 + CameraConfig POD + 4 个函数声明）和 camera_source.cpp（default_camera_type + camera_type_name + parse_camera_type + create_source 完整实现），完全按照 design.md 接口定义。
+
+**测试状态：** 未运行（轻量模式，测试覆盖将在任务 4 camera_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/camera_source.h, device/src/camera_source.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / 任务: 2.1 + 2.2 PipelineBuilder 签名扩展
+
+**完成概要：** pipeline_builder.h 添加 `#include "camera_source.h"` 并扩展 build_tee_pipeline 签名（CameraConfig 默认参数），pipeline_builder.cpp 将硬编码 videotestsrc 替换为 CameraSource::create_source 调用，管道拓扑不变。
+
+**测试状态：** 未运行（轻量模式，签名扩展向后兼容，由 tee_test 回归 + 任务 4 camera_test 覆盖）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/pipeline_builder.h, device/src/pipeline_builder.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / 任务: 3.1 + 3.2 CMakeLists.txt 更新与编译验证
+
+**完成概要：** pipeline_manager 库添加 camera_source.cpp，新增 camera_test 测试目标（GTest::gtest），创建占位 camera_test.cpp，macOS Debug 编译零错误。
+
+**测试状态：** 未运行（轻量模式，检查点任务）— 新增 1 个占位测试（camera_test Placeholder）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | GitHub 网络不可达，FetchContent update step 失败 | 网络问题 | `fatal: unable to access 'https://github.com/emil-e/rapidcheck.git/': Failed to connect to github.com port 443 after 75003 ms` | 使用 `-DFETCHCONTENT_UPDATES_DISCONNECTED=ON` 跳过更新 | 无需行动（网络瞬断，依赖已缓存） |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/camera_test.cpp（占位）
+
+---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / 任务: 4.1 + 4.2 camera_test 测试
+
+**完成概要：** 创建 camera_test.cpp 包含 11 个测试用例（DefaultCameraType、CameraTypeName、ParseCameraTypeValid/CaseInsensitive/Invalid、CreateSourceTest、CreateSourceUnavailable[macOS]、TeePipelineDefaultConfig/ExplicitTest/SourceElement），全量测试 4/4 套件通过（smoke 8 + log 7 + tee 8 + camera ~10），ASan 无报告，总耗时 0.65s。
+
+**测试状态：** 全部通过（4/4 套件）— 新增 ~10 个测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/camera_test.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / 任务: 5. 检查点 — 确认现有测试回归通过
+
+**完成概要：** 确认 4/4 套件全部通过（smoke_test 0.30s + log_test 0.07s + tee_test 0.15s + camera_test 0.13s），ASan 无报告，总耗时 0.65s。
+
+**测试状态：** 全部通过（4/4 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / 任务: 6.1 + 6.2 main.cpp 命令行集成与编译验证
+
+**完成概要：** main.cpp 添加 --camera/--device 命令行解析（三阶段模式：解析→初始化日志→验证），cam_config 传入 build_tee_pipeline，编译零错误，4/4 套件全部通过（0.65s），ASan 无报告。
+
+**测试状态：** 全部通过（4/4 套件）— 无新增测试（main.cpp 命令行解析由 camera_test 中 parse_camera_type 测试间接覆盖）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/main.cpp
+
+---
+
+### 2026-04-09 — Spec: spec-4-camera-abstraction / 任务: 7. 最终检查点 — 全量验证
+
+**完成概要：** 干净 build 全量验证通过，CMake 配置成功（GStreamer 1.28.1）、编译零错误、4/4 套件全部通过（smoke_test 1.53s + log_test 1.13s + tee_test 1.12s + camera_test 0.96s = 4.76s）、ASan 无报告。Pi 5 Release 验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（4/4 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
