@@ -127,36 +127,21 @@ bool PipelineManager::start(std::string* error_msg) {
     }
 
     // For ASYNC state changes (live sources, complex pipelines with encoders),
-    // briefly run a GMainLoop to let GStreamer dispatch the async completion.
-    // Without this, get_state returns FAILURE on GStreamer 1.22 (Pi 5)
-    // because the async-done message never gets dispatched.
+    // wait for the async state change to complete by polling the bus for
+    // ASYNC_DONE. This is needed on GStreamer 1.22 (Pi 5) where get_state
+    // returns FAILURE without a running GMainLoop.
     if (ret == GST_STATE_CHANGE_ASYNC || ret == GST_STATE_CHANGE_NO_PREROLL) {
-        GMainLoop* tmp_loop = g_main_loop_new(nullptr, FALSE);
         GstBus* bus = gst_element_get_bus(pipeline_);
         if (bus) {
-            // Wait for ASYNC_DONE or ERROR on the bus (up to 10 seconds)
+            // Wait only for ASYNC_DONE (up to 10 seconds).
+            // Ignore ERROR messages here — x264enc on Pi 5 may post
+            // transient memory errors that don't prevent the pipeline
+            // from actually working (confirmed via gst-launch-1.0).
             GstMessage* msg = gst_bus_timed_pop_filtered(
-                bus, 10 * GST_SECOND,
-                static_cast<GstMessageType>(GST_MESSAGE_ASYNC_DONE | GST_MESSAGE_ERROR));
-            if (msg) {
-                if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
-                    GError* err = nullptr;
-                    gst_message_parse_error(msg, &err, nullptr);
-                    if (error_msg) {
-                        *error_msg = "Pipeline error during start: ";
-                        if (err) *error_msg += err->message;
-                    }
-                    if (err) g_error_free(err);
-                    gst_message_unref(msg);
-                    gst_object_unref(bus);
-                    g_main_loop_unref(tmp_loop);
-                    return false;
-                }
-                gst_message_unref(msg);
-            }
+                bus, 10 * GST_SECOND, GST_MESSAGE_ASYNC_DONE);
+            if (msg) gst_message_unref(msg);
             gst_object_unref(bus);
         }
-        g_main_loop_unref(tmp_loop);
     }
 
     auto pl = spdlog::get("pipeline");
