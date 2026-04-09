@@ -2,7 +2,6 @@
 // PipelineManager implementation - wraps GStreamer C API with RAII.
 #include "pipeline_manager.h"
 #include <spdlog/spdlog.h>
-#include <cstdio>
 
 // --- GStreamer init (shared by both create() overloads) ----------------
 
@@ -120,17 +119,15 @@ bool PipelineManager::start(std::string* error_msg) {
     }
 
     GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
-
-    // Diagnostic output (stderr, no spdlog dependency)
-    fprintf(stderr, "[start] set_state(PLAYING) returned: %d\n", static_cast<int>(ret));
-
     if (ret == GST_STATE_CHANGE_FAILURE) {
         if (error_msg) *error_msg = "Failed to set pipeline to PLAYING";
-        fprintf(stderr, "[start] FAILURE\n");
+        auto pl = spdlog::get("pipeline");
+        if (pl) pl->error("Failed to start pipeline: {}", error_msg ? *error_msg : "unknown");
         return false;
     }
 
-    fprintf(stderr, "[start] success (ret=%d)\n", static_cast<int>(ret));
+    auto pl = spdlog::get("pipeline");
+    if (pl) pl->info("Pipeline started");
     return true;
 }
 
@@ -153,27 +150,22 @@ GstState PipelineManager::current_state() const {
     GstStateChangeReturn ret = gst_element_get_state(
         pipeline_, &state, &pending, 10 * GST_SECOND);
 
-    // Diagnostic output (stderr, no spdlog dependency)
-    fprintf(stderr, "[current_state] get_state ret=%d state=%s(%d) pending=%s(%d)\n",
-            static_cast<int>(ret),
-            gst_element_state_get_name(state), static_cast<int>(state),
-            gst_element_state_get_name(pending), static_cast<int>(pending));
+    // If async transition to PLAYING failed but pipeline is in PAUSED,
+    // treat as PLAYING. This happens on Pi 5 where x264enc async state
+    // change reports failure but the pipeline is actually functional.
+    // Evidence: set_state(PLAYING) returns ASYNC(2), get_state returns
+    // FAILURE(0) with state=PAUSED pending=PLAYING, yet data flows fine.
+    if (ret == GST_STATE_CHANGE_FAILURE &&
+        state == GST_STATE_PAUSED &&
+        pending == GST_STATE_PLAYING) {
+        return GST_STATE_PLAYING;
+    }
 
     // Handle live sources: NO_PREROLL with PAUSED means effectively PLAYING
     if (ret == GST_STATE_CHANGE_NO_PREROLL &&
         state == GST_STATE_PAUSED &&
         pending == GST_STATE_VOID_PENDING) {
         return GST_STATE_PLAYING;
-    }
-
-    // If still transitioning PAUSED->PLAYING, re-query
-    if (state == GST_STATE_PAUSED && pending == GST_STATE_PLAYING) {
-        GstStateChangeReturn ret2 = gst_element_get_state(
-            pipeline_, &state, &pending, 10 * GST_SECOND);
-        fprintf(stderr, "[current_state] re-query ret=%d state=%s(%d) pending=%s(%d)\n",
-                static_cast<int>(ret2),
-                gst_element_state_get_name(state), static_cast<int>(state),
-                gst_element_state_get_name(pending), static_cast<int>(pending));
     }
 
     return state;
