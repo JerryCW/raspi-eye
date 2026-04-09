@@ -26,8 +26,8 @@ Smart Camera 是一个运行在 Raspberry Pi 5 上的智能摄像头应用，核
 ## 硬件环境
 
 - Raspberry Pi 5
-- 摄像头：当前 IMX216（CSI），计划迁移到 IMX678（USB）
-- IMX678 将替换 IMX216，需要摄像头接口抽象层
+- 摄像头：IMX678（USB，主力，V4L2 接入）+ IMX216（CSI，备用，libcamera 接入），需要灵活切换
+- macOS 开发环境使用 videotestsrc 模拟
 
 ## 开发与部署
 
