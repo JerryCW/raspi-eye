@@ -148,23 +148,22 @@ GstState PipelineManager::current_state() const {
 
     GstState state = GST_STATE_NULL;
     GstState pending = GST_STATE_VOID_PENDING;
-    // 10-second timeout for state query (Pi 5 x264enc init can be slow)
     GstStateChangeReturn ret = gst_element_get_state(
         pipeline_, &state, &pending, 10 * GST_SECOND);
 
-    // NO_PREROLL is returned for live sources — the pipeline is effectively
-    // in the target state even though get_state reports PAUSED.
-    // If we requested PLAYING and got NO_PREROLL with state=PAUSED and
-    // no pending state, the pipeline is actually playing.
+    // Handle live sources: NO_PREROLL with PAUSED means effectively PLAYING
     if (ret == GST_STATE_CHANGE_NO_PREROLL &&
         state == GST_STATE_PAUSED &&
         pending == GST_STATE_VOID_PENDING) {
         return GST_STATE_PLAYING;
     }
 
-    // If still async after timeout, return the pending target state
-    if (ret == GST_STATE_CHANGE_ASYNC && pending != GST_STATE_VOID_PENDING) {
-        return pending;
+    // If async and still transitioning to a target, poll briefly
+    // This handles Pi 5 where PAUSED->PLAYING is slow (x264enc init)
+    if (state == GST_STATE_PAUSED && pending == GST_STATE_PLAYING) {
+        // Re-query with full timeout to wait for PLAYING
+        gst_element_get_state(pipeline_, &state, nullptr, 10 * GST_SECOND);
     }
+
     return state;
 }
