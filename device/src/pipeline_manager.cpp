@@ -2,6 +2,7 @@
 // PipelineManager implementation - wraps GStreamer C API with RAII.
 #include "pipeline_manager.h"
 #include <spdlog/spdlog.h>
+#include <chrono>
 
 // --- GStreamer init (shared by both create() overloads) ----------------
 
@@ -147,25 +148,28 @@ GstState PipelineManager::current_state() const {
 
     GstState state = GST_STATE_NULL;
     GstState pending = GST_STATE_VOID_PENDING;
-    GstStateChangeReturn ret = gst_element_get_state(
-        pipeline_, &state, &pending, 10 * GST_SECOND);
 
-    // If async transition to PLAYING failed but pipeline is in PAUSED,
-    // treat as PLAYING. This happens on Pi 5 where x264enc async state
-    // change reports failure but the pipeline is actually functional.
-    // Evidence: set_state(PLAYING) returns ASYNC(2), get_state returns
-    // FAILURE(0) with state=PAUSED pending=PLAYING, yet data flows fine.
-    if (ret == GST_STATE_CHANGE_FAILURE &&
-        state == GST_STATE_PAUSED &&
-        pending == GST_STATE_PLAYING) {
-        return GST_STATE_PLAYING;
-    }
+    // Poll with short iterations to allow GLib main context to dispatch
+    // async state-change completions. On Pi 5 (GStreamer 1.22), get_state
+    // returns FAILURE when async completion hasn't been dispatched yet
+    // because no GMainLoop is running (common in test environments).
+    GMainContext* ctx = g_main_context_default();
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
 
-    // Handle live sources: NO_PREROLL with PAUSED means effectively PLAYING
-    if (ret == GST_STATE_CHANGE_NO_PREROLL &&
-        state == GST_STATE_PAUSED &&
-        pending == GST_STATE_VOID_PENDING) {
-        return GST_STATE_PLAYING;
+    while (std::chrono::steady_clock::now() < deadline) {
+        // Pump pending GLib events (dispatches async state-change messages)
+        while (g_main_context_iteration(ctx, FALSE)) {}
+
+        GstStateChangeReturn ret = gst_element_get_state(
+            pipeline_, &state, &pending, 50 * GST_MSECOND);
+
+        if (ret == GST_STATE_CHANGE_SUCCESS || ret == GST_STATE_CHANGE_NO_PREROLL) {
+            return state;
+        }
+        // If we got the target state even with ASYNC/FAILURE, return it
+        if (state == GST_STATE_PLAYING) {
+            return state;
+        }
     }
 
     return state;
