@@ -57,4 +57,5 @@ device/certs/
 device/config/config.toml
 
 # GStreamer plugins (kvssink, webrtc — copied manually on Pi 5, see docs/pi-setup.md)
-device/plugins/
+device/plugins/*
+!device/plugins/.gitkeep

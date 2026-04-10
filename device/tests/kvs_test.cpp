@@ -32,6 +32,29 @@ static void cleanup_file(const std::string& path) {
     std::remove(path.c_str());
 }
 
+// Check if a GstElement is a real kvssink (not fakesink).
+// Used to skip tests that feed fake credentials — real kvssink crashes
+// when it tries to parse invalid iot-certificate data.
+static bool is_real_kvssink(GstElement* element) {
+    if (!element) return false;
+    GstElementFactory* factory = gst_element_get_factory(element);
+    const gchar* name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
+    return g_strcmp0(name, "kvssink") == 0;
+}
+
+// Check if kvssink plugin is available on this system.
+// Returns true if gst_element_factory_make("kvssink", ...) would succeed.
+static bool kvssink_available() {
+#ifdef __linux__
+    GstElementFactory* factory = gst_element_factory_find("kvssink");
+    if (factory) {
+        gst_object_unref(factory);
+        return true;
+    }
+#endif
+    return false;
+}
+
 // ============================================================
 // Example-based tests
 // ============================================================
@@ -51,8 +74,13 @@ TEST(KvsSinkFactory, MissingSectionReturnsError) {
 
 // 2. MacOsCreatesFakesink: create_kvs_sink on current platform (macOS test env)
 //    returns fakesink with element name "kvs-sink"
+//    On Linux with real kvssink available, skip (fake credentials would crash).
 // **Validates: Requirements 2.2, 5.4**
 TEST(KvsSinkFactory, MacOsCreatesFakesink) {
+    if (kvssink_available()) {
+        GTEST_SKIP() << "Real kvssink available; skipping fakesink stub test";
+    }
+
     KvsSinkFactory::KvsConfig kvs_cfg;
     kvs_cfg.stream_name = "TestStream";
     kvs_cfg.aws_region = "us-east-1";
@@ -100,8 +128,12 @@ TEST(KvsSinkFactory, BackwardCompatibleWithoutKvsConfig) {
 
 // 4. PipelineBuildsWithKvsConfig: pipeline builds with KvsConfig + AwsConfig
 //    (macOS stub scenario)
+//    On Linux with real kvssink, skip (fake credentials crash kvssink).
 // **Validates: Requirements 4.1, 4.2, 5.6**
 TEST(KvsSinkFactory, PipelineBuildsWithKvsConfig) {
+    if (kvssink_available()) {
+        GTEST_SKIP() << "Real kvssink available; skipping fake-credential pipeline test";
+    }
     KvsSinkFactory::KvsConfig kvs_cfg;
     kvs_cfg.stream_name = "TestStream";
     kvs_cfg.aws_region = "us-east-1";
@@ -126,8 +158,12 @@ TEST(KvsSinkFactory, PipelineBuildsWithKvsConfig) {
 
 // 5. FakesinkSkipsIotCertificate: fakesink stub does not set iot-certificate
 //    property, no crash
+//    On Linux with real kvssink, skip (fake credentials crash kvssink).
 // **Validates: Requirements 3.5**
 TEST(KvsSinkFactory, FakesinkSkipsIotCertificate) {
+    if (kvssink_available()) {
+        GTEST_SKIP() << "Real kvssink available; skipping fakesink property test";
+    }
     KvsSinkFactory::KvsConfig kvs_cfg;
     kvs_cfg.stream_name = "TestStream";
     kvs_cfg.aws_region = "us-east-1";
@@ -154,8 +190,12 @@ TEST(KvsSinkFactory, FakesinkSkipsIotCertificate) {
 
 // 6. PipelineTopologyUnchanged: pipeline with KvsConfig still contains
 //    raw-tee, encoded-tee, ai-sink, webrtc-sink
+//    On Linux with real kvssink, skip (fake credentials crash kvssink).
 // **Validates: Requirements 4.5**
 TEST(KvsSinkFactory, PipelineTopologyUnchanged) {
+    if (kvssink_available()) {
+        GTEST_SKIP() << "Real kvssink available; skipping fake-credential topology test";
+    }
     KvsSinkFactory::KvsConfig kvs_cfg;
     kvs_cfg.stream_name = "TestStream";
     kvs_cfg.aws_region = "us-east-1";
