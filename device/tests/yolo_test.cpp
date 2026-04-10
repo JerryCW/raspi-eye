@@ -561,6 +561,20 @@ TEST(YoloBenchmark, OptimizationComparison) {
     for (const auto& cfg : configs) {
         run_benchmark(cfg);
     }
+
+    // Nano model comparison (key configs only)
+    if (model_nano_available()) {
+        spdlog::info("--- yolo11n configs ---");
+        std::vector<BenchConfig> nano_configs = {
+            {"nano-cpu-2t-all",    {0.25f, 0.45f, 2, 0, false, 99}, YOLO_MODEL_PATH_NANO},
+            {"nano-cpu-3t-all",    {0.25f, 0.45f, 3, 0, false, 99}, YOLO_MODEL_PATH_NANO},
+            {"nano-cpu-4t-all",    {0.25f, 0.45f, 4, 0, false, 99}, YOLO_MODEL_PATH_NANO},
+            {"nano-xnnpack-2t",    {0.25f, 0.45f, 2, 0, true,  99}, YOLO_MODEL_PATH_NANO},
+        };
+        for (const auto& cfg : nano_configs) {
+            run_benchmark(cfg);
+        }
+    }
 }
 
 TEST(YoloBenchmark, Int8ModelBenchmark) {
