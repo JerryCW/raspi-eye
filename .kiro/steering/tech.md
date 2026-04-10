@@ -39,7 +39,8 @@ inclusion: always
 | libcamera | 未引入 | CSI 摄像头（Linux aarch64 only） |
 | V4L2 | 未引入 | USB 摄像头（Linux only） |
 | systemd | 未引入 | 看门狗、服务集成（Linux only） |
-| ONNX Runtime + YOLOv11s | 未引入 | 设备端目标检测 |
+| ONNX Runtime | v1.24.4 预编译库（macOS: Homebrew `brew install onnxruntime`，Pi 5: GitHub Releases aarch64 包安装到 /usr/local） | 设备端 YOLO 推理引擎 |
+| YOLOv11 | yolo11s.onnx + yolo11n.onnx（`scripts/download-model.sh` 下载到 `device/models/`） | 设备端目标检测（COCO 80 类） |
 | SageMaker Serverless | 未引入 | 云端种类识别（DINOv2 等，支持模型切换） |
 
 ## 测试框架

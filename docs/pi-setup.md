@@ -27,7 +27,32 @@ sudo apt update && sudo apt install -y \
 > **Note:** CMake's `FetchContent` will automatically download GTest, spdlog,
 > and RapidCheck on the first build. Make sure the Pi has internet access.
 
-## 2. Clone Repository
+## 2. Install ONNX Runtime (for YOLO detection)
+
+Download and install the ONNX Runtime aarch64 prebuilt library:
+
+```bash
+ORT_VERSION="1.24.4"
+cd /tmp
+curl -L -o "onnxruntime-linux-aarch64-${ORT_VERSION}.tgz" \
+    "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-aarch64-${ORT_VERSION}.tgz"
+tar xzf "onnxruntime-linux-aarch64-${ORT_VERSION}.tgz"
+sudo cp -r "onnxruntime-linux-aarch64-${ORT_VERSION}/include/"* /usr/local/include/
+sudo cp -r "onnxruntime-linux-aarch64-${ORT_VERSION}/lib/"* /usr/local/lib/
+sudo ldconfig
+```
+
+Verify installation:
+
+```bash
+ls /usr/local/include/onnxruntime_c_api.h
+ls /usr/local/lib/libonnxruntime.so
+```
+
+> **Note:** Without ONNX Runtime, CMake will automatically disable the YOLO
+> module (`ENABLE_YOLO=OFF`). Other modules are not affected.
+
+## 3. Clone Repository
 
 ```bash
 git clone https://github.com/JerryCW/raspi-eye.git ~/raspi-eye
@@ -36,7 +61,17 @@ cd ~/raspi-eye
 
 Replace `https://github.com/JerryCW/raspi-eye.git` with your fork URL if applicable.
 
-## 3. First Build Verification
+## 4. Download YOLO Models
+
+```bash
+bash scripts/download-model.sh
+```
+
+This downloads `yolo11s.onnx` (small) and `yolo11n.onnx` (nano) to
+`device/models/`. If the `yolo` CLI (ultralytics) is installed, it exports from
+PyTorch; otherwise it downloads pre-exported ONNX files from GitHub.
+
+## 5. First Build Verification
 
 Run the full configure + build + test cycle to confirm the environment is set up
 correctly:
@@ -50,7 +85,7 @@ cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release && \
 All tests should pass. The first build takes longer because FetchContent
 downloads dependencies; subsequent builds are incremental.
 
-## 4. SSH Key Setup
+## 6. SSH Key Setup
 
 Passwordless SSH login is required by `scripts/pi-build.sh` (remote mode) and
 `scripts/build-all.sh`. Run the following commands **on your macOS development
@@ -79,7 +114,7 @@ ssh pi@<PI_IP> "echo OK"
 
 You should see `OK` printed without being prompted for a password.
 
-## 5. Using pi-build.sh
+## 7. Using pi-build.sh
 
 `scripts/pi-build.sh` auto-detects the platform:
 - On Pi 5 (Linux): runs build locally

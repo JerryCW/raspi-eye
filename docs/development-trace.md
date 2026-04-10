@@ -996,3 +996,33 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/CMakeLists.txt, device/tests/yolo_test.cpp
 
 ---
+
+### 2026-04-10 — Spec: spec-9-yolo-detector / Pi 5 Release 验证 + 性能基线采集
+
+**完成概要：** Pi 5 上安装 ONNX Runtime v1.24.4 aarch64 预编译包 + 下载 yolo11s/yolo11n 模型，全量 6/6 测试通过（18/18 yolo_test 含端到端推理和性能基线），采集到 Pi 5 推理性能基线数据。
+
+**测试状态：** 全部通过（Pi 5 Release 6/6 套件，12.67s）— 无新增测试
+
+**性能基线数据（Pi 5, Release, ONNX Runtime 1.24.4, CPU 2 threads）：**
+
+| 模型 | 前处理 avg | 推理 avg | 后处理 avg | 总耗时 avg | 推理 min | 推理 max | RSS 增量 |
+|------|-----------|---------|-----------|-----------|---------|---------|---------|
+| yolo11s | 7.5ms | 662.0ms | 1.5ms | 671.1ms | 634.2ms | 680.6ms | 33MB |
+| yolo11n | 7.6ms | 248.5ms | 1.5ms | 257.6ms | 244.0ms | 253.6ms | 4.5MB |
+
+**推理帧率估算：** yolo11s ~1.5 FPS，yolo11n ~3.9 FPS。Spec 10 抽帧策略参考：yolo11n 每 250ms 抽一帧，yolo11s 每 700ms 抽一帧。
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | CMake 中模型文件名 `yolov11s.onnx` 与实际文件名 `yolo11s.onnx` 不匹配，导致模型测试全部 SKIPPED | Spec 缺少信息 | Ultralytics v11 命名为 `yolo11s`（无 `v`），CMake 写的是 `yolov11s`（有 `v`） | 修正 CMakeLists.txt 中的文件名 | 后续 Spec 中引用外部模型文件名时，先确认实际命名再写入 CMake |
+| 2 | GPU 警告 `device_discovery.cc:325 DiscoverDevicesForPlatform` | 正常行为 | Pi 5 无 NVIDIA GPU，ONNX Runtime 尝试发现 GPU 失败后回退 CPU | 无需处理，不影响功能 | 无需行动 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt（模型文件名修正），docs/pi-setup.md（ONNX Runtime 安装步骤），.kiro/steering/tech.md（依赖表更新），.kiro/steering/structure.md（项目结构更新）
+
+---
