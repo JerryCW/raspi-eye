@@ -38,7 +38,10 @@ FetchContent_MakeAvailable(rapidcheck)
 
 # nlohmann/json（FetchContent，header-only）
 FetchContent_Declare(json
-    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+    GIT_SUBMODULES ""
+    GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(json)
 
 # libcurl（系统包）
