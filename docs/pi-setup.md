@@ -52,6 +52,123 @@ ls /usr/local/lib/libonnxruntime.so
 > **Note:** Without ONNX Runtime, CMake will automatically disable the YOLO
 > module (`ENABLE_YOLO=OFF`). Other modules are not affected.
 
+## 2.5 Build ONNX Runtime with XNNPACK EP (Optional)
+
+The prebuilt ONNX Runtime package does NOT include XNNPACK EP support. To enable
+XNNPACK acceleration on Pi 5 (Cortex-A76 ARM NEON), you must build ONNX Runtime
+from source with `--use_xnnpack`. This replaces the prebuilt library from step 2.
+
+### Prerequisites
+
+```bash
+sudo apt install -y \
+    cmake \
+    python3-dev \
+    python3-numpy \
+    python3-pip
+```
+
+CMake >= 3.26 is required. Check your version:
+
+```bash
+cmake --version
+```
+
+If the system cmake is too old, install a newer version:
+
+```bash
+pip3 install cmake --break-system-packages
+# Or download from https://cmake.org/download/
+```
+
+### Increase swap (recommended for 4GB Pi 5)
+
+The build is memory-intensive. Increase swap to avoid OOM:
+
+```bash
+sudo dphys-swapfile swapoff
+sudo sed -i 's/CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
+sudo dphys-swapfile setup
+sudo dphys-swapfile swapon
+free -h  # Verify swap is ~2GB
+```
+
+### Clone and build
+
+```bash
+cd /tmp
+git clone --recursive --branch v1.24.4 --depth 1 \
+    https://github.com/microsoft/onnxruntime.git
+cd onnxruntime
+
+./build.sh \
+    --config Release \
+    --build_shared_lib \
+    --use_xnnpack \
+    --parallel \
+    --skip_tests \
+    --cmake_extra_defines CMAKE_INSTALL_PREFIX=/usr/local
+```
+
+> **Build time:** Expect 1-3 hours on Pi 5 depending on swap and thermal
+> throttling. If you hit OOM, try `--parallel 1` instead of `--parallel`.
+
+### Install
+
+```bash
+cd build/Linux/Release
+sudo make install
+sudo ldconfig
+```
+
+This installs headers to `/usr/local/include/` and libraries to
+`/usr/local/lib/`, replacing the prebuilt version from step 2.
+
+### Verify XNNPACK EP availability
+
+Create a quick test program:
+
+```bash
+cat > /tmp/test_xnnpack.cpp << 'EOF'
+#include <onnxruntime_c_api.h>
+#include <cstdio>
+int main() {
+    const OrtApi* ort = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+    OrtSessionOptions* opts = nullptr;
+    ort->CreateSessionOptions(&opts);
+    OrtStatus* status = OrtSessionOptionsAppendExecutionProvider(
+        opts, "XNNPACK", nullptr, nullptr, 0);
+    if (status) {
+        printf("XNNPACK EP NOT available: %s\n", ort->GetErrorMessage(status));
+        ort->ReleaseStatus(status);
+    } else {
+        printf("XNNPACK EP available!\n");
+    }
+    ort->ReleaseSessionOptions(opts);
+    return 0;
+}
+EOF
+g++ -o /tmp/test_xnnpack /tmp/test_xnnpack.cpp -lonnxruntime -I/usr/local/include
+/tmp/test_xnnpack
+```
+
+Expected output: `XNNPACK EP available!`
+
+### Cleanup
+
+```bash
+rm -rf /tmp/onnxruntime  # Free ~10GB disk space
+```
+
+### Restore swap (optional)
+
+```bash
+sudo dphys-swapfile swapoff
+sudo sed -i 's/CONF_SWAPSIZE=.*/CONF_SWAPSIZE=100/' /etc/dphys-swapfile
+sudo dphys-swapfile setup
+sudo dphys-swapfile swapon
+```
+
 ## 3. Clone Repository
 
 ```bash

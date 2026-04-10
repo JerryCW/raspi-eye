@@ -84,6 +84,8 @@ if(ENABLE_YOLO)
     if(OnnxRuntime_FOUND)
         set(YOLO_MODEL_PATH_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/models/yolo11s.onnx")
         set(YOLO_MODEL_PATH_NANO "${CMAKE_CURRENT_SOURCE_DIR}/models/yolo11n.onnx")
+        set(YOLO_MODEL_PATH_SMALL_INT8 "${CMAKE_CURRENT_SOURCE_DIR}/models/yolo11s-int8.onnx")
+        set(YOLO_MODEL_PATH_NANO_INT8 "${CMAKE_CURRENT_SOURCE_DIR}/models/yolo11n-int8.onnx")
 
         add_library(yolo_module STATIC src/yolo_detector.cpp)
         target_include_directories(yolo_module PUBLIC src ${OnnxRuntime_INCLUDE_DIRS})
@@ -94,7 +96,9 @@ if(ENABLE_YOLO)
                               rapidcheck rapidcheck_gtest)
         target_compile_definitions(yolo_test PRIVATE
             YOLO_MODEL_PATH_SMALL="${YOLO_MODEL_PATH_SMALL}"
-            YOLO_MODEL_PATH_NANO="${YOLO_MODEL_PATH_NANO}")
+            YOLO_MODEL_PATH_NANO="${YOLO_MODEL_PATH_NANO}"
+            YOLO_MODEL_PATH_SMALL_INT8="${YOLO_MODEL_PATH_SMALL_INT8}"
+            YOLO_MODEL_PATH_NANO_INT8="${YOLO_MODEL_PATH_NANO_INT8}")
         add_test(NAME yolo_test COMMAND yolo_test)
 
         message(STATUS "YOLO module: ENABLED (ONNX Runtime found)")

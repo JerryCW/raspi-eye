@@ -1026,3 +1026,131 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/CMakeLists.txt（模型文件名修正），docs/pi-setup.md（ONNX Runtime 安装步骤），.kiro/steering/tech.md（依赖表更新），.kiro/steering/structure.md（项目结构更新）
 
 ---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 任务: 0. 文档：Pi 5 上源码编译带 XNNPACK EP 的 ONNX Runtime
+
+**完成概要：** 在 docs/pi-setup.md 中新增 "Build ONNX Runtime with XNNPACK EP (Optional)" 章节，包含前置依赖、swap 扩容、源码编译命令、安装、验证和清理步骤。同步更新 tasks.md 新增任务 0。
+
+**测试状态：** 未运行（轻量模式，纯文档变更）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** docs/pi-setup.md, .kiro/specs/spec-9.5-onnx-arm-optimization/tasks.md
+
+---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 任务: 1. DetectorConfig 扩展与 create() 工厂方法变更（1.1 + 1.2 + 1.3）
+
+**完成概要：** DetectorConfig 新增 inter_op_num_threads/use_xnnpack/graph_optimization_level 三个字段，create() 中新增 inter-op 线程数设置（非致命）、图优化级别设置（致命）、XNNPACK EP 运行时注册（非致命回退 CPU EP）。编译通过，6/6 测试通过。
+
+**测试状态：** 全部通过（6/6 套件）— 无新增测试（测试覆盖将在任务 3 中添加）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | XNNPACK EP 注册 API 实际为 `ort->SessionOptionsAppendExecutionProvider()`（OrtApi 成员），而非设计文档中的全局函数 `OrtSessionOptionsAppendExecutionProvider` | Spec 缺少信息 | macOS Homebrew v1.24.4 中该函数是 OrtApi 成员而非全局函数，子代理通过查阅头文件确认后使用正确 API | 使用 `ort->SessionOptionsAppendExecutionProvider()` | 后续 Spec 中 ONNX Runtime API 参考代码应注明版本差异，或直接引用头文件中的声明 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（API 差异为单次问题，子代理正确处理）
+
+**涉及文件：** device/src/yolo_detector.h, device/src/yolo_detector.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 任务: 2. 检查点 — 编译通过 + 现有测试回归
+
+**完成概要：** 干净 build 全量验证通过，6/6 测试套件全部通过（smoke_test 1.93s + log_test 1.35s + tee_test 1.43s + camera_test 1.21s + health_test 10.08s + yolo_test 8.45s），ASan 无报告。
+
+**测试状态：** 全部通过（6/6 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 任务: 3. 配置测试与图优化级别测试（3.1 + 3.2 + 3.3）
+
+**完成概要：** 在 yolo_test.cpp 中新增 7 个测试：ConfigDefaultValues、ConfigBackwardCompatible（配置扩展）、GraphOptLevelAll/Disable/Basic/Extended（图优化级别）、XnnpackFallbackOnUnsupported（XNNPACK 回退）。编译通过，6/6 套件全部通过。
+
+**测试状态：** 全部通过（6/6 套件）— 新增 7 个测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/yolo_test.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 任务: 4. CMakeLists.txt 更新与量化脚本（4.1 + 4.2 + 4.3）
+
+**完成概要：** CMakeLists.txt 新增 INT8 模型路径编译定义，创建 quantize-model.sh 量化脚本（bash -n 通过），确认 .gitignore 已覆盖 INT8 模型文件。编译通过，6/6 测试通过。
+
+**测试状态：** 全部通过（6/6 套件）— 无新增测试（轻量模式，纯配置/脚本创建）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, scripts/quantize-model.sh（新建）
+
+---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 任务: 6. A/B 对比基准测试框架（6.1 + 6.2 + 6.3）
+
+**完成概要：** 在 yolo_test.cpp 中新增 BenchConfig 结构体、CPU 温度监控（get_cpu_temp_celsius/wait_for_cool_cpu）、run_benchmark 通用函数、OptimizationComparison 测试（9 种配置矩阵）、Int8ModelBenchmark 测试（FP32 vs INT8 对比）。macOS 上基准测试通过 GTEST_SKIP 跳过。编译通过，6/6 套件全部通过。
+
+**测试状态：** 全部通过（6/6 套件）— 新增 2 个测试（OptimizationComparison + Int8ModelBenchmark，macOS 上 GTEST_SKIP）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/yolo_test.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 任务: 7. 最终检查点 — 全量验证
+
+**完成概要：** 干净 build 全量验证通过。ENABLE_YOLO=ON: 6/6 套件通过（yolo_test 27 用例：15 passed + 12 skipped），ENABLE_YOLO=OFF: 5/5 套件通过。ASan 无报告。Pi 5 Release 验证 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（ENABLE_YOLO=ON: 6/6, ENABLE_YOLO=OFF: 5/5）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

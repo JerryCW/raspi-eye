@@ -289,6 +289,38 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
         return nullptr;
     }
 
+    // 3b. Set inter-op thread count (non-fatal on failure)
+    status = ort->SetInterOpNumThreads(opts, config.inter_op_num_threads);
+    if (!check_ort_status(ort, status, error_msg)) {
+        spdlog::warn("Failed to set inter-op threads: {}", config.inter_op_num_threads);
+    }
+    spdlog::info("Threads: intra-op={}, inter-op={}", config.num_threads, config.inter_op_num_threads);
+
+    // 3c. Set graph optimization level (fatal on failure)
+    auto opt_level = static_cast<GraphOptimizationLevel>(config.graph_optimization_level);
+    status = ort->SetSessionGraphOptimizationLevel(opts, opt_level);
+    if (!check_ort_status(ort, status, error_msg)) {
+        ort->ReleaseSessionOptions(opts);
+        ort->ReleaseEnv(env_raw);
+        spdlog::error("Failed to set graph optimization level: {}", config.graph_optimization_level);
+        return nullptr;
+    }
+    spdlog::info("Graph optimization level: {}", config.graph_optimization_level);
+
+    // 3d. XNNPACK EP registration (non-fatal on failure)
+    if (config.use_xnnpack) {
+        status = ort->SessionOptionsAppendExecutionProvider(opts, "XNNPACK", nullptr, nullptr, 0);
+        if (status != nullptr) {
+            const char* msg = ort->GetErrorMessage(status);
+            spdlog::warn("XNNPACK EP not available: {}, falling back to CPU EP", msg);
+            ort->ReleaseStatus(status);
+        } else {
+            spdlog::info("Execution Provider: XNNPACK");
+        }
+    } else {
+        spdlog::info("Execution Provider: CPU");
+    }
+
     // 4. Create Session
     OrtSession* session_raw = nullptr;
     status = ort->CreateSession(env_raw, model_path.c_str(), opts, &session_raw);

@@ -7,11 +7,13 @@
 #include <rapidcheck/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <numeric>
 #include <random>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -21,6 +23,12 @@
 #endif
 #ifndef YOLO_MODEL_PATH_NANO
 #define YOLO_MODEL_PATH_NANO ""
+#endif
+#ifndef YOLO_MODEL_PATH_SMALL_INT8
+#define YOLO_MODEL_PATH_SMALL_INT8 ""
+#endif
+#ifndef YOLO_MODEL_PATH_NANO_INT8
+#define YOLO_MODEL_PATH_NANO_INT8 ""
 #endif
 
 static bool model_available() {
@@ -379,4 +387,196 @@ TEST(YoloPerformance, PerformanceBaseline) {
 TEST(YoloPerformance, PerformanceBaselineNano) {
     if (!model_nano_available()) GTEST_SKIP() << "Model (yolov11n) not available";
     run_perf_baseline(YOLO_MODEL_PATH_NANO, "yolov11n");
+}
+
+// ===== Config Extension Tests (Spec 9.5, Task 3.1) =====
+
+TEST(YoloConfigTest, ConfigDefaultValues) {
+    DetectorConfig cfg;
+    EXPECT_EQ(cfg.use_xnnpack, false);
+    EXPECT_EQ(cfg.graph_optimization_level, 99);
+    EXPECT_EQ(cfg.inter_op_num_threads, 1);
+    // Verify original fields retain defaults
+    EXPECT_FLOAT_EQ(cfg.confidence_threshold, 0.25f);
+    EXPECT_FLOAT_EQ(cfg.iou_threshold, 0.45f);
+    EXPECT_EQ(cfg.num_threads, 2);
+}
+
+TEST(YoloConfigTest, ConfigBackwardCompatible) {
+    DetectorConfig cfg{0.25f, 0.45f, 2};
+    EXPECT_FLOAT_EQ(cfg.confidence_threshold, 0.25f);
+    EXPECT_FLOAT_EQ(cfg.iou_threshold, 0.45f);
+    EXPECT_EQ(cfg.num_threads, 2);
+    // New fields use defaults
+    EXPECT_EQ(cfg.use_xnnpack, false);
+    EXPECT_EQ(cfg.graph_optimization_level, 99);
+}
+
+// ===== Graph Optimization Level Tests (Spec 9.5, Task 3.2) =====
+
+TEST(YoloGraphOptTest, GraphOptLevelAll) {
+    if (!model_available()) GTEST_SKIP() << "Model not available";
+    DetectorConfig cfg;
+    cfg.graph_optimization_level = 99;
+    auto det = YoloDetector::create(YOLO_MODEL_PATH_SMALL, cfg);
+    EXPECT_NE(det, nullptr);
+}
+
+TEST(YoloGraphOptTest, GraphOptLevelDisable) {
+    if (!model_available()) GTEST_SKIP() << "Model not available";
+    DetectorConfig cfg;
+    cfg.graph_optimization_level = 0;
+    auto det = YoloDetector::create(YOLO_MODEL_PATH_SMALL, cfg);
+    EXPECT_NE(det, nullptr);
+}
+
+TEST(YoloGraphOptTest, GraphOptLevelBasic) {
+    if (!model_available()) GTEST_SKIP() << "Model not available";
+    DetectorConfig cfg;
+    cfg.graph_optimization_level = 1;
+    auto det = YoloDetector::create(YOLO_MODEL_PATH_SMALL, cfg);
+    EXPECT_NE(det, nullptr);
+}
+
+TEST(YoloGraphOptTest, GraphOptLevelExtended) {
+    if (!model_available()) GTEST_SKIP() << "Model not available";
+    DetectorConfig cfg;
+    cfg.graph_optimization_level = 2;
+    auto det = YoloDetector::create(YOLO_MODEL_PATH_SMALL, cfg);
+    EXPECT_NE(det, nullptr);
+}
+
+// ===== XNNPACK Fallback Test (Spec 9.5, Task 3.3) =====
+
+TEST(YoloXnnpackTest, XnnpackFallbackOnUnsupported) {
+    if (!model_available()) GTEST_SKIP() << "Model not available";
+    DetectorConfig cfg;
+    cfg.use_xnnpack = true;
+    // When XNNPACK EP is not available (e.g. macOS prebuilt without XNNPACK),
+    // create() should fall back to CPU EP and return a valid detector
+    auto det = YoloDetector::create(YOLO_MODEL_PATH_SMALL, cfg);
+    EXPECT_NE(det, nullptr);
+}
+
+// ===== A/B Comparison Benchmark Framework (Spec 9.5, Task 6) =====
+
+struct BenchConfig {
+    std::string label;
+    DetectorConfig detector_config;
+    std::string model_path;
+};
+
+static int get_cpu_temp_celsius() {
+#ifdef __linux__
+    std::ifstream temp_file("/sys/class/thermal/thermal_zone0/temp");
+    if (temp_file.is_open()) {
+        int millideg = 0;
+        temp_file >> millideg;
+        return millideg / 1000;
+    }
+#endif
+    return -1;
+}
+
+static void wait_for_cool_cpu() {
+#ifdef __linux__
+    for (int i = 0; i < 60; ++i) {
+        int temp = get_cpu_temp_celsius();
+        if (temp < 0 || temp < 70) return;
+        if (temp >= 80) {
+            spdlog::info("CPU temp {}C >= 80C, waiting 5s to cool down...", temp);
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+        } else {
+            return;
+        }
+    }
+#endif
+}
+
+static void run_benchmark(const BenchConfig& bench, int runs = 10) {
+    if (!std::filesystem::exists(bench.model_path)) {
+        spdlog::info("[{}] SKIPPED: model not available", bench.label);
+        return;
+    }
+
+    wait_for_cool_cpu();
+    int cpu_temp_before = get_cpu_temp_celsius();
+
+    long rss_before = get_rss_kb();
+    auto det = YoloDetector::create(bench.model_path, bench.detector_config);
+    if (!det) {
+        spdlog::info("[{}] SKIPPED: detector creation failed", bench.label);
+        return;
+    }
+    long rss_after_load = get_rss_kb();
+
+    auto img = random_rgb_image(640, 480);
+    std::vector<double> pre_ms, inf_ms, post_ms, tot_ms;
+
+    for (int i = 0; i < runs; ++i) {
+        auto [results, stats] = det->detect_with_stats(img.data(), 640, 480);
+        pre_ms.push_back(stats.preprocess_ms);
+        inf_ms.push_back(stats.inference_ms);
+        post_ms.push_back(stats.postprocess_ms);
+        tot_ms.push_back(stats.total_ms);
+    }
+
+    auto avg = [](const std::vector<double>& v) {
+        return std::accumulate(v.begin(), v.end(), 0.0) / v.size();
+    };
+    auto mn = [](const std::vector<double>& v) { return *std::min_element(v.begin(), v.end()); };
+    auto mx = [](const std::vector<double>& v) { return *std::max_element(v.begin(), v.end()); };
+
+    long rss_delta = (rss_before > 0 && rss_after_load > 0)
+                         ? (rss_after_load - rss_before) : -1;
+    int cpu_temp_after = get_cpu_temp_celsius();
+
+    spdlog::info("[{}] {} runs | infer: avg={:.1f} min={:.1f} max={:.1f}ms | "
+                 "total: avg={:.1f} min={:.1f} max={:.1f}ms | "
+                 "RSS delta: {}kB | CPU temp: {}->{}C",
+                 bench.label, runs,
+                 avg(inf_ms), mn(inf_ms), mx(inf_ms),
+                 avg(tot_ms), mn(tot_ms), mx(tot_ms),
+                 rss_delta, cpu_temp_before, cpu_temp_after);
+}
+
+TEST(YoloBenchmark, OptimizationComparison) {
+#ifdef __APPLE__
+    GTEST_SKIP() << "ARM optimization benchmark skipped on macOS";
+#endif
+    if (!model_available()) GTEST_SKIP() << "Model not available";
+
+    std::vector<BenchConfig> configs = {
+        {"baseline-cpu-2t-all",  {0.25f, 0.45f, 2, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-1t-all",           {0.25f, 0.45f, 1, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-3t-all",           {0.25f, 0.45f, 3, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-4t-all",           {0.25f, 0.45f, 4, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-4t-inter2-all",    {0.25f, 0.45f, 4, 2, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"xnnpack-2t-all",       {0.25f, 0.45f, 2, 1, true,  99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-2t-disable",       {0.25f, 0.45f, 2, 1, false,  0}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-2t-basic",         {0.25f, 0.45f, 2, 1, false,  1}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-2t-extended",      {0.25f, 0.45f, 2, 1, false,  2}, YOLO_MODEL_PATH_SMALL},
+    };
+
+    for (const auto& cfg : configs) {
+        run_benchmark(cfg);
+    }
+}
+
+TEST(YoloBenchmark, Int8ModelBenchmark) {
+#ifdef __APPLE__
+    GTEST_SKIP() << "ARM optimization benchmark skipped on macOS";
+#endif
+    bool fp32_available = std::filesystem::exists(YOLO_MODEL_PATH_SMALL);
+    bool int8_available = std::filesystem::exists(YOLO_MODEL_PATH_SMALL_INT8);
+    if (!fp32_available && !int8_available) {
+        GTEST_SKIP() << "Neither FP32 nor INT8 model available";
+    }
+
+    if (fp32_available) {
+        run_benchmark({"fp32-cpu-2t-all", {0.25f, 0.45f, 2, 1, false, 99}, YOLO_MODEL_PATH_SMALL});
+    }
+    if (int8_available) {
+        run_benchmark({"int8-cpu-2t-all", {0.25f, 0.45f, 2, 1, false, 99}, YOLO_MODEL_PATH_SMALL_INT8});
+    }
 }
