@@ -73,3 +73,34 @@ add_test(NAME camera_test COMMAND camera_test)
 add_executable(health_test tests/health_test.cpp)
 target_link_libraries(health_test PRIVATE pipeline_manager GTest::gtest rapidcheck rapidcheck_gtest)
 add_test(NAME health_test COMMAND health_test)
+
+# YOLO detector module (optional, requires ONNX Runtime)
+option(ENABLE_YOLO "Build YOLO detector module (requires ONNX Runtime)" ON)
+
+if(ENABLE_YOLO)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+    find_package(OnnxRuntime QUIET)
+
+    if(OnnxRuntime_FOUND)
+        set(YOLO_MODEL_PATH_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/models/yolov11s.onnx")
+        set(YOLO_MODEL_PATH_NANO "${CMAKE_CURRENT_SOURCE_DIR}/models/yolov11n.onnx")
+
+        add_library(yolo_module STATIC src/yolo_detector.cpp)
+        target_include_directories(yolo_module PUBLIC src ${OnnxRuntime_INCLUDE_DIRS})
+        target_link_libraries(yolo_module PUBLIC ${OnnxRuntime_LIBRARIES} log_module)
+
+        add_executable(yolo_test tests/yolo_test.cpp)
+        target_link_libraries(yolo_test PRIVATE yolo_module GTest::gtest_main
+                              rapidcheck rapidcheck_gtest)
+        target_compile_definitions(yolo_test PRIVATE
+            YOLO_MODEL_PATH_SMALL="${YOLO_MODEL_PATH_SMALL}"
+            YOLO_MODEL_PATH_NANO="${YOLO_MODEL_PATH_NANO}")
+        add_test(NAME yolo_test COMMAND yolo_test)
+
+        message(STATUS "YOLO module: ENABLED (ONNX Runtime found)")
+    else()
+        message(STATUS "YOLO module: DISABLED (ONNX Runtime not found)")
+    endif()
+else()
+    message(STATUS "YOLO module: DISABLED (ENABLE_YOLO=OFF)")
+endif()

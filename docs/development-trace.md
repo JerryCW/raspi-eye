@@ -877,3 +877,122 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/pipeline_manager.cpp, device/tests/tee_test.cpp, device/tests/camera_test.cpp
 
 ---
+
+### 2026-04-09 — Spec: spec-9-yolo-detector / 任务: 1+2. CMake 基础设施 + YoloDetector 实现
+
+**完成概要：** 创建 FindOnnxRuntime.cmake、yolo_detector.h（5 个 POD + 4 个独立函数 + YoloDetector 类）、yolo_detector.cpp（compute_iou + nms + letterbox_resize 双线性 + restore_coordinates + ONNX Runtime RAII + create 工厂 + detect_with_stats）、download-model.sh（yolov11s + yolov11n 双模型）、CMakeLists.txt ENABLE_YOLO 条件编译、.gitignore 排除 *.onnx。macOS Debug 编译零错误。
+
+**测试状态：** 未运行（测试覆盖将在任务 4 yolo_test 中实现）— 新增 1 个占位测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/cmake/FindOnnxRuntime.cmake, device/src/yolo_detector.h, device/src/yolo_detector.cpp, device/tests/yolo_test.cpp（占位）, device/CMakeLists.txt, .gitignore, scripts/download-model.sh
+
+---
+
+### 2026-04-09 — Spec: spec-9-yolo-detector / 任务: 3. 检查点 — 编译通过
+
+**完成概要：** 编译检查点通过。CMake 配置成功（ONNX Runtime found），全量编译零错误，6/6 测试通过。
+
+**测试状态：** 全部通过（6/6）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+- CMake 配置：6.4s，YOLO module ENABLED
+- 编译：全部 target 构建成功
+- 测试结果：smoke_test 0.40s, log_test 0.87s, tee_test 0.19s, camera_test 0.14s, health_test 7.65s, yolo_test 28.61s（placeholder）
+- 注意：yolo_test placeholder 耗时 28.61s 偏长，可能是 ONNX Runtime 链接库的加载开销
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证检查点）
+
+---
+
+### 2026-04-10 — Spec: spec-9-yolo-detector / 任务: 4.1 yolo_test.cpp — 基础结构与 example-based 测试 + PBT + 性能基线
+
+**完成概要：** 实现完整 yolo_test.cpp：12 个 example-based 测试（NMS 5 + Letterbox 3 + 模型加载 2 + 端到端 2）+ 4 个 PBT 属性测试 + 2 个性能基线测试。使用 YoloModelFixture 共享模型实例减少加载次数。PBT 参数缩减（NMS 列表 [0,30]、letterbox 图像 [1,128]）以控制耗时。
+
+**测试状态：** 全部通过（6/6 套件）— 新增 18 个测试（替换 placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+- yolo_test 耗时 87.90s，主要来自 ONNX Runtime 模型加载（~15-20s/次 × 3 次：fixture + perf baseline s + perf baseline n）
+- 纯逻辑测试（NMS、letterbox、PBT）部分很快
+- ASan 无报告
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/yolo_test.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-9-yolo-detector / 任务: 5. 检查点 — yolo_test 全量通过
+
+**完成概要：** 全量测试检查点通过，6/6 套件全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（6/6：smoke_test 1.30s + log_test 0.12s + tee_test 0.89s + camera_test 0.92s + health_test 6.31s + yolo_test 87.90s = 97.59s）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证检查点）
+
+---
+
+### 2026-04-10 — Spec: spec-9-yolo-detector / 任务: 4.2-4.5 PBT 属性测试 + 6.1 性能基线测试（状态补标）
+
+**完成概要：** 任务 4.2-4.5（4 个 PBT 属性测试）和 6.1（2 个性能基线测试）的代码在任务 4.1 中已一并实现并通过测试，本次仅补标 tasks.md 中的完成状态。
+
+**测试状态：** 全部通过（6/6 套件，已在任务 5 检查点确认）— 无新增测试（代码已在 4.1 中实现）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。任务 4.1 的子代理一次性实现了所有 PBT 和性能基线测试代码，tasks.md 中 4.2-4.5 和 6.1 的 checkbox 未同步更新，本次补标。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯状态补标）
+
+---
+
+### 2026-04-10 — Spec: spec-9-yolo-detector / 任务: 7. 最终检查点 — 全量验证
+
+**完成概要：** 最终全量验证通过。包含用户反馈的重命名：`YOLO_MODEL_PATH` → `YOLO_MODEL_PATH_SMALL`，与 `YOLO_MODEL_PATH_NANO` 对称。CMake 配置 + 编译 + 6/6 测试通过 + ENABLE_YOLO=OFF 5/5 测试通过。Pi 5 Release 验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（ENABLE_YOLO=ON: 6/6, 71.76s; ENABLE_YOLO=OFF: 5/5, 8.15s）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | `YOLO_MODEL_PATH` 命名不够精确，应为 `YOLO_MODEL_PATH_SMALL` 与 NANO 对称 | Spec 不够精确 | 用户反馈：YOLO 模型有很多种，YOLO_MODEL_PATH 语义不明确 | 全局重命名 CMakeLists.txt + yolo_test.cpp 中的 YOLO_MODEL_PATH → YOLO_MODEL_PATH_SMALL | 后续 Spec 中定义 CMake 变量时，命名应明确标注模型变体（如 _SMALL、_NANO、_MEDIUM） |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（命名精度问题为单次反馈，非系统性失败模式）
+
+**涉及文件：** device/CMakeLists.txt, device/tests/yolo_test.cpp
+
+---

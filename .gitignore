@@ -3,7 +3,7 @@
 
 # Build
 build/
-build-pi/
+build-*/
 *.o
 *.a
 *.so
@@ -45,3 +45,7 @@ vcpkg_installed/
 
 # Test artifacts
 Testing/
+
+# ONNX models (downloaded via scripts/download-model.sh)
+*.onnx
+device/models/

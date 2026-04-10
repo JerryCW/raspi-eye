@@ -47,7 +47,7 @@ spec-17 + spec-13 → spec-20（前端 MVP，可选）
 
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
-| 5 | pipeline-health | 管道健康监控 + 自动恢复（Element 错误检测、重建管道）+ 故障注入验证 | spec-3, spec-4 | device | 🔄 |
+| 5 | pipeline-health | 管道健康监控 + 自动恢复（Element 错误检测、重建管道）+ 故障注入验证 | spec-3, spec-4 | device | ✅ |
 | 6 | infra-core | AWS 基础设施 IaC：KVS 流、S3 桶、DynamoDB 表、IAM 角色 | spec-3 | infra | ⬜ |
 | 7 | iot-credentials | AWS IoT Thing 注册 + X.509 证书 + STS 临时凭证获取 | spec-6 | device + infra | ⬜ |
 
@@ -138,7 +138,7 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 
 _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 
-暂无。
+- **XNNPACK execution provider 优化**：ONNX Runtime 针对 ARM CPU 的加速后端，比默认 CPU provider 快 2-3x。需要从源码编译 ONNX Runtime 启用 `--use_xnnpack`。等 Spec 9 基线数据出来后决定是否需要。（来源：spec-9 需求讨论）
 
 ---
 
@@ -149,4 +149,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅, spec-3 ✅, spec-4 ✅ 已完成，spec-5 🔄 进行中
+当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅, spec-3 ✅, spec-4 ✅, spec-5 ✅ 已完成，spec-9 🔄 进行中（跳过 spec-6/7/8，先做设备端 AI）
