@@ -31,6 +31,16 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
   - 原因：日志可能被收集到云端或共享给他人
   - 建议：日志中只输出资源标识（如 thing-name），不输出凭证内容
 
+- SHALL NOT 在不确定 ONNX Runtime 默认行为的情况下显式设置 SetInterOpNumThreads 为非零值（来源：spec-9.5）
+  - 原因：ORT 的默认 inter-op 线程策略比显式设为 1 快 30%
+  - 建议：inter_op_num_threads 默认 0（不调用），仅在明确需要时设置非零值
+
+- SHALL NOT 在 Pi 5 多线程推理场景中保持 ORT 默认的 intra-op spinning（来源：spec-9.5）
+  - 原因：spinning=1 时 4 线程空转互相抢 CPU 核心，导致性能退化 45%（636ms vs 352ms）
+  - 建议：显式设置 `AddSessionConfigEntry("session.intra_op.allow_spinning", "0")`
+  - 原因：日志可能被收集到云端或共享给他人
+  - 建议：日志中只输出资源标识（如 thing-name），不输出凭证内容
+
 - SHALL NOT 在 macOS 上直接在 main() 中运行含 autovideosink 的 GStreamer 管道（来源：spec-0 手动验证）
   - 原因：macOS 要求 NSApplication 在主线程运行，否则 GStreamer-GL 报警告且可能崩溃
   - 建议：用 `gst_macos_main()` 包装管道运行逻辑

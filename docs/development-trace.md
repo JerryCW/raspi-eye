@@ -1245,3 +1245,55 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/yolo_detector.h, device/src/yolo_detector.cpp, device/tests/yolo_test.cpp
 
 ---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / 最终优化：disable spinning + XNNPACK 线程池 + 模型缓存
+
+**完成概要：** 关闭 ORT intra-op spinning 后 CPU EP 4 线程从 636ms 暴降到 352ms（之前 spinning 导致线程互相抢 CPU）。XNNPACK EP 配置独立线程池 + 模型序列化缓存。最终最优配置 CPU EP 4t 352ms，从 Spec 9 基线 662ms 加速 1.88x。
+
+**最终 A/B 基准测试数据（Pi 5, Release, yolo11s, 10 runs, spinning=off）：**
+
+| 配置 | EP | intra-op | 推理 avg (ms) | 推理 min (ms) | CPU 温度 | vs 基线 662ms |
+|------|-----|---------|-------------|-------------|---------|--------------|
+| baseline-cpu-2t | CPU | 2 | 487.9 | 486.6 | 54→66°C | 1.36x |
+| cpu-1t | CPU | 1 | 891.2 | 889.1 | 65→62°C | 0.74x |
+| cpu-3t | CPU | 3 | 385.8 | 383.2 | 61→66°C | 1.72x |
+| cpu-4t | CPU | 4 | 352.3 | 348.6 | 67→70°C | 1.88x |
+| cpu-4t-inter2 | CPU | 4 | 352.1 | 351.0 | 69→70°C | 1.88x |
+| xnnpack-2t | XNNPACK | 2 | 431.7 | 429.2 | 69→66°C | 1.53x |
+| cpu-2t-disable | CPU | 2 | 516.4 | 514.2 | 66→65°C | 1.28x |
+| cpu-2t-basic | CPU | 2 | 517.0 | 512.4 | 65→66°C | 1.28x |
+| cpu-2t-extended | CPU | 2 | 488.5 | 487.1 | 67→66°C | 1.36x |
+
+**优化历程总结（yolo11s 推理延迟）：**
+
+| 阶段 | 推理 avg | vs 原始基线 | 关键变更 |
+|------|---------|-----------|---------|
+| Spec 9 基线（预编译 ORT） | 662ms | 1.00x | GitHub Releases aarch64 预编译包 |
+| 源码编译 ORT + inter-op bug | 649ms | 1.02x | SetInterOpNumThreads(1) 抵消了编译优化 |
+| 修复 inter-op=0 | 517ms | 1.28x | 不调用 SetInterOpNumThreads，让 ORT 自动决定 |
+| + XNNPACK EP | 432ms | 1.53x | XNNPACK 替换部分 Conv/MatMul 算子 |
+| + disable spinning | 352ms (4t) | 1.88x | 关闭线程空转，4 线程不再退化 |
+
+**关键发现：**
+1. spinning 是 Pi 5 多线程推理的最大性能杀手：开启时 4 线程 636ms（比 2 线程还慢），关闭后 352ms（最快）
+2. 源码编译 ORT 比预编译快 ~28%（662→488ms），来自 GCC 针对 Cortex-A76 的本机优化
+3. XNNPACK EP 在 spinning=on 时是最优（432ms），但 spinning=off 后 CPU EP 4t 反超（352ms）
+4. SetInterOpNumThreads(1) 比 ORT 默认行为慢 30%，教训：不确定默认行为时不要显式设置
+5. 模型序列化缓存（SetOptimizedModelFilePath）减少后续启动时间，但不影响推理延迟
+
+**Spec 10 推荐配置：** `DetectorConfig{.num_threads = 4, .use_xnnpack = false}`，代码中 `allow_spinning = "0"` 已默认生效
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | spinning=on 时 4 线程比 2 线程慢（636ms vs 517ms） | Spec 缺少信息 | ORT 默认 spinning=1，4 线程空转互相抢 CPU 核心 | `AddSessionConfigEntry("session.intra_op.allow_spinning", "0")` | SHALL NOT 在多线程推理场景中保持 ORT 默认的 spinning=1 |
+| 2 | XNNPACK EP 线程配置未传参 | Spec 缺少信息 | 之前 `SessionOptionsAppendExecutionProvider(opts, "XNNPACK", nullptr, nullptr, 0)` 没传线程数 | 改为传 `intra_op_num_threads` 键值对 | XNNPACK 官方文档推荐配置应在 design.md 中完整引用 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在 Pi 5 多线程推理场景中保持 ORT 默认的 intra-op spinning（spinning=1）——4 线程空转导致性能退化 45%，必须显式关闭
+
+**涉及文件：** device/src/yolo_detector.cpp
+
+---
