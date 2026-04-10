@@ -1607,3 +1607,112 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+
+### 2026-04-10 — Spec: spec-8-kvs-producer / 任务: 1. KvsSinkFactory 模块实现与 CMake 配置（1.1 + 1.2 + 1.3）
+
+**完成概要：** 创建 kvs_sink_factory.h（KvsConfig POD + 3 个函数声明）、kvs_sink_factory.cpp（build_kvs_config + build_iot_certificate_string + create_kvs_sink 平台条件编译实现）、修改 CMakeLists.txt（kvs_module 静态库 + kvs_test 占位测试），编译通过，8 个测试全部通过。
+
+**测试状态：** 全部通过（8/8 套件含 kvs_test 占位）— 新增 1 个占位测试（kvs_test Placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/kvs_sink_factory.h, device/src/kvs_sink_factory.cpp, device/CMakeLists.txt, device/tests/kvs_test.cpp（占位）
+
+---
+
+### 2026-04-10 — Spec: spec-8-kvs-producer / 任务: 2. PipelineBuilder 签名扩展与配置文件更新（2.1 + 2.2 + 2.3）
+
+**完成概要：** pipeline_builder.h 添加 kvs_sink_factory.h include 并扩展 build_tee_pipeline 签名（+kvs_config +aws_config 可选参数），pipeline_builder.cpp KVS sink 创建改为条件调用 KvsSinkFactory，config.toml.example 新增 [kvs] section 示例，编译通过，8/8 测试通过。
+
+**测试状态：** 全部通过（8/8 套件）— 无新增测试（测试覆盖将在任务 4 kvs_test 中实现）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/pipeline_builder.h, device/src/pipeline_builder.cpp, device/config/config.toml.example
+
+---
+
+### 2026-04-10 — Spec: spec-8-kvs-producer / 任务: 3. 检查点 — 编译通过与现有测试回归
+
+**完成概要：** cmake 配置 + 编译 + ctest 全量验证通过，8/8 测试通过（smoke_test、log_test、tee_test、camera_test、health_test、credential_test、kvs_test、yolo_test），ASan 无报告。
+
+**测试状态：** 全部通过（8/8 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-10 — Spec: spec-8-kvs-producer / 任务: 4. kvs_test.cpp — PBT 与 Example-Based 测试（4.1 + 4.2 + 4.3 + 4.4）
+
+**完成概要：** 创建完整 kvs_test.cpp（6 个 example-based + 3 个 PBT 属性测试），自定义 main() 先调用 gst_init，CMakeLists.txt kvs_test 改为 GTest::gtest，全部 8/8 套件通过（kvs_test 1.93s），ASan 无报告。
+
+**测试状态：** 全部通过（8/8 套件）— 新增 9 个测试（6 example-based + 3 PBT，替换 1 个占位）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/kvs_test.cpp, device/CMakeLists.txt
+
+---
+
+### 2026-04-10 — Spec: spec-8-kvs-producer / 任务: 5. provision-device.sh 扩展（5.1）
+
+**完成概要：** provision-device.sh 扩展完成：新增 KVS_STREAM_NAME 全局变量、--kvs-stream-name 参数、create_kvs_stream() 和 attach_kvs_iam_policy() 幂等函数、generate_toml_config() 追加 [kvs] section、verify/cleanup/summary 扩展，bash -n 语法检查通过。
+
+**测试状态：** 未运行（Bash 脚本，需要真实 AWS 环境手动验证）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/provision-device.sh
+
+---
+
+### 2026-04-10 — Spec: spec-8-kvs-producer / 任务: 6. 最终检查点 — 全量验证
+
+**完成概要：** 最终全量验证通过，cmake 配置 + 编译零错误 + 8/8 测试全部通过 + ASan 无报告。Pi 5 Release 验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（8/8 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

@@ -55,3 +55,6 @@ device/certs/
 
 # Device config (generated via scripts/provision-device.sh, contains device-specific info)
 device/config/config.toml
+
+# GStreamer plugins (kvssink, webrtc — copied manually on Pi 5, see docs/pi-setup.md)
+device/plugins/

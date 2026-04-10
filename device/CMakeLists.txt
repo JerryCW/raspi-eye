@@ -101,6 +101,26 @@ target_link_libraries(credential_test PRIVATE
 add_test(NAME credential_test COMMAND credential_test
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# KVS sink factory module
+add_library(kvs_module STATIC src/kvs_sink_factory.cpp)
+target_include_directories(kvs_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_directories(kvs_module PUBLIC ${GST_LIBRARY_DIRS})
+target_link_libraries(kvs_module PUBLIC ${GST_LIBRARIES} spdlog::spdlog credential_module)
+
+# Link kvs_module to pipeline_manager
+target_link_libraries(pipeline_manager PUBLIC kvs_module)
+
+# KVS test
+add_executable(kvs_test tests/kvs_test.cpp)
+target_link_libraries(kvs_test PRIVATE
+    kvs_module
+    pipeline_manager
+    GTest::gtest
+    rapidcheck
+    rapidcheck_gtest)
+add_test(NAME kvs_test COMMAND kvs_test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # YOLO detector module (optional, requires ONNX Runtime)
 option(ENABLE_YOLO "Build YOLO detector module (requires ONNX Runtime)" ON)
 

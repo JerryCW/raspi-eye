@@ -11,6 +11,8 @@ PI_REPO_DIR="${PI_REPO_DIR:-~/raspi-eye}"
 
 OS="$(uname -s)"
 
+PLUGINS_DIR="device/plugins"
+
 if [ "${OS}" = "Linux" ]; then
     # ── Local mode: running on Pi 5 directly ──
     echo "[pi-build] Local mode: building on Pi 5"
@@ -18,6 +20,14 @@ if [ "${OS}" = "Linux" ]; then
 
     echo "[pi-build] git pull..."
     git pull
+
+    # Set GST_PLUGIN_PATH if plugins directory exists and contains .so files
+    if [ -d "${PLUGINS_DIR}" ] && ls "${PLUGINS_DIR}"/*.so &>/dev/null; then
+        export GST_PLUGIN_PATH="${PROJECT_ROOT}/${PLUGINS_DIR}"
+        echo "[pi-build] GST_PLUGIN_PATH=${GST_PLUGIN_PATH}"
+    else
+        echo "[pi-build] No plugins in ${PLUGINS_DIR}/, kvssink/webrtc will fall back to fakesink"
+    fi
 
     echo "[pi-build] cmake configure (Release)..."
     cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release
@@ -47,6 +57,15 @@ else
 
         echo "[pi-build] git pull..."
         git pull
+
+        # Set GST_PLUGIN_PATH if plugins directory exists
+        PLUGINS_DIR="device/plugins"
+        if [ -d "${PLUGINS_DIR}" ] && ls "${PLUGINS_DIR}"/*.so &>/dev/null; then
+            export GST_PLUGIN_PATH="$(pwd)/${PLUGINS_DIR}"
+            echo "[pi-build] GST_PLUGIN_PATH=${GST_PLUGIN_PATH}"
+        else
+            echo "[pi-build] No plugins in ${PLUGINS_DIR}/, kvssink/webrtc will fall back to fakesink"
+        fi
 
         echo "[pi-build] cmake configure (Release)..."
         cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release

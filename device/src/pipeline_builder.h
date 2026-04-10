@@ -14,6 +14,7 @@
 #include <gst/gst.h>
 #include <string>
 #include "camera_source.h"
+#include "kvs_sink_factory.h"
 
 namespace PipelineBuilder {
 
@@ -21,8 +22,12 @@ namespace PipelineBuilder {
 // Caller takes ownership via PipelineManager::create(GstElement*).
 // Returns nullptr on failure; error_msg receives the detail.
 // error_msg in front to keep compatibility with existing build_tee_pipeline(&err) calls.
+// When kvs_config and aws_config are non-null, KvsSinkFactory creates the KVS sink.
+// When nullptr (default), a fakesink is used (backward compatible).
 GstElement* build_tee_pipeline(
     std::string* error_msg = nullptr,
-    CameraSource::CameraConfig config = CameraSource::CameraConfig{});
+    CameraSource::CameraConfig config = CameraSource::CameraConfig{},
+    const KvsSinkFactory::KvsConfig* kvs_config = nullptr,
+    const AwsConfig* aws_config = nullptr);
 
 } // namespace PipelineBuilder

@@ -10,3 +10,10 @@ role_alias = "<your-project-name>RoleAlias"
 cert_path = "device/certs/device-cert.pem"
 key_path = "device/certs/device-private.key"
 ca_path = "device/certs/root-ca.pem"
+
+# KVS (Kinesis Video Streams) configuration
+# stream_name: KVS stream name (must be pre-created via AWS CLI or IaC)
+# aws_region: AWS region where the KVS stream is located
+[kvs]
+stream_name = "<your-kvs-stream-name>"
+aws_region = "<your-aws-region>"

@@ -169,7 +169,105 @@ sudo dphys-swapfile setup
 sudo dphys-swapfile swapon
 ```
 
-## 3. Clone Repository
+## 3. Build KVS Producer SDK (for kvssink GStreamer plugin)
+
+The KVS Producer SDK provides `libgstkvssink.so`, a GStreamer sink element that
+uploads H.264 video to Amazon Kinesis Video Streams. Our code does NOT link
+against this SDK at compile time — it loads the plugin at runtime via
+`GST_PLUGIN_PATH`. Without it, the code gracefully falls back to fakesink.
+
+Reference: [AWS docs — Download and build the KVS C++ producer SDK](https://docs.aws.amazon.com/kinesisvideostreams/latest/dg/producersdk-cpp-rpi-download.html)
+
+### Install additional dependencies
+
+```bash
+sudo apt-get install -y \
+    automake \
+    gstreamer1.0-plugins-base-apps \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-tools \
+    libcurl4-openssl-dev \
+    liblog4cplus-dev \
+    libssl-dev
+```
+
+### Clone and build
+
+```bash
+cd ~
+git clone https://github.com/awslabs/amazon-kinesis-video-streams-producer-sdk-cpp.git \
+    --single-branch -b master kvs-producer-sdk-cpp
+mkdir -p kvs-producer-sdk-cpp/build
+cd kvs-producer-sdk-cpp/build
+cmake .. -DBUILD_GSTREAMER_PLUGIN=ON -DBUILD_DEPENDENCIES=OFF -DALIGNED_MEMORY_MODEL=ON
+make -j$(nproc)
+```
+
+Build time: ~10-20 minutes on Pi 5.
+
+### Verify kvssink plugin
+
+```bash
+export GST_PLUGIN_PATH=~/kvs-producer-sdk-cpp/build
+gst-inspect-1.0 kvssink
+```
+
+You should see kvssink's property list (stream-name, aws-region,
+iot-certificate, etc.). Press `q` to exit.
+
+### Copy plugin to project plugins directory
+
+The project uses a unified `device/plugins/` directory for all runtime-loaded
+GStreamer plugins (kvssink, webrtc, etc.). `pi-build.sh` automatically sets
+`GST_PLUGIN_PATH` to this directory.
+
+```bash
+cd ~/raspi-eye   # or your PI_REPO_DIR
+mkdir -p device/plugins
+cp ~/kvs-producer-sdk-cpp/build/libgstkvssink.so device/plugins/
+```
+
+Verify:
+
+```bash
+export GST_PLUGIN_PATH=$(pwd)/device/plugins
+gst-inspect-1.0 kvssink
+```
+
+> Future plugins (e.g. WebRTC) should also be copied to `device/plugins/`.
+> The directory is in `.gitignore` — plugins are platform-specific binaries
+> and must be built on the target device.
+
+### Persist GST_PLUGIN_PATH (optional)
+
+If you run raspi-eye outside of `pi-build.sh`, set the path in your shell:
+
+```bash
+echo 'export GST_PLUGIN_PATH=~/raspi-eye/device/plugins' >> ~/.bashrc
+source ~/.bashrc
+```
+
+> **Note:** `pi-build.sh` sets `GST_PLUGIN_PATH` automatically. You only need
+> the `.bashrc` entry for manual runs or systemd service configuration.
+
+### Quick end-to-end test (optional)
+
+```bash
+gst-launch-1.0 -v videotestsrc num-buffers=150 ! videoconvert ! \
+    x264enc tune=zerolatency speed-preset=ultrafast ! h264parse ! \
+    kvssink stream-name="TestStream" aws-region="ap-southeast-1" \
+    iot-certificate="iot-certificate,endpoint=YOUR_ENDPOINT,cert-path=device/certs/device-cert.pem,key-path=device/certs/device-private.key,ca-path=device/certs/root-ca.pem,role-aliases=YOUR_ROLE_ALIAS"
+```
+
+Replace the placeholder values with your actual IoT credentials. Check the AWS
+KVS console to verify the stream receives video.
+
+> **Note:** If you skip this step, raspi-eye still compiles and all tests pass.
+> At runtime, `create_kvs_sink()` will log a warning and fall back to fakesink.
+
+## 4. Clone Repository
 
 ```bash
 git clone https://github.com/JerryCW/raspi-eye.git ~/raspi-eye
@@ -178,7 +276,7 @@ cd ~/raspi-eye
 
 Replace `https://github.com/JerryCW/raspi-eye.git` with your fork URL if applicable.
 
-## 4. Download YOLO Models
+## 5. Download YOLO Models
 
 ```bash
 bash scripts/download-model.sh
@@ -188,7 +286,7 @@ This downloads `yolo11s.onnx` (small) and `yolo11n.onnx` (nano) to
 `device/models/`. If the `yolo` CLI (ultralytics) is installed, it exports from
 PyTorch; otherwise it downloads pre-exported ONNX files from GitHub.
 
-## 5. First Build Verification
+## 6. First Build Verification
 
 Run the full configure + build + test cycle to confirm the environment is set up
 correctly:
@@ -202,7 +300,7 @@ cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Release && \
 All tests should pass. The first build takes longer because FetchContent
 downloads dependencies; subsequent builds are incremental.
 
-## 6. SSH Key Setup
+## 7. SSH Key Setup
 
 Passwordless SSH login is required by `scripts/pi-build.sh` (remote mode) and
 `scripts/build-all.sh`. Run the following commands **on your macOS development
@@ -231,7 +329,7 @@ ssh pi@<PI_IP> "echo OK"
 
 You should see `OK` printed without being prompted for a password.
 
-## 7. Using pi-build.sh
+## 8. Using pi-build.sh
 
 `scripts/pi-build.sh` auto-detects the platform:
 - On Pi 5 (Linux): runs build locally

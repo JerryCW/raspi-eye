@@ -2,6 +2,7 @@
 // Dual-tee pipeline construction using GStreamer C API.
 #include "pipeline_builder.h"
 #include "camera_source.h"
+#include "kvs_sink_factory.h"
 #include <spdlog/spdlog.h>
 #include <array>
 
@@ -103,7 +104,9 @@ bool link_tee_to_element(GstElement* tee, GstElement* element,
 // --- build_tee_pipeline ------------------------------------------------
 
 GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
-                                                CameraSource::CameraConfig config) {
+                                                CameraSource::CameraConfig config,
+                                                const KvsSinkFactory::KvsConfig* kvs_config,
+                                                const AwsConfig* aws_config) {
     // 1. Pipeline container
     GstElement* pipeline = gst_pipeline_new("tee-pipeline");
     if (!pipeline) {
@@ -126,7 +129,12 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     GstElement* enc_tee   = gst_element_factory_make("tee",           "encoded-tee");
 
     GstElement* q_kvs     = gst_element_factory_make("queue",         "q-kvs");
-    GstElement* kvs_sink  = gst_element_factory_make("fakesink",      "kvs-sink");
+    GstElement* kvs_sink  = nullptr;
+    if (kvs_config && aws_config) {
+        kvs_sink = KvsSinkFactory::create_kvs_sink(*kvs_config, *aws_config, error_msg);
+    } else {
+        kvs_sink = gst_element_factory_make("fakesink", "kvs-sink");
+    }
 
     GstElement* q_web     = gst_element_factory_make("queue",         "q-web");
     GstElement* web_sink  = gst_element_factory_make("fakesink",      "webrtc-sink");

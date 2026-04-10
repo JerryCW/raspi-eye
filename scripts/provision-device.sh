@@ -16,6 +16,7 @@ OUTPUT_DIR="device/certs"
 POLICY_NAME=""
 ROLE_NAME=""
 ROLE_ALIAS=""
+KVS_STREAM_NAME=""
 MODE="provision"  # provision | verify | cleanup
 
 # Runtime variables (dynamically resolved)
@@ -121,6 +122,7 @@ print_usage() {
     printf "  --role-name NAME         IAM Role name (default: {project-name}IotRole)\n"
     printf "  --role-alias NAME        Role Alias name (default: {project-name}RoleAlias)\n"
     printf "  --region REGION          AWS Region (default: from aws configure)\n"
+    printf "  --kvs-stream-name NAME   KVS Stream name (default: {thing-name}Stream)\n"
     printf "  --verify                 Verify mode: check existing resources\n"
     printf "  --cleanup                Cleanup mode: delete all resources\n"
     printf "  --help                   Show this help message\n"
@@ -166,6 +168,10 @@ parse_args() {
                 AWS_REGION="$2"
                 shift 2
                 ;;
+            --kvs-stream-name)
+                KVS_STREAM_NAME="$2"
+                shift 2
+                ;;
             --verify)
                 MODE="verify"
                 shift
@@ -197,6 +203,7 @@ parse_args() {
     POLICY_NAME="${POLICY_NAME:-${PROJECT_NAME}IotPolicy}"
     ROLE_NAME="${ROLE_NAME:-${PROJECT_NAME}IotRole}"
     ROLE_ALIAS="${ROLE_ALIAS:-${PROJECT_NAME}RoleAlias}"
+    KVS_STREAM_NAME="${KVS_STREAM_NAME:-${THING_NAME}Stream}"
 
     log_info "Thing: ${THING_NAME}, Mode: ${MODE}"
     log_info "Policy: ${POLICY_NAME}, Role: ${ROLE_NAME}, Alias: ${ROLE_ALIAS}"
@@ -390,6 +397,38 @@ create_role_alias() {
     log_success "Created Role Alias '${ROLE_ALIAS}'"
 }
 
+create_kvs_stream() {
+    local stream_name="${KVS_STREAM_NAME}"
+    log_info "Checking KVS Stream '${stream_name}'..."
+    if aws kinesisvideo describe-stream --stream-name "$stream_name" &>/dev/null; then
+        log_info "KVS Stream '${stream_name}' already exists, skipping"
+        return 0
+    fi
+    log_info "Creating KVS Stream '${stream_name}'..."
+    aws kinesisvideo create-stream \
+        --stream-name "$stream_name" \
+        --data-retention-in-hours 2
+    log_success "Created KVS Stream '${stream_name}'"
+}
+
+attach_kvs_iam_policy() {
+    local policy_name="${PROJECT_NAME}KvsPolicy"
+    log_info "Checking IAM inline policy '${policy_name}' on role '${ROLE_NAME}'..."
+    if aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$policy_name" &>/dev/null; then
+        log_info "KVS IAM policy already attached, skipping"
+        return 0
+    fi
+    local stream_arn="arn:aws:kinesisvideo:${AWS_REGION}:${AWS_ACCOUNT_ID}:stream/${KVS_STREAM_NAME}/*"
+    local policy_doc
+    policy_doc=$(printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["kinesisvideo:PutMedia","kinesisvideo:GetDataEndpoint","kinesisvideo:DescribeStream"],"Resource":"%s"}]}' "$stream_arn")
+    log_info "Attaching KVS IAM policy to role '${ROLE_NAME}'..."
+    aws iam put-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-name "$policy_name" \
+        --policy-document "$policy_doc"
+    log_success "Attached KVS IAM policy '${policy_name}'"
+}
+
 get_credential_endpoint() {
     log_info "Retrieving IoT Credential Provider endpoint..."
     CREDENTIAL_ENDPOINT=$(aws iot describe-endpoint \
@@ -434,6 +473,20 @@ generate_toml_config() {
         printf '%s\n' "$aws_section" > "$config_file"
     fi
 
+    local kvs_section=""
+    kvs_section+="[kvs]"
+    kvs_section+=$'\n'
+    kvs_section+="stream_name = \"${KVS_STREAM_NAME}\""
+    kvs_section+=$'\n'
+    kvs_section+="aws_region = \"${AWS_REGION}\""
+
+    if [[ -f "$config_file" ]]; then
+        local tmp_kvs="${config_file}.tmp"
+        awk '/^\[kvs\]/{skip=1; next} /^\[/{skip=0} !skip' "$config_file" > "$tmp_kvs"
+        mv "$tmp_kvs" "$config_file"
+    fi
+    printf '\n%s\n' "$kvs_section" >> "$config_file"
+
     log_success "TOML config written to ${config_file}"
 }
 
@@ -453,6 +506,7 @@ print_summary() {
     log_info "Cert file:           ${OUTPUT_DIR}/device-cert.pem"
     log_info "Key file:            ${OUTPUT_DIR}/device-private.key"
     log_info "CA file:             ${OUTPUT_DIR}/root-ca.pem"
+    log_info "KVS Stream:          ${KVS_STREAM_NAME}"
     log_info "Config file:         device/config/config.toml"
     log_info "======================================="
     log_success "Provisioning complete!"
@@ -468,6 +522,8 @@ do_provision() {
     attach_policy_to_cert
     create_iam_role
     create_role_alias
+    create_kvs_stream
+    attach_kvs_iam_policy
     get_credential_endpoint
     generate_toml_config
     print_summary
@@ -535,7 +591,23 @@ verify_resources() {
         failures=$((failures + 1))
     fi
 
-    # 6. TOML config file
+    # 6. KVS Stream
+    if aws kinesisvideo describe-stream --stream-name "$KVS_STREAM_NAME" &>/dev/null; then
+        log_success "KVS Stream '${KVS_STREAM_NAME}' exists"
+    else
+        log_error "[FAIL] KVS Stream '${KVS_STREAM_NAME}' not found"
+        failures=$((failures + 1))
+    fi
+
+    # 7. KVS IAM inline policy
+    if aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "${PROJECT_NAME}KvsPolicy" &>/dev/null; then
+        log_success "KVS IAM policy '${PROJECT_NAME}KvsPolicy' exists"
+    else
+        log_error "[FAIL] KVS IAM policy '${PROJECT_NAME}KvsPolicy' not found"
+        failures=$((failures + 1))
+    fi
+
+    # 8. TOML config file
     local config_file="device/config/config.toml"
     if [[ -f "$config_file" ]]; then
         log_success "TOML config: ${config_file}"
@@ -570,6 +642,27 @@ cleanup_resources() {
         log_info "Found certificate: ${CERT_ID_CLEANUP}"
     else
         log_warn "No certificate found for Thing '${THING_NAME}', skipping certificate-related steps"
+    fi
+
+    # Step 0a: Delete KVS IAM inline policy
+    log_info "Deleting KVS IAM inline policy '${PROJECT_NAME}KvsPolicy'..."
+    aws iam delete-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-name "${PROJECT_NAME}KvsPolicy" 2>/dev/null \
+        || { log_warn "Failed to delete KVS IAM inline policy"; errors=$((errors + 1)); }
+
+    # Step 0b: Delete KVS Stream
+    log_info "Deleting KVS Stream '${KVS_STREAM_NAME}'..."
+    local stream_arn=""
+    stream_arn=$(aws kinesisvideo describe-stream \
+        --stream-name "$KVS_STREAM_NAME" \
+        --query 'StreamInfo.StreamARN' \
+        --output text 2>/dev/null || echo "")
+    if [[ -n "$stream_arn" ]] && [[ "$stream_arn" != "None" ]]; then
+        aws kinesisvideo delete-stream --stream-arn "$stream_arn" 2>/dev/null \
+            || { log_warn "Failed to delete KVS Stream"; errors=$((errors + 1)); }
+    else
+        log_warn "KVS Stream '${KVS_STREAM_NAME}' not found, skipping"
     fi
 
     # Step 1: Detach certificate from Thing
