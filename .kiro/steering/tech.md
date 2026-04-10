@@ -117,7 +117,7 @@ ctest --test-dir device/build --output-on-failure
 - Commit 时机：Spec 全部 tasks 完成并测试通过后，统一提交
 - Commit message：`spec-{N}: 简要描述本 Spec 完成的功能`
 - 提交后合回 main
-- **自动 Commit 规则：** 当 Spec 的所有任务（包括检查点）执行完毕后，agent 必须主动执行 `git add` + `git commit`，不等用户提醒。提交前用 `git status` 确认无敏感文件。
+- **自动 Commit 规则：** agent 不自动执行 `git commit`。代码改完后只做 `git status` 确认无敏感文件，由用户测试确认后自行决定提交时机。
 
 ## Spec 创建规则
 

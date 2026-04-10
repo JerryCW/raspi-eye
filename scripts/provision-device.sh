@@ -11,6 +11,7 @@ set -euo pipefail
 # Global variables (from args, never hardcoded)
 # ============================================================
 THING_NAME=""
+PROJECT_NAME="RaspiEye"
 OUTPUT_DIR="device/certs"
 POLICY_NAME=""
 ROLE_NAME=""
@@ -111,22 +112,23 @@ print_usage() {
     printf "Creates IoT Thing, certificates, policy, IAM role, and role alias.\n"
     printf "\n"
     printf "Required:\n"
-    printf "  --thing-name NAME        IoT Thing name\n"
+    printf "  --thing-name NAME        IoT Thing name (e.g. RaspiEyeAlpha)\n"
     printf "\n"
     printf "Optional:\n"
+    printf "  --project-name NAME      Project name for shared resources (default: RaspiEye)\n"
     printf "  --output-dir DIR         Certificate output directory (default: device/certs)\n"
-    printf "  --policy-name NAME       IoT Policy name (default: {thing-name}-policy)\n"
-    printf "  --role-name NAME         IAM Role name (default: {thing-name}-role)\n"
-    printf "  --role-alias NAME        Role Alias name (default: {thing-name}-role-alias)\n"
+    printf "  --policy-name NAME       IoT Policy name (default: {project-name}IotPolicy)\n"
+    printf "  --role-name NAME         IAM Role name (default: {project-name}IotRole)\n"
+    printf "  --role-alias NAME        Role Alias name (default: {project-name}RoleAlias)\n"
     printf "  --region REGION          AWS Region (default: from aws configure)\n"
     printf "  --verify                 Verify mode: check existing resources\n"
     printf "  --cleanup                Cleanup mode: delete all resources\n"
     printf "  --help                   Show this help message\n"
     printf "\n"
     printf "Examples:\n"
-    printf "  %s --thing-name raspi-eye-001\n" "$script_name"
-    printf "  %s --thing-name raspi-eye-001 --verify\n" "$script_name"
-    printf "  %s --thing-name raspi-eye-001 --cleanup\n" "$script_name"
+    printf "  %s --thing-name RaspiEyeAlpha --region ap-northeast-1\n" "$script_name"
+    printf "  %s --thing-name RaspiEyeAlpha --verify\n" "$script_name"
+    printf "  %s --thing-name RaspiEyeAlpha --cleanup\n" "$script_name"
 }
 
 # ============================================================
@@ -142,6 +144,10 @@ parse_args() {
                 ;;
             --output-dir)
                 OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            --project-name)
+                PROJECT_NAME="$2"
                 shift 2
                 ;;
             --policy-name)
@@ -187,10 +193,10 @@ parse_args() {
         exit 1
     fi
 
-    # Derive defaults from thing name
-    POLICY_NAME="${POLICY_NAME:-${THING_NAME}-policy}"
-    ROLE_NAME="${ROLE_NAME:-${THING_NAME}-role}"
-    ROLE_ALIAS="${ROLE_ALIAS:-${THING_NAME}-role-alias}"
+    # Derive defaults from project name (shared resources, PascalCase)
+    POLICY_NAME="${POLICY_NAME:-${PROJECT_NAME}IotPolicy}"
+    ROLE_NAME="${ROLE_NAME:-${PROJECT_NAME}IotRole}"
+    ROLE_ALIAS="${ROLE_ALIAS:-${PROJECT_NAME}RoleAlias}"
 
     log_info "Thing: ${THING_NAME}, Mode: ${MODE}"
     log_info "Policy: ${POLICY_NAME}, Role: ${ROLE_NAME}, Alias: ${ROLE_ALIAS}"

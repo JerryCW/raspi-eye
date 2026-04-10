@@ -47,7 +47,7 @@ spec-17 + spec-13 → spec-20（前端 MVP，可选）
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
 | 5 | pipeline-health | 管道健康监控 + 自动恢复（Element 错误检测、重建管道）+ 故障注入验证 | spec-3, spec-4 | device | ✅ |
-| 6 | iot-provisioning | AWS IoT Thing 注册 + X.509 证书生成 + IoT Policy + IAM Role + Role Alias（Bash 脚本 + AWS CLI） | spec-3 | scripts + infra | ⬜ |
+| 6 | iot-provisioning | AWS IoT Thing 注册 + X.509 证书生成 + IoT Policy + IAM Role + Role Alias（Bash 脚本 + AWS CLI） | spec-3 | scripts + infra | ✅ |
 | 7 | credential-provider | 设备端 C++ 凭证模块：libcurl mTLS 请求 IoT Credentials Provider 获取 STS 临时凭证 | spec-6 | device | ⬜ |
 
 spec-5 和 spec-6 可并行开发（一个 device，一个 infra + device）。管道健康监控是纯设备端逻辑，和 AWS 凭证无关。IaC 资源（KVS 流、S3 桶等）推迟到各自的 Spec 里按需创建。
@@ -149,4 +149,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅, spec-3 ✅, spec-4 ✅, spec-5 ✅, spec-9 ✅, spec-9.5 ✅ 已完成，下一个 spec-6（IoT provisioning）
+当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅, spec-3 ✅, spec-4 ✅, spec-5 ✅, spec-6 ✅, spec-9 ✅, spec-9.5 ✅ 已完成，下一个 spec-7（credential-provider）

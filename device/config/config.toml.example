@@ -6,7 +6,7 @@
 [aws]
 thing_name = "<your-thing-name>"
 credential_endpoint = "<your-account-id>.credentials.iot.<region>.amazonaws.com"
-role_alias = "<your-thing-name>-role-alias"
+role_alias = "<your-project-name>RoleAlias"
 cert_path = "device/certs/device-cert.pem"
 key_path = "device/certs/device-private.key"
 ca_path = "device/certs/root-ca.pem"

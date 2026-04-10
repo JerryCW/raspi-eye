@@ -1427,3 +1427,21 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证检查点）
 
 ---
+
+### 2026-04-10 — Spec: spec-6-iot-provisioning / 用户反馈后改进
+
+**完成概要：** 根据用户反馈完成三项改进：1) 添加 `--region` 参数支持指定 AWS Region；2) 资源命名改为 PascalCase + 共享模式（`--project-name` 参数，默认 `RaspiEye`，推导 `RaspiEyeIotPolicy`/`RaspiEyeIotRole`/`RaspiEyeRoleAlias`）；3) 更新 steering 中自动 commit 规则为不自动 commit。用户已用旧命名 cleanup 清理完毕并 verify 确认 8/8 FAIL。
+
+**测试状态：** 用户手动测试通过（provision + verify + cleanup 全流程）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/provision-device.sh, device/config/config.toml.example, .kiro/steering/tech.md, docs/spec-backlog.md
+
+---
