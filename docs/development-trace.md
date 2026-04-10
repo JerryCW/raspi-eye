@@ -1297,3 +1297,23 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/yolo_detector.cpp
 
 ---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / yolo11n 基准测试数据
+
+**yolo11n A/B 基准测试（Pi 5, Release, 10 runs, spinning=off）：**
+
+| 配置 | EP | intra-op | 推理 avg (ms) | 推理 min (ms) | CPU 温度 | vs 基线 249ms |
+|------|-----|---------|-------------|-------------|---------|--------------|
+| nano-cpu-2t | CPU | 2 | 182.6 | 181.7 | 67→65°C | 1.36x |
+| nano-cpu-3t | CPU | 3 | 151.2 | 150.2 | 65→66°C | 1.65x |
+| nano-cpu-4t | CPU | 4 | 143.3 | 141.9 | 66→67°C | 1.74x |
+| nano-xnnpack-2t | XNNPACK | 2 | 154.0 | 152.5 | 67→66°C | 1.62x |
+
+**Spec 10 推荐配置总结：**
+
+| 模型 | 最优配置 | 推理延迟 | 帧率 | vs Spec 9 基线 |
+|------|---------|---------|------|---------------|
+| yolo11s | CPU 4t, spinning=off | 352ms | ~2.8 FPS | 1.88x (662ms) |
+| yolo11n | CPU 4t, spinning=off | 143ms | ~7.0 FPS | 1.74x (249ms) |
+
+---
