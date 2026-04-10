@@ -79,7 +79,10 @@ check_dependencies() {
 
 get_aws_context() {
     AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    AWS_REGION=$(aws configure get region)
+
+    if [[ -z "$AWS_REGION" ]]; then
+        AWS_REGION=$(aws configure get region || echo "")
+    fi
 
     if [[ -z "$AWS_ACCOUNT_ID" ]]; then
         log_error "Failed to retrieve AWS Account ID"
@@ -87,10 +90,11 @@ get_aws_context() {
     fi
 
     if [[ -z "$AWS_REGION" ]]; then
-        log_error "AWS Region not configured. Run 'aws configure' to set a default region"
+        log_error "AWS Region not configured. Use --region or run 'aws configure' to set a default region"
         exit 1
     fi
 
+    export AWS_DEFAULT_REGION="$AWS_REGION"
     log_info "AWS Account: ${AWS_ACCOUNT_ID}, Region: ${AWS_REGION}"
 }
 
@@ -114,6 +118,7 @@ print_usage() {
     printf "  --policy-name NAME       IoT Policy name (default: {thing-name}-policy)\n"
     printf "  --role-name NAME         IAM Role name (default: {thing-name}-role)\n"
     printf "  --role-alias NAME        Role Alias name (default: {thing-name}-role-alias)\n"
+    printf "  --region REGION          AWS Region (default: from aws configure)\n"
     printf "  --verify                 Verify mode: check existing resources\n"
     printf "  --cleanup                Cleanup mode: delete all resources\n"
     printf "  --help                   Show this help message\n"
@@ -149,6 +154,10 @@ parse_args() {
                 ;;
             --role-alias)
                 ROLE_ALIAS="$2"
+                shift 2
+                ;;
+            --region)
+                AWS_REGION="$2"
                 shift 2
                 ;;
             --verify)
