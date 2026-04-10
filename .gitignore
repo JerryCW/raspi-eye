@@ -49,3 +49,6 @@ Testing/
 # ONNX models (downloaded via scripts/download-model.sh)
 *.onnx
 device/models/
+
+# Device certificates (generated via scripts/provision-device.sh)
+device/certs/
