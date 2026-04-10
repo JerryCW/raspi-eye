@@ -380,11 +380,13 @@ static void run_perf_baseline(const std::string& model_path, const std::string& 
 }
 
 TEST(YoloPerformance, PerformanceBaseline) {
+    if (!std::getenv("RUN_PERF_TESTS")) GTEST_SKIP() << "Set RUN_PERF_TESTS=1 to run";
     if (!model_available()) GTEST_SKIP() << "Model (yolov11s) not available";
     run_perf_baseline(YOLO_MODEL_PATH_SMALL, "yolov11s");
 }
 
 TEST(YoloPerformance, PerformanceBaselineNano) {
+    if (!std::getenv("RUN_PERF_TESTS")) GTEST_SKIP() << "Set RUN_PERF_TESTS=1 to run";
     if (!model_nano_available()) GTEST_SKIP() << "Model (yolov11n) not available";
     run_perf_baseline(YOLO_MODEL_PATH_NANO, "yolov11n");
 }
@@ -541,6 +543,7 @@ static void run_benchmark(const BenchConfig& bench, int runs = 10) {
 }
 
 TEST(YoloBenchmark, OptimizationComparison) {
+    if (!std::getenv("RUN_PERF_TESTS")) GTEST_SKIP() << "Set RUN_PERF_TESTS=1 to run";
 #ifdef __APPLE__
     GTEST_SKIP() << "ARM optimization benchmark skipped on macOS";
 #endif
@@ -578,6 +581,7 @@ TEST(YoloBenchmark, OptimizationComparison) {
 }
 
 TEST(YoloBenchmark, Int8ModelBenchmark) {
+    if (!std::getenv("RUN_PERF_TESTS")) GTEST_SKIP() << "Set RUN_PERF_TESTS=1 to run";
 #ifdef __APPLE__
     GTEST_SKIP() << "ARM optimization benchmark skipped on macOS";
 #endif
