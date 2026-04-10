@@ -311,16 +311,43 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
 
     // 3d. XNNPACK EP registration (non-fatal on failure)
     if (config.use_xnnpack) {
-        status = ort->SessionOptionsAppendExecutionProvider(opts, "XNNPACK", nullptr, nullptr, 0);
+        // XNNPACK recommended config: disable ORT intra-op spinning, let XNNPACK
+        // use its own thread pool. Set ORT intra-op threads to 1 so XNNPACK
+        // handles all parallelism internally.
+        status = ort->AddSessionConfigEntry(opts,
+            "session.intra_op.allow_spinning", "0");
+        if (status) { ort->ReleaseStatus(status); }
+
+        // Pass XNNPACK its own thread count via EP options
+        std::string xnnpack_threads = std::to_string(config.num_threads);
+        const char* ep_keys[] = {"intra_op_num_threads"};
+        const char* ep_values[] = {xnnpack_threads.c_str()};
+        status = ort->SessionOptionsAppendExecutionProvider(
+            opts, "XNNPACK", ep_keys, ep_values, 1);
         if (status != nullptr) {
             const char* msg = ort->GetErrorMessage(status);
             spdlog::warn("XNNPACK EP not available: {}, falling back to CPU EP", msg);
             ort->ReleaseStatus(status);
         } else {
-            spdlog::info("Execution Provider: XNNPACK");
+            spdlog::info("Execution Provider: XNNPACK (threads={})", config.num_threads);
         }
     } else {
         spdlog::info("Execution Provider: CPU");
+    }
+
+    // 3e. Disable intra-op spinning when not using XNNPACK (saves CPU cycles)
+    if (!config.use_xnnpack) {
+        status = ort->AddSessionConfigEntry(opts,
+            "session.intra_op.allow_spinning", "0");
+        if (status) { ort->ReleaseStatus(status); }
+    }
+
+    // 3f. Save optimized model to avoid re-optimization on subsequent loads
+    std::string opt_model_path = model_path + ".optimized";
+    status = ort->SetOptimizedModelFilePath(opts, opt_model_path.c_str());
+    if (status) {
+        spdlog::warn("Failed to set optimized model path");
+        ort->ReleaseStatus(status);
     }
 
     // 4. Create Session
