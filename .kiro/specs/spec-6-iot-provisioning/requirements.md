@@ -28,7 +28,7 @@
 | 脚本语言 | Bash（`#!/usr/bin/env bash`，`set -euo pipefail`） |
 | 依赖工具 | AWS CLI v2、jq |
 | 证书输出目录 | 脚本参数指定，默认 `device/certs/` |
-| 配置文件路径 | `device/config/raspi-eye.toml`（脚本生成 `[aws]` section） |
+| 配置文件路径 | `device/config/config.toml`（脚本生成 `[aws]` section） |
 | 配置文件格式 | TOML（后续 Spec 按需追加 `[camera]`、`[pipeline]`、`[yolo]` 等 section） |
 | 证书文件 | .gitignore 排除，不提交 git |
 | 脚本位置 | `scripts/provision-device.sh` |
@@ -109,7 +109,7 @@
 
 #### 验收标准
 
-1. THE Provisioning_Script SHALL 在输出目录生成 `raspi-eye.toml` 配置文件，包含 `[aws]` section
+1. THE Provisioning_Script SHALL 在输出目录生成 `config.toml` 配置文件，包含 `[aws]` section
 2. THE `[aws]` section SHALL 包含以下字段：`thing_name`、`credential_endpoint`、`role_alias`、`cert_path`、`key_path`、`ca_path`
 3. THE 配置文件中的证书路径 SHALL 使用相对于项目根目录的路径
 4. IF 配置文件已存在，THEN THE Provisioning_Script SHALL 仅更新 `[aws]` section，保留其他 section 不变

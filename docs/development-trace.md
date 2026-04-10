@@ -1317,3 +1317,113 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 | yolo11n | CPU 4t, spinning=off | 143ms | ~7.0 FPS | 1.74x (249ms) |
 
 ---
+
+### 2026-04-10 — Spec: spec-6-iot-provisioning / 任务: 1. 创建 TOML 配置模板文件
+
+**完成概要：** 创建 `device/config/config.toml.example`，包含 `[aws]` section 的 6 个字段（占位符值）和注释说明。
+
+**测试状态：** 未运行（轻量模式，纯配置文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。文件已存在（之前创建），内容符合 design.md 规范。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/config/config.toml.example
+
+---
+
+### 2026-04-10 — Spec: spec-6-iot-provisioning / 任务: 2.1 创建 provision-device.sh 基础框架
+
+**完成概要：** 创建 `scripts/provision-device.sh` 基础框架（shebang、全局变量、4 个日志函数、check_dependencies、get_aws_context、parse_args、print_usage），`bash -n` 语法验证通过。
+
+**测试状态：** 未运行（轻量模式，纯 Bash 脚本创建）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | 子代理在 `print_usage()` 中使用了 `cat <<EOF` heredoc，违反禁止项 | Spec 不够精确 | `print_usage()` 函数体使用 `cat <<EOF ... EOF` 格式输出帮助信息 | 编排层手动替换为 `printf` 逐行输出 | 子代理 prompt 中强调 heredoc 禁止项时给出替代方案示例（printf 逐行） |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（heredoc 违规为子代理单次问题，已在 shall-not.md 中有记录）
+
+**涉及文件：** scripts/provision-device.sh
+
+---
+
+### 2026-04-10 — Spec: spec-6-iot-provisioning / 任务: 2.2 实现 main() 入口逻辑
+
+**完成概要：** 在 `scripts/provision-device.sh` 末尾追加三个占位函数（do_provision、verify_resources、cleanup_resources）、main() 入口函数（按 MODE 分发）、`main "$@"` 调用，`bash -n` 语法验证通过。
+
+**测试状态：** 未运行（轻量模式，纯 Bash 脚本框架）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/provision-device.sh
+
+---
+
+### 2026-04-10 — Spec: spec-6-iot-provisioning / 任务: 3+4+5 实现 provision 模式全部函数
+
+**完成概要：** 在 `scripts/provision-device.sh` 中实现 13 个 provision 函数：create_thing、create_certificate、download_root_ca、attach_cert_to_thing、recover_cert_arn（任务 3）、create_iot_policy、attach_policy_to_cert、create_iam_role、create_role_alias、get_credential_endpoint（任务 4）、generate_toml_config、print_summary、do_provision 编排函数（任务 5）。`bash -n` 语法验证通过，无 heredoc，无硬编码凭证。
+
+**测试状态：** 未运行（轻量模式，纯 Bash 脚本实现，本 Spec 不含自动化测试）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。所有函数按 design.md 规范实现，幂等检查逻辑完整。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/provision-device.sh
+
+---
+
+### 2026-04-10 — Spec: spec-6-iot-provisioning / 任务: 6+7+8 检查点 + verify + cleanup 模式
+
+**完成概要：** 检查点 6 全部 4 项通过（语法、无 heredoc、无硬编码、无敏感信息）。实现 `verify_resources()`（8 项资源检查）和 `cleanup_resources()`（8 步按依赖顺序清理，每步独立容错）。`bash -n` 语法验证通过。
+
+**测试状态：** 未运行（轻量模式，纯 Bash 脚本实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/provision-device.sh
+
+---
+
+### 2026-04-10 — Spec: spec-6-iot-provisioning / 任务: 9. 最终检查点 — 全量验证
+
+**完成概要：** 最终全量验证通过：`bash -n` 语法正确、`config.toml.example` 存在且内容正确、`.gitignore` 排除规则完整、C++ 测试 6/6 通过（18.95s）、无 heredoc、无硬编码凭证、日志无敏感信息。
+
+**测试状态：** 全部通过（6/6 C++ 测试套件，18.95s）— 无新增测试（本 Spec 不含自动化测试）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证检查点）
+
+---
