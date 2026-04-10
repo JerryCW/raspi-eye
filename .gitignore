@@ -52,3 +52,6 @@ device/models/
 
 # Device certificates (generated via scripts/provision-device.sh)
 device/certs/
+
+# Device config (generated via scripts/provision-device.sh, contains device-specific info)
+device/config/raspi-eye.toml

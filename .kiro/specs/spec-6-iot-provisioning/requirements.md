@@ -28,6 +28,8 @@
 | 脚本语言 | Bash（`#!/usr/bin/env bash`，`set -euo pipefail`） |
 | 依赖工具 | AWS CLI v2、jq |
 | 证书输出目录 | 脚本参数指定，默认 `device/certs/` |
+| 配置文件路径 | `device/config/raspi-eye.toml`（脚本生成 `[aws]` section） |
+| 配置文件格式 | TOML（后续 Spec 按需追加 `[camera]`、`[pipeline]`、`[yolo]` 等 section） |
 | 证书文件 | .gitignore 排除，不提交 git |
 | 脚本位置 | `scripts/provision-device.sh` |
 | 日志语言 | 英文 |
@@ -86,7 +88,7 @@
 #### 验收标准
 
 1. THE Provisioning_Script SHALL 创建 IAM_Role，信任策略允许 `iot.credentials.amazonaws.com` 代入
-2. THE IAM_Role SHALL 初始仅包含最小权限（`iot:DescribeEndpoint`），后续 Spec 按需追加
+2. THE IAM_Role SHALL 初始包含空权限策略（仅信任策略），后续 Spec 按需追加 KVS、S3 等权限
 3. THE Provisioning_Script SHALL 通过 `aws iot create-role-alias` 创建 Role_Alias
 4. IF Role 或 Role Alias 已存在，THEN THE Provisioning_Script SHALL 跳过创建（幂等）
 5. THE Provisioning_Script SHALL 输出 IoT Credentials Provider endpoint（`aws iot describe-endpoint --endpoint-type iot:CredentialProvider`）
@@ -100,6 +102,18 @@
 1. THE Provisioning_Script SHALL 在执行结束时输出摘要：Thing 名称、证书 ARN、Policy 名称、Role ARN、Role Alias、Credentials Provider endpoint、证书文件路径
 2. THE Provisioning_Script SHALL 提供 `--verify` 模式，检查已有资源是否完整（不创建新资源）
 3. THE Provisioning_Script SHALL 提供 `--cleanup` 模式，删除本次创建的所有资源（证书、Thing、Policy、Role Alias、Role）
+
+### 需求 6：TOML 配置文件输出
+
+**用户故事：** 作为开发者，我需要 provisioning 脚本自动生成 TOML 配置文件，以便设备端 C++ 模块直接读取 AWS 连接信息。
+
+#### 验收标准
+
+1. THE Provisioning_Script SHALL 在输出目录生成 `raspi-eye.toml` 配置文件，包含 `[aws]` section
+2. THE `[aws]` section SHALL 包含以下字段：`thing_name`、`credential_endpoint`、`role_alias`、`cert_path`、`key_path`、`ca_path`
+3. THE 配置文件中的证书路径 SHALL 使用相对于项目根目录的路径
+4. IF 配置文件已存在，THEN THE Provisioning_Script SHALL 仅更新 `[aws]` section，保留其他 section 不变
+5. THE 配置文件 SHALL 被 `.gitignore` 排除（包含设备特定信息）
 
 ## 验证命令
 
