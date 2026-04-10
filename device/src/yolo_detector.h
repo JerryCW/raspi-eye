@@ -28,7 +28,7 @@ struct DetectorConfig {
     float confidence_threshold = 0.25f; // Min confidence to keep
     float iou_threshold = 0.45f;        // NMS IoU threshold
     int num_threads = 2;                // ONNX Runtime intra-op threads
-    int inter_op_num_threads = 1;       // ONNX Runtime inter-op threads (YOLO is sequential)
+    int inter_op_num_threads = 0;       // ONNX Runtime inter-op threads (0 = ORT default)
     bool use_xnnpack = false;           // Enable XNNPACK EP (ARM NEON)
     int graph_optimization_level = 99;  // 0=DISABLE_ALL, 1=BASIC, 2=EXTENDED, 99=ALL
 };

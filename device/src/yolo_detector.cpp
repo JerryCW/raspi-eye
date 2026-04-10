@@ -289,10 +289,12 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
         return nullptr;
     }
 
-    // 3b. Set inter-op thread count (non-fatal on failure)
-    status = ort->SetInterOpNumThreads(opts, config.inter_op_num_threads);
-    if (!check_ort_status(ort, status, error_msg)) {
-        spdlog::warn("Failed to set inter-op threads: {}", config.inter_op_num_threads);
+    // 3b. Set inter-op thread count (skip if 0 to let ORT use default behavior)
+    if (config.inter_op_num_threads > 0) {
+        status = ort->SetInterOpNumThreads(opts, config.inter_op_num_threads);
+        if (!check_ort_status(ort, status, error_msg)) {
+            spdlog::warn("Failed to set inter-op threads: {}", config.inter_op_num_threads);
+        }
     }
     spdlog::info("Threads: intra-op={}, inter-op={}", config.num_threads, config.inter_op_num_threads);
 

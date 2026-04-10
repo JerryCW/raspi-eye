@@ -395,7 +395,7 @@ TEST(YoloConfigTest, ConfigDefaultValues) {
     DetectorConfig cfg;
     EXPECT_EQ(cfg.use_xnnpack, false);
     EXPECT_EQ(cfg.graph_optimization_level, 99);
-    EXPECT_EQ(cfg.inter_op_num_threads, 1);
+    EXPECT_EQ(cfg.inter_op_num_threads, 0);
     // Verify original fields retain defaults
     EXPECT_FLOAT_EQ(cfg.confidence_threshold, 0.25f);
     EXPECT_FLOAT_EQ(cfg.iou_threshold, 0.45f);
@@ -547,15 +547,15 @@ TEST(YoloBenchmark, OptimizationComparison) {
     if (!model_available()) GTEST_SKIP() << "Model not available";
 
     std::vector<BenchConfig> configs = {
-        {"baseline-cpu-2t-all",  {0.25f, 0.45f, 2, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
-        {"cpu-1t-all",           {0.25f, 0.45f, 1, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
-        {"cpu-3t-all",           {0.25f, 0.45f, 3, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
-        {"cpu-4t-all",           {0.25f, 0.45f, 4, 1, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"baseline-cpu-2t-all",  {0.25f, 0.45f, 2, 0, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-1t-all",           {0.25f, 0.45f, 1, 0, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-3t-all",           {0.25f, 0.45f, 3, 0, false, 99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-4t-all",           {0.25f, 0.45f, 4, 0, false, 99}, YOLO_MODEL_PATH_SMALL},
         {"cpu-4t-inter2-all",    {0.25f, 0.45f, 4, 2, false, 99}, YOLO_MODEL_PATH_SMALL},
-        {"xnnpack-2t-all",       {0.25f, 0.45f, 2, 1, true,  99}, YOLO_MODEL_PATH_SMALL},
-        {"cpu-2t-disable",       {0.25f, 0.45f, 2, 1, false,  0}, YOLO_MODEL_PATH_SMALL},
-        {"cpu-2t-basic",         {0.25f, 0.45f, 2, 1, false,  1}, YOLO_MODEL_PATH_SMALL},
-        {"cpu-2t-extended",      {0.25f, 0.45f, 2, 1, false,  2}, YOLO_MODEL_PATH_SMALL},
+        {"xnnpack-2t-all",       {0.25f, 0.45f, 2, 0, true,  99}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-2t-disable",       {0.25f, 0.45f, 2, 0, false,  0}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-2t-basic",         {0.25f, 0.45f, 2, 0, false,  1}, YOLO_MODEL_PATH_SMALL},
+        {"cpu-2t-extended",      {0.25f, 0.45f, 2, 0, false,  2}, YOLO_MODEL_PATH_SMALL},
     };
 
     for (const auto& cfg : configs) {
@@ -574,9 +574,9 @@ TEST(YoloBenchmark, Int8ModelBenchmark) {
     }
 
     if (fp32_available) {
-        run_benchmark({"fp32-cpu-2t-all", {0.25f, 0.45f, 2, 1, false, 99}, YOLO_MODEL_PATH_SMALL});
+        run_benchmark({"fp32-cpu-2t-all", {0.25f, 0.45f, 2, 0, false, 99}, YOLO_MODEL_PATH_SMALL});
     }
     if (int8_available) {
-        run_benchmark({"int8-cpu-2t-all", {0.25f, 0.45f, 2, 1, false, 99}, YOLO_MODEL_PATH_SMALL_INT8});
+        run_benchmark({"int8-cpu-2t-all", {0.25f, 0.45f, 2, 0, false, 99}, YOLO_MODEL_PATH_SMALL_INT8});
     }
 }
