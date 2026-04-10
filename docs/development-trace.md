@@ -1154,3 +1154,54 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / Pi 5 Release 验证 + A/B 基准测试
+
+**完成概要：** Pi 5 上源码编译带 XNNPACK EP 的 ONNX Runtime v1.24.4（GCC 12.2 + KleidiAI bf16 ICE patch），27/27 测试全部通过，采集到 9 种配置的 A/B 对比数据。
+
+**测试状态：** 全部通过（Pi 5 Release 6/6 套件，yolo_test 27/27，81.62s）— 无新增测试
+
+**ONNX Runtime 编译备注：** GCC 12.2 编译 KleidiAI 的 `kai_lhs_quant_pack_qai8dxp_bf16_neon.c` 触发 ICE（`vect_transform_reduction`），通过 `sed -i '1i #pragma GCC optimize("no-tree-vectorize")'` patch 绕过。
+
+**A/B 基准测试数据（Pi 5, Release, yolo11s, 10 runs each）：**
+
+| 配置 | EP | intra-op | inter-op | 图优化 | 推理 avg (ms) | 推理 min (ms) | 推理 max (ms) | 总耗时 avg (ms) | RSS delta | CPU 温度 | vs Spec 9 基线 (662ms) |
+|------|-----|---------|---------|--------|-------------|-------------|-------------|---------------|-----------|---------|----------------------|
+| baseline-cpu-2t-all | CPU | 2 | 1 | ALL | 649.4 | 628.0 | 688.9 | 658.5 | 7.8MB | 71→74°C | 1.02x |
+| cpu-1t-all | CPU | 1 | 1 | ALL | 1160.9 | 1107.7 | 1227.4 | 1170.3 | 4.4MB | 73→71°C | 0.57x |
+| cpu-3t-all | CPU | 3 | 1 | ALL | 592.1 | 523.7 | 637.2 | 603.3 | 7.7MB | 71→77°C | 1.12x |
+| cpu-4t-all | CPU | 4 | 1 | ALL | 840.7 | 811.9 | 884.9 | 850.4 | 4.4MB | 76→76°C | 0.79x |
+| cpu-4t-inter2-all | CPU | 4 | 2 | ALL | 842.4 | 795.0 | 910.7 | 852.3 | 5.2MB | 75→76°C | 0.79x |
+| xnnpack-2t-all | XNNPACK | 2 | 1 | ALL | 606.5 | 575.7 | 655.3 | 615.8 | 5.1MB | 77→76°C | 1.09x |
+| cpu-2t-disable | CPU | 2 | 1 | DISABLE | 672.2 | 656.8 | 687.8 | 681.0 | 4.2MB | 76→76°C | 0.99x |
+| cpu-2t-basic | CPU | 2 | 1 | BASIC | 683.4 | 653.9 | 711.4 | 692.1 | 10.9MB | 76→76°C | 0.97x |
+| cpu-2t-extended | CPU | 2 | 1 | EXTENDED | 650.4 | 619.7 | 674.4 | 659.5 | 11.5MB | 76→77°C | 1.02x |
+
+**FP32 单独对比（Int8ModelBenchmark，INT8 模型未生成故跳过）：**
+
+| 模型 | 推理 avg (ms) | RSS delta | CPU 温度 |
+|------|-------------|-----------|---------|
+| fp32-cpu-2t-all | 654.0 | 0kB | 76→77°C |
+
+**关键发现：**
+1. 最优 CPU 配置：3 线程（592ms，1.12x 加速），Pi 5 四核但满核（4 线程）因热节流反而退化到 841ms
+2. XNNPACK EP 有效：607ms（1.09x 加速），部分节点回退 CPU EP（ORT 警告 "Some nodes were not assigned to the preferred execution providers"）
+3. inter-op=2 对 YOLO 串行结构无帮助（842ms vs 841ms）
+4. 图优化级别影响不大：ALL(649) ≈ EXTENDED(650) ≈ DISABLE(672)，差异在噪声范围内
+5. 推荐 Spec 10 配置：CPU EP, 3 threads, ORT_ENABLE_ALL（最佳性价比）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | GCC 12.2 编译 KleidiAI bf16 NEON 代码触发 ICE | 环境限制 | `internal compiler error: in vect_transform_reduction, at tree-vect-loop.cc:7457` on `kai_lhs_quant_pack_qai8dxp_bf16_neon.c` | `sed -i '1i #pragma GCC optimize("no-tree-vectorize")'` patch 该文件 | 记录到 pi-setup.md 编译步骤中 |
+| 2 | macOS 上 spec-9.5 commit 未 push，Pi 5 git pull 拉到旧代码 | 操作遗漏 | Pi 5 上只有 18 个测试（Spec 9），缺少 Spec 9.5 新增的 9 个测试 | macOS 上 `git push origin main` | 自动 commit 规则应同时包含 push |
+| 3 | Pi 5 网络不稳定，FetchContent clone spdlog 失败 | 环境限制 | `GnuTLS recv error (-9): Error decoding the received TLS packet` | 重试成功 | 已知问题，无需行动 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（GCC ICE 和网络问题为环境限制，非代码/Spec 问题）
+
+**涉及文件：** 无文件变更（纯 Pi 5 验证）
+
+---
