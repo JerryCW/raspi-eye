@@ -82,8 +82,8 @@ if(ENABLE_YOLO)
     find_package(OnnxRuntime QUIET)
 
     if(OnnxRuntime_FOUND)
-        set(YOLO_MODEL_PATH_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/models/yolov11s.onnx")
-        set(YOLO_MODEL_PATH_NANO "${CMAKE_CURRENT_SOURCE_DIR}/models/yolov11n.onnx")
+        set(YOLO_MODEL_PATH_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/models/yolo11s.onnx")
+        set(YOLO_MODEL_PATH_NANO "${CMAKE_CURRENT_SOURCE_DIR}/models/yolo11n.onnx")
 
         add_library(yolo_module STATIC src/yolo_detector.cpp)
         target_include_directories(yolo_module PUBLIC src ${OnnxRuntime_INCLUDE_DIRS})
