@@ -332,6 +332,7 @@ RC_GTEST_PROP(KvsPBT, MissingFieldsDetected, ()) {
 
 // **Validates: Requirements 3.3**
 RC_GTEST_PROP(KvsPBT, IotCertificateContainsAllFields, ()) {
+    auto thing_name = *genSafeIotString();
     auto endpoint = *genSafeIotString();
     auto cert_path = *genSafeIotString();
     auto key_path = *genSafeIotString();
@@ -339,6 +340,7 @@ RC_GTEST_PROP(KvsPBT, IotCertificateContainsAllFields, ()) {
     auto role_alias = *genSafeIotString();
 
     AwsConfig aws_cfg;
+    aws_cfg.thing_name = thing_name;
     aws_cfg.credential_endpoint = endpoint;
     aws_cfg.cert_path = cert_path;
     aws_cfg.key_path = key_path;
@@ -351,6 +353,7 @@ RC_GTEST_PROP(KvsPBT, IotCertificateContainsAllFields, ()) {
     RC_ASSERT(result.substr(0, 16) == "iot-certificate,");
 
     // Must contain all field values
+    RC_ASSERT(result.find("iot-thing-name=" + thing_name) != std::string::npos);
     RC_ASSERT(result.find("endpoint=" + endpoint) != std::string::npos);
     RC_ASSERT(result.find("cert-path=" + cert_path) != std::string::npos);
     RC_ASSERT(result.find("key-path=" + key_path) != std::string::npos);

@@ -130,7 +130,7 @@ encoded-tee -> queue -> kvssink("kvs-sink")
 
 1. WHEN 创建 kvssink element 后，THE KvsSinkFactory SHALL 设置 `stream-name` 属性为配置中的 KVS 流名称
 2. WHEN 创建 kvssink element 后，THE KvsSinkFactory SHALL 设置 `aws-region` 属性为配置中的 AWS 区域
-3. WHEN 创建 kvssink element 后，THE KvsSinkFactory SHALL 构建 `iot-certificate` 属性字符串，格式为：`"iot-certificate,endpoint={credential_endpoint},cert-path={cert_path},key-path={key_path},ca-path={ca_path},role-aliases={role_alias}"`，其中各字段来自 config.toml 的 `[aws]` section
+3. WHEN 创建 kvssink element 后，THE KvsSinkFactory SHALL 构建 `iot-certificate` 属性字符串，格式为：`"iot-certificate,iot-thing-name={thing_name},endpoint={credential_endpoint},cert-path={cert_path},key-path={key_path},ca-path={ca_path},role-aliases={role_alias}"`，其中 `thing_name` 来自 config.toml 的 `[aws]` section，其余字段同样来自 `[aws]` section
 4. THE KvsSinkFactory SHALL 通过 spdlog 记录 stream-name 和 aws-region（不记录证书路径和凭证内容）
 5. IF 当前 sink 为 fakesink stub（macOS 或 Linux 回退场景），THEN THE KvsSinkFactory SHALL 跳过 `iot-certificate` 属性设置（fakesink 不支持该属性）
 6. WHEN 创建 kvssink element 后，THE KvsSinkFactory SHALL 设置 `restart-on-error` 属性为 false，禁用 kvssink 内置重试机制，由 PipelineHealthMonitor（spec-5）统一管理运行时错误恢复

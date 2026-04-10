@@ -41,6 +41,7 @@ bool build_kvs_config(
 
 std::string build_iot_certificate_string(const AwsConfig& aws_config) {
     return "iot-certificate,"
+           "iot-thing-name=" + aws_config.thing_name + ","
            "endpoint=" + aws_config.credential_endpoint + ","
            "cert-path=" + aws_config.cert_path + ","
            "key-path=" + aws_config.key_path + ","
