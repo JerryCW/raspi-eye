@@ -36,6 +36,14 @@ FetchContent_Declare(rapidcheck
 set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(rapidcheck)
 
+# nlohmann/json（FetchContent，header-only）
+FetchContent_Declare(json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+FetchContent_MakeAvailable(json)
+
+# libcurl（系统包）
+find_package(CURL REQUIRED)
+
 # 日志模块库
 add_library(log_module STATIC src/json_formatter.cpp src/log_init.cpp)
 target_include_directories(log_module PUBLIC src)
@@ -73,6 +81,25 @@ add_test(NAME camera_test COMMAND camera_test)
 add_executable(health_test tests/health_test.cpp)
 target_link_libraries(health_test PRIVATE pipeline_manager GTest::gtest rapidcheck rapidcheck_gtest)
 add_test(NAME health_test COMMAND health_test)
+
+# 凭证模块库
+add_library(credential_module STATIC src/credential_provider.cpp)
+target_include_directories(credential_module PUBLIC src)
+target_link_libraries(credential_module PUBLIC
+    nlohmann_json::nlohmann_json
+    CURL::libcurl
+    spdlog::spdlog
+    log_module)
+
+# 凭证测试
+add_executable(credential_test tests/credential_test.cpp)
+target_link_libraries(credential_test PRIVATE
+    credential_module
+    GTest::gtest_main
+    rapidcheck
+    rapidcheck_gtest)
+add_test(NAME credential_test COMMAND credential_test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 # YOLO detector module (optional, requires ONNX Runtime)
 option(ENABLE_YOLO "Build YOLO detector module (requires ONNX Runtime)" ON)

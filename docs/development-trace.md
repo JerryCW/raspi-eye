@@ -1445,3 +1445,165 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** scripts/provision-device.sh, device/config/config.toml.example, .kiro/steering/tech.md, docs/spec-backlog.md
 
 ---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 1.1 CMake 配置与依赖引入
+
+**完成概要：** 修改 CMakeLists.txt，在 RapidCheck 之后添加 nlohmann/json v3.11.3（FetchContent URL）和 find_package(CURL REQUIRED)，新增 credential_module 静态库和 credential_test 测试目标。创建占位文件 credential_provider.cpp 和 credential_test.cpp。
+
+**测试状态：** 全部通过（7/7 套件含新增 credential_test 占位）— 新增 1 个占位测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/src/credential_provider.cpp（占位）, device/tests/credential_test.cpp（占位）
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 2.1 创建 credential_provider.h
+
+**完成概要：** 创建 credential_provider.h，包含全部数据结构（AwsConfig、StsCredential、TlsConfig、HttpResponse）、函数声明、HttpClient 接口、CurlHttpClient 类、CredentialProvider 类，完全按照设计文档。
+
+**测试状态：** 未运行（轻量模式，纯头文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/credential_provider.h
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 3.1 TOML 解析器与证书预检查
+
+**完成概要：** 替换 credential_provider.cpp 占位文件，实现 trim、parse_toml_section、build_aws_config、file_exists、is_pem_format、check_key_permissions、validate_cert_files 共 7 个函数。
+
+**测试状态：** 未运行（后续任务还要追加代码，测试在任务 5 统一实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/credential_provider.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 3.2 JSON 解析与 ISO 8601 解析
+
+**完成概要：** 在 credential_provider.cpp 末尾追加 parse_iso8601 和 parse_credential_json 两个函数，按设计文档参考代码实现。
+
+**测试状态：** 未运行（后续任务还要追加代码）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/credential_provider.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 3.3 CurlHttpClient 实现
+
+**完成概要：** 在 credential_provider.cpp 末尾追加 CurlHttpClient 的 5 个方法（ensure_curl_global_init、write_callback、构造、析构、get），按设计文档参考代码实现。
+
+**测试状态：** 未运行（后续任务还要追加代码）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/credential_provider.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 3.4 CredentialProvider 核心实现
+
+**完成概要：** 在 credential_provider.cpp 末尾追加 CredentialProvider 的 8 个方法（构造、析构、create 工厂、fetch_credentials、get_credentials、is_expired、set_credential_callback、refresh_loop），credential_provider.cpp 完整实现完毕。
+
+**测试状态：** 未运行（测试在任务 5 统一实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/credential_provider.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 4. 检查点 — 编译通过
+
+**完成概要：** cmake 配置 + 编译 + ctest 全部通过，7/7 套件（含 credential_test 占位），ASan 无报告。
+
+**测试状态：** 全部通过（7/7 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 5.1-5.10 测试实现（一次性完成）
+
+**完成概要：** 替换 credential_test.cpp 占位文件为完整测试实现，包含 MockHttpClient + TestEnv 辅助设施、7 个 example-based 测试（CreateSuccess、CreateFailsOnHttpError、CreateFailsOnMissingConfig、CreateFailsOnInvalidJson、DestructorGracefulShutdown、NoCopyable、FetchRealCredentials）、9 个 PBT 属性测试（TomlRoundTrip、TomlCommentsAndBlankLines、TomlMissingFieldsDetected、HttpRequestParams、NonOkStatusReturnsError、JsonCredentialRoundTrip、JsonMissingFieldsDetected、CacheDoesNotTriggerNetwork、ExpirationCheck）。
+
+**测试状态：** 全部通过（7/7 套件）— 新增 16 个测试（7 example-based + 9 PBT，替换 1 个占位）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/credential_test.cpp
+
+---
+
+### 2026-04-10 — Spec: spec-7-credential-provider / 任务: 6. 最终检查点 — 全量验证
+
+**完成概要：** 干净 build 全量验证通过，CMake 配置成功、编译零错误、7/7 套件全部通过（smoke_test + log_test + tee_test + camera_test + health_test + credential_test + yolo_test）、ASan 无报告。
+
+**测试状态：** 全部通过（7/7 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
