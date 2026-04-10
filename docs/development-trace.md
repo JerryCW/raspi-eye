@@ -1205,3 +1205,43 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯 Pi 5 验证）
 
 ---
+
+### 2026-04-10 — Spec: spec-9.5-onnx-arm-optimization / Pi 5 修正后 A/B 基准测试（inter-op=0 fix）
+
+**完成概要：** 修复 SetInterOpNumThreads(1) 导致的 30% 性能退化（改为默认 0 不调用），重新采集 A/B 基准数据。XNNPACK EP 432ms，从 Spec 9 基线 662ms 加速 1.53x。
+
+**修正后 A/B 基准测试数据（Pi 5, Release, yolo11s, 10 runs, inter-op=0）：**
+
+| 配置 | EP | intra-op | inter-op | 图优化 | 推理 avg (ms) | 推理 min (ms) | CPU 温度 | vs 基线 662ms |
+|------|-----|---------|---------|--------|-------------|-------------|---------|--------------|
+| baseline-cpu-2t-all | CPU | 2 | 0 | ALL | 517.2 | 489.4 | 62→66°C | 1.28x |
+| cpu-1t-all | CPU | 1 | 0 | ALL | 951.9 | 948.2 | 66→63°C | 0.70x |
+| cpu-3t-all | CPU | 3 | 0 | ALL | 490.3 | 456.2 | 63→71°C | 1.35x |
+| cpu-4t-all | CPU | 4 | 0 | ALL | 636.3 | 579.5 | 71→73°C | 1.04x |
+| cpu-4t-inter2-all | CPU | 4 | 2 | ALL | 631.6 | 578.6 | 73→74°C | 1.05x |
+| xnnpack-2t-all | XNNPACK | 2 | 0 | ALL | 431.8 | 428.7 | 74→73°C | 1.53x |
+| cpu-2t-disable | CPU | 2 | 0 | DISABLE | 515.8 | 513.1 | 77→72°C | 1.28x |
+| cpu-2t-basic | CPU | 2 | 0 | BASIC | 515.6 | 512.2 | 72→71°C | 1.28x |
+| cpu-2t-extended | CPU | 2 | 0 | EXTENDED | 486.8 | 483.7 | 72→71°C | 1.36x |
+
+**PerformanceBaseline（3 runs）：** yolo11s 492ms, yolo11n 183ms
+
+**关键发现：**
+1. XNNPACK EP 是最优配置：432ms（1.53x 加速），稳定（min=429, max=441）
+2. 源码编译 ORT 本身带来 ~1.28x 加速（662→517ms），XNNPACK 在此基础上再加 ~20%
+3. SetInterOpNumThreads(1) 是性能杀手：显式设为 1 比 ORT 默认行为慢 30%
+4. 推荐 Spec 10 配置：XNNPACK EP + 2 intra-op threads + inter-op=0（ORT 默认）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | SetInterOpNumThreads(1) 导致 30% 性能退化 | Spec 缺少信息 | 旧代码 484ms → 新代码 639ms，根因是显式设 inter-op=1 比 ORT 默认行为慢 | 默认值改为 0，inter_op_num_threads=0 时不调用 SetInterOpNumThreads | SHALL NOT 在不确定 ORT 默认行为时显式设置线程参数为非零值 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在不确定 ONNX Runtime 默认行为的情况下显式设置 SetInterOpNumThreads 为非零值——ORT 的默认 inter-op 线程策略比显式设为 1 快 30%
+
+**涉及文件：** device/src/yolo_detector.h, device/src/yolo_detector.cpp, device/tests/yolo_test.cpp
+
+---
