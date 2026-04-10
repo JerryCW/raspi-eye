@@ -1716,3 +1716,27 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-10 — Spec: spec-8-kvs-producer / Pi 5 端到端验证
+
+**完成概要：** Pi 5 上 gst-launch + kvssink 端到端验证通过，150 帧测试视频成功上传到 KVS（BUFFERING → RECEIVED → PERSISTED 完整 ACK 链）。排查过程中发现并修复 3 个问题。
+
+**测试状态：** Pi 5 端到端验证通过 — 无新增自动化测试（手动 gst-launch 验证）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | kvs_test MacOsCreatesFakesink 在 Pi 5 上崩溃：`GLib-ERROR: failed to allocate 53918607400 bytes` | Spec 缺少信息 | Pi 5 上有真实 kvssink 插件，测试用假凭证数据喂给真实 kvssink，SDK 内部解析假凭证时产生垃圾 size 值导致 g_malloc abort | 在涉及 create_kvs_sink 假凭证的 4 个测试中加 `kvssink_available()` 检测，有真实 kvssink 时 GTEST_SKIP | Design 层禁止项：SHALL NOT 在测试中用假凭证数据调用可能创建真实 kvssink 的函数 |
+| 2 | kvssink iot-certificate 模式 403 "Invalid thing name passed" | Spec 缺少信息 | kvssink 用 stream-name 作为 `x-amzn-iot-thingname` HTTP header，但 IoT Thing 名称和 KVS Stream 名称不同（RaspiEyeAlpha vs RaspiEyeAlphaStream），IoT Credentials Provider 返回 403 | iot-certificate 字符串中必须包含 `iot-thing-name=` 字段，SDK 内部用此值设置 thing name header | Design 层禁止项：SHALL NOT 省略 iot-certificate 字符串中的 iot-thing-name 字段 |
+| 3 | KVS SDK 链接自编译的 libcurl 导致 SSL connection timeout | Spec 缺少信息 | `ldd libgstkvssink.so` 显示链接 `open-source/local/lib/libcurl.so` 而非系统 libcurl，该 libcurl 的 TLS 后端不兼容导致 mTLS 握手卡住 | 删除 `open-source/` 目录重新编译 KVS SDK（`-DBUILD_DEPENDENCIES=OFF`），确保链接系统 libcurl | pi-setup.md 中强调必须用 `-DBUILD_DEPENDENCIES=OFF` 且确认 `ldd` 输出为系统 libcurl |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 省略 kvssink iot-certificate 属性字符串中的 `iot-thing-name` 字段 — AWS 官方文档未提及此字段，但 SDK 内部依赖它设置 `x-amzn-iot-thingname` HTTP header，缺失时 SDK 用 stream-name 替代导致 IoT Credentials Provider 返回 403
+- **Design 层：** SHALL NOT 编译 KVS Producer SDK 时使用 `-DBUILD_DEPENDENCIES=ON` 或保留 `open-source/` 目录中的自编译依赖 — 自编译的 libcurl TLS 后端可能与系统不兼容，导致 mTLS 握手超时
+- **Tasks 层：** SHALL NOT 在测试中用假凭证数据调用可能创建真实 kvssink 的函数（Pi 5 上有 kvssink 插件时，假凭证会导致 SDK 内部崩溃）— 应检测 kvssink 可用性并 GTEST_SKIP
+
+**涉及文件：** device/src/kvs_sink_factory.cpp, device/tests/kvs_test.cpp, device/plugins/.gitkeep, .gitignore, docs/pi-setup.md, .kiro/specs/spec-8-kvs-producer/requirements.md
+
+---
