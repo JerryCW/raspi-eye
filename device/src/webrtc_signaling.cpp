@@ -59,7 +59,7 @@ extern "C" {
 struct WebRtcSignaling::Impl {
     WebRtcConfig config;
     AwsConfig aws_config;
-    PCredentialProvider credential_provider = nullptr;
+    PAwsCredentialProvider credential_provider = nullptr;
     SIGNALING_CLIENT_HANDLE signaling_handle = INVALID_SIGNALING_CLIENT_HANDLE_VALUE;
     bool connected = false;
 
@@ -69,7 +69,7 @@ struct WebRtcSignaling::Impl {
     // SDK callback: signaling client state changed
     // Forwards to C++ side — no heavy work here.
     static STATUS on_signaling_state_changed(UINT64 custom_data,
-                                             SIGNALING_CLIENT_STATE_TYPE state) {
+                                             SIGNALING_CLIENT_STATE state) {
         auto* self = reinterpret_cast<Impl*>(custom_data);
         auto logger = spdlog::get("pipeline");
         if (state == SIGNALING_CLIENT_STATE_CONNECTED) {
