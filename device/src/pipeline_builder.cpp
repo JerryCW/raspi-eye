@@ -153,9 +153,19 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     GstElement* q_enc     = gst_element_factory_make("queue",         "q-enc");
     GstElement* encoder   = create_encoder(error_msg);
     GstElement* parser    = gst_element_factory_make("h264parse",     "parser");
+    if (parser) {
+        // Insert SPS/PPS before every IDR frame — required for WebRTC viewers
+        // that may join mid-stream and need codec config to decode.
+        g_object_set(G_OBJECT(parser), "config-interval", -1, nullptr);
+    }
+    // Force byte-stream output from parser so WebRTC appsink gets Annex B NALUs.
+    GstElement* bs_caps   = gst_element_factory_make("capsfilter",    "bs-caps");
     GstElement* enc_tee   = gst_element_factory_make("tee",           "encoded-tee");
 
     GstElement* q_kvs     = gst_element_factory_make("queue",         "q-kvs");
+    // kvssink needs AVC format, so add h264parse to convert byte-stream → avc
+    GstElement* kvs_parser= gst_element_factory_make("h264parse",     "kvs-parser");
+    GstElement* avc_caps  = gst_element_factory_make("capsfilter",    "avc-caps");
     GstElement* kvs_sink  = nullptr;
     if (kvs_config && aws_config) {
         kvs_sink = KvsSinkFactory::create_kvs_sink(*kvs_config, *aws_config, error_msg);
@@ -176,15 +186,15 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     GstElement* all[] = {
         src, convert, capsfilter, raw_tee,
         q_ai, ai_sink,
-        q_enc, encoder, parser, enc_tee,
-        q_kvs, kvs_sink,
+        q_enc, encoder, parser, bs_caps, enc_tee,
+        q_kvs, kvs_parser, avc_caps, kvs_sink,
         q_web, web_sink
     };
     const char* names[] = {
         "src", "videoconvert", "capsfilter", "raw-tee",
         "q-ai", "ai-sink",
-        "q-enc", "encoder", "h264parse", "encoded-tee",
-        "q-kvs", "kvs-sink",
+        "q-enc", "encoder", "h264parse", "bs-caps", "encoded-tee",
+        "q-kvs", "kvs-parser", "avc-caps", "kvs-sink",
         "q-web", "webrtc-sink"
     };
     static_assert(sizeof(all) / sizeof(all[0]) == sizeof(names) / sizeof(names[0]),
@@ -210,7 +220,21 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     GstCaps* caps = gst_caps_new_simple("video/x-raw",
         "format", G_TYPE_STRING, "I420", nullptr);
     g_object_set(G_OBJECT(capsfilter), "caps", caps, nullptr);
-    gst_caps_unref(caps);  // Must unref immediately after setting
+    gst_caps_unref(caps);
+
+    // 4b. Set byte-stream caps after h264parse (for WebRTC Annex B)
+    GstCaps* bs = gst_caps_new_simple("video/x-h264",
+        "stream-format", G_TYPE_STRING, "byte-stream",
+        "alignment", G_TYPE_STRING, "au", nullptr);
+    g_object_set(G_OBJECT(bs_caps), "caps", bs, nullptr);
+    gst_caps_unref(bs);
+
+    // 4c. Set AVC caps for kvssink branch
+    GstCaps* avc = gst_caps_new_simple("video/x-h264",
+        "stream-format", G_TYPE_STRING, "avc",
+        "alignment", G_TYPE_STRING, "au", nullptr);
+    g_object_set(G_OBJECT(avc_caps), "caps", avc, nullptr);
+    gst_caps_unref(avc);
 
     // 5. Configure queue parameters
     //    AI and WebRTC: leaky=downstream(2), max-size-buffers=1
@@ -236,8 +260,8 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     gst_bin_add_many(GST_BIN(pipeline),
         src, convert, capsfilter, raw_tee,
         q_ai, ai_sink,
-        q_enc, encoder, parser, enc_tee,
-        q_kvs, kvs_sink,
+        q_enc, encoder, parser, bs_caps, enc_tee,
+        q_kvs, kvs_parser, avc_caps, kvs_sink,
         q_web, web_sink,
         nullptr);
 
@@ -251,9 +275,9 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
         return nullptr;
     }
 
-    // 9. Link encoding chain: q-enc -> encoder -> parser -> enc-tee
-    if (!gst_element_link_many(q_enc, encoder, parser, enc_tee, nullptr)) {
-        if (error_msg) *error_msg = "Failed to link encoding chain (q-enc -> encoder -> parser -> enc-tee)";
+    // 9. Link encoding chain: q-enc -> encoder -> parser -> bs-caps -> enc-tee
+    if (!gst_element_link_many(q_enc, encoder, parser, bs_caps, enc_tee, nullptr)) {
+        if (error_msg) *error_msg = "Failed to link encoding chain";
         gst_object_unref(pipeline);
         return nullptr;
     }
@@ -273,8 +297,13 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
         gst_object_unref(pipeline);
         return nullptr;
     }
-    if (!gst_element_link(q_kvs, kvs_sink)) {
-        if (error_msg) *error_msg = "Failed to link q-kvs -> kvs-sink";
+    if (!gst_element_link(q_kvs, kvs_parser)) {
+        if (error_msg) *error_msg = "Failed to link q-kvs -> kvs-parser";
+        gst_object_unref(pipeline);
+        return nullptr;
+    }
+    if (!gst_element_link_many(kvs_parser, avc_caps, kvs_sink, nullptr)) {
+        if (error_msg) *error_msg = "Failed to link kvs-parser -> avc-caps -> kvs-sink";
         gst_object_unref(pipeline);
         return nullptr;
     }
@@ -285,7 +314,7 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     }
 
     auto pl = spdlog::get("pipeline");
-    if (pl) pl->info("Dual-tee pipeline built successfully (14 elements)");
+    if (pl) pl->info("Dual-tee pipeline built successfully (17 elements)");
 
     return pipeline;
 }

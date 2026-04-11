@@ -2222,3 +2222,29 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/webrtc_signaling.h, device/src/webrtc_signaling.cpp, device/src/webrtc_media.h, device/src/webrtc_media.cpp, device/src/app_context.cpp, device/tests/webrtc_media_test.cpp
 
 ---
+
+### 2026-04-11 — Pi 5 WebRTC 端到端调试：ICE 失败 + NALU 格式 + pipeline caps 冲突
+
+**完成概要：** Pi 5 上 WebRTC viewer 无法看到视频流，经 3 轮迭代定位并修复 3 个独立问题：(1) `payloadLen` 包含 null terminator 导致 ICE 协商失败；(2) ICE candidate 比 offer 先到被丢弃；(3) H.264 stream-format 为 AVC（length-prefixed）而非 Annex B（byte-stream），SDK `writeFrame` 报 `STATUS_RTP_INVALID_NALU (0x5c000003)`。最终修复后 WebRTC 端到端视频流正常。
+
+**测试状态：** Pi 5 编译通过 — 无新增测试（端到端手动验证）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | ICE 协商失败 `0x5a00000d`，所有 ICE candidate pair check 失败 | Spec 缺少信息 | `send_answer` 和 `send_ice_candidate` 中 `payloadLen = sdp_answer.size()` 可能包含 null terminator，导致 viewer 端解析 SDP/ICE 异常 | `payloadLen` 改用 `(UINT32) STRLEN(msg.payload)` + `msg.correlationId[0] = '\0'`，与参考实现一致 | SHALL NOT 在 KVS WebRTC SDK 的 `SignalingMessage.payloadLen` 中使用 `std::string::size()`，必须用 `STRLEN(msg.payload)` 确保不含 null terminator |
+| 2 | viewer 的 ICE candidate 在 SDP offer 之前到达，被 `on_viewer_ice_candidate` 丢弃（"ICE candidate for unknown peer"） | Spec 缺少信息 | AWS Console viewer 发送 ICE candidate 的时序可能早于 offer，设备端 PeerConnection 尚未创建时 candidate 被丢弃 | 在 `Impl` 中添加 `pending_candidates` 缓存（最多 50 条），`on_viewer_ice_candidate` 在 peer 不存在时缓存而非丢弃，`on_viewer_offer` 末尾 flush 缓存的 candidate | 后续 WebRTC 实现必须考虑 ICE candidate 先于 offer 到达的时序 |
+| 3 | ICE 连接成功（`ICE_AGENT_STATE_READY`）但 `writeFrame` 持续返回 `0x5c000003` | Spec 缺少信息 | `0x5c000003` = `STATUS_RTP_INVALID_NALU`（非 SRTP 错误）。`h264parse` 默认输出 AVC 格式（length-prefixed NALU），KVS WebRTC SDK 期望 Annex B 格式（`00 00 00 01` start codes） | 在 `h264parse` 后加 capsfilter 强制 `stream-format=byte-stream,alignment=au`；kvssink 分支单独加 `h264parse` + `stream-format=avc` capsfilter 做格式转换 | SHALL NOT 将 AVC 格式的 H.264 数据传给 KVS WebRTC SDK 的 `writeFrame`，必须确保 byte-stream（Annex B）格式 |
+| 4 | appsink 设置 `byte-stream` caps 后 pipeline 反复崩溃重建（`v4l2-source: Internal data stream error`） | Spec 缺少信息 | `enc_tee` 后两个分支 caps 冲突：appsink 要 byte-stream，kvssink 要 avc，tee 无法同时输出两种格式 | 改为两级架构：`h264parse → [byte-stream caps] → enc_tee`，WebRTC 分支直接用 byte-stream，kvssink 分支加 `h264parse → [avc caps]` 转换 | 当 tee 后多个分支需要不同 H.264 stream-format 时，必须在 tee 前统一为一种格式，各分支按需转换 |
+| 5 | 误判 `0x5c000003` 为 SRTP 错误，浪费一轮修复 | 模型能力边界 | 错误码 `0x5c000003` 在 `STATUS_RTP_BASE` 范围内（`STATUS_RTP_INVALID_NALU`），非 `STATUS_SRTP_BASE`（`0x5b000000`） | 查阅 SDK 头文件确认错误码定义 | 遇到未知 SDK 错误码时，必须先查头文件确认含义，不要凭经验猜测 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在 KVS WebRTC SDK 的 `SignalingMessage.payloadLen` 中使用 `std::string::size()`——必须用 `STRLEN(msg.payload)` 确保不含 null terminator，否则 ICE 协商失败
+- **Design 层：** SHALL NOT 将 AVC 格式（length-prefixed）的 H.264 数据传给 KVS WebRTC SDK 的 `writeFrame`——必须确保 Annex B（byte-stream）格式，否则报 `STATUS_RTP_INVALID_NALU (0x5c000003)`
+- **Design 层：** 当 GStreamer tee 后多个分支需要不同 H.264 stream-format 时，SHALL NOT 在 appsink 上单独设 caps 导致 tee caps 协商冲突——应在 tee 前统一格式，各分支按需转换
+
+**涉及文件：** device/src/webrtc_signaling.cpp, device/src/webrtc_media.cpp, device/src/pipeline_builder.cpp
+
+---

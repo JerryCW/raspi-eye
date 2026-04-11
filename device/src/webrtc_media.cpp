@@ -136,6 +136,11 @@ struct WebRtcMediaManager::Impl {
     // the SDK stores a raw UINT64 cast of the pointer.
     std::unordered_map<std::string, CallbackContext*> callback_contexts;
 
+    // Buffer ICE candidates that arrive before the SDP offer is processed.
+    // Key: peer_id, Value: list of raw candidate JSON strings.
+    static constexpr size_t kMaxPendingCandidates = 50;
+    std::unordered_map<std::string, std::vector<std::string>> pending_candidates;
+
     explicit Impl(WebRtcSignaling& sig) : signaling(sig) {}
 
     // SDK callback: local ICE candidate generated.
@@ -201,6 +206,9 @@ struct WebRtcMediaManager::Impl {
             logger->info("Removed peer {}, reason={}, remaining={}",
                          peer_id, reason, peers.size());
         }
+
+        // Also discard any buffered candidates for this peer.
+        pending_candidates.erase(peer_id);
     }
 
     ~Impl() {
@@ -218,6 +226,7 @@ struct WebRtcMediaManager::Impl {
             delete ctx;
         }
         callback_contexts.clear();
+        pending_candidates.clear();
         if (logger) logger->info("WebRtcMediaManager destroyed, all peers released");
     }
 };
@@ -341,8 +350,8 @@ bool WebRtcMediaManager::on_viewer_offer(
     MEMSET(&video_track, 0, SIZEOF(RtcMediaStreamTrack));
     video_track.kind = MEDIA_STREAM_TRACK_KIND_VIDEO;
     video_track.codec = RTC_CODEC_H264_PROFILE_42E01F_LEVEL_ASYMMETRY_ALLOWED_PACKETIZATION_MODE;
-    STRCPY(video_track.streamId, "raspiEyeVideo");
-    STRCPY(video_track.trackId, "videoTrack");
+    STRCPY(video_track.streamId, "myKvsVideoStream");
+    STRCPY(video_track.trackId, "myVideoTrack");
 
     RtcRtpTransceiverInit video_init;
     MEMSET(&video_init, 0, SIZEOF(RtcRtpTransceiverInit));
@@ -363,8 +372,8 @@ bool WebRtcMediaManager::on_viewer_offer(
     MEMSET(&audio_track, 0, SIZEOF(RtcMediaStreamTrack));
     audio_track.kind = MEDIA_STREAM_TRACK_KIND_AUDIO;
     audio_track.codec = RTC_CODEC_OPUS;
-    STRCPY(audio_track.streamId, "raspiEyeAudio");
-    STRCPY(audio_track.trackId, "audioTrack");
+    STRCPY(audio_track.streamId, "myKvsVideoStream");
+    STRCPY(audio_track.trackId, "myAudioTrack");
 
     RtcRtpTransceiverInit audio_init;
     MEMSET(&audio_init, 0, SIZEOF(RtcRtpTransceiverInit));
@@ -490,6 +499,34 @@ bool WebRtcMediaManager::on_viewer_offer(
 
     if (logger) logger->info("Created PeerConnection for peer {}, count={}",
                              peer_id, impl_->peers.size());
+
+    // 16. Flush any ICE candidates that arrived before the offer was processed.
+    auto pending_it = impl_->pending_candidates.find(peer_id);
+    if (pending_it != impl_->pending_candidates.end()) {
+        auto& pending = pending_it->second;
+        if (logger) logger->info("Flushing {} buffered ICE candidates for peer {}",
+                                 pending.size(), peer_id);
+        for (const auto& cand : pending) {
+            RtcIceCandidateInit cand_init;
+            MEMSET(&cand_init, 0, SIZEOF(RtcIceCandidateInit));
+            STATUS cand_ret = deserializeRtcIceCandidateInit(
+                const_cast<PCHAR>(cand.c_str()),
+                static_cast<UINT32>(cand.size()),
+                &cand_init);
+            if (STATUS_FAILED(cand_ret)) {
+                if (logger) logger->warn("Failed to deserialize buffered ICE candidate for peer {}, status: {}",
+                                         peer_id, status_to_hex(cand_ret));
+                continue;
+            }
+            cand_ret = addIceCandidate(peer_connection, cand_init.candidate);
+            if (STATUS_FAILED(cand_ret)) {
+                if (logger) logger->warn("Failed to add buffered ICE candidate for peer {}, status: {}",
+                                         peer_id, status_to_hex(cand_ret));
+            }
+        }
+        impl_->pending_candidates.erase(pending_it);
+    }
+
     return true;
 }
 
@@ -503,9 +540,17 @@ bool WebRtcMediaManager::on_viewer_ice_candidate(
 
     auto it = impl_->peers.find(peer_id);
     if (it == impl_->peers.end()) {
-        if (logger) logger->warn("ICE candidate for unknown peer: {}", peer_id);
-        if (error_msg) *error_msg = "Unknown peer_id";
-        return false;
+        // Peer not yet created (offer not processed yet) — buffer the candidate.
+        auto& pending = impl_->pending_candidates[peer_id];
+        if (pending.size() < Impl::kMaxPendingCandidates) {
+            pending.push_back(candidate);
+            if (logger) logger->info("Buffered early ICE candidate for peer: {} (buffered={})",
+                                     peer_id, pending.size());
+        } else {
+            if (logger) logger->warn("Pending ICE candidate buffer full for peer: {}, dropping",
+                                     peer_id);
+        }
+        return true;  // not an error — will be applied after offer
     }
 
     RtcIceCandidateInit candidate_init;
@@ -571,6 +616,10 @@ void WebRtcMediaManager::broadcast_frame(
         STATUS ret = writeFrame(info.video_transceiver, &frame);
         if (STATUS_SUCCEEDED(ret)) {
             info.consecutive_write_failures = 0;
+        } else if (ret == 0x5c000003) {
+            // STATUS_SRTP_NOT_READY_YET — DTLS handshake still in progress,
+            // skip silently without counting as failure.
+            continue;
         } else {
             info.consecutive_write_failures++;
             if (logger) logger->warn("writeFrame failed for peer {}, status: {}, failures: {}",

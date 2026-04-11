@@ -174,6 +174,9 @@ struct WebRtcSignaling::Impl {
         MEMSET(&client_info, 0, SIZEOF(SignalingClientInfo));
         client_info.version = SIGNALING_CLIENT_INFO_CURRENT_VERSION;
         client_info.loggingLevel = LOG_LEVEL_WARN;
+        client_info.cacheFilePath = NULL;  // Use default cache path
+        client_info.signalingClientCreationMaxRetryAttempts =
+            CREATE_SIGNALING_CLIENT_RETRY_ATTEMPTS_SENTINEL_VALUE;
         STRCPY(client_info.clientId, "raspi-eye-master");
 
         // Channel info
@@ -187,6 +190,10 @@ struct WebRtcSignaling::Impl {
         channel_info.channelType = SIGNALING_CHANNEL_TYPE_SINGLE_MASTER;
         channel_info.channelRoleType = SIGNALING_CHANNEL_ROLE_TYPE_MASTER;
         channel_info.cachingPolicy = SIGNALING_API_CALL_CACHE_TYPE_FILE;
+        channel_info.cachingPeriod = SIGNALING_API_CALL_CACHE_TTL_SENTINEL_VALUE;
+        channel_info.retry = TRUE;
+        channel_info.reconnect = TRUE;
+        channel_info.messageTtl = 0;
         channel_info.pRegion = const_cast<PCHAR>(config.aws_region.c_str());
         channel_info.pCertPath = const_cast<PCHAR>(aws_config.ca_path.c_str());
 
@@ -389,7 +396,8 @@ bool WebRtcSignaling::send_answer(const std::string& peer_id,
     msg.messageType = SIGNALING_MESSAGE_TYPE_ANSWER;
     STRNCPY(msg.peerClientId, peer_id.c_str(), MAX_SIGNALING_CLIENT_ID_LEN);
     STRNCPY(msg.payload, sdp_answer.c_str(), MAX_SIGNALING_MESSAGE_LEN);
-    msg.payloadLen = static_cast<UINT32>(sdp_answer.size());
+    msg.payloadLen = (UINT32) STRLEN(msg.payload);
+    msg.correlationId[0] = '\0';
 
     STATUS status = signalingClientSendMessageSync(impl_->signaling_handle, &msg);
     if (STATUS_FAILED(status)) {
@@ -423,7 +431,8 @@ bool WebRtcSignaling::send_ice_candidate(const std::string& peer_id,
     msg.messageType = SIGNALING_MESSAGE_TYPE_ICE_CANDIDATE;
     STRNCPY(msg.peerClientId, peer_id.c_str(), MAX_SIGNALING_CLIENT_ID_LEN);
     STRNCPY(msg.payload, candidate.c_str(), MAX_SIGNALING_MESSAGE_LEN);
-    msg.payloadLen = static_cast<UINT32>(candidate.size());
+    msg.payloadLen = (UINT32) STRLEN(msg.payload);
+    msg.correlationId[0] = '\0';
 
     STATUS status = signalingClientSendMessageSync(impl_->signaling_handle, &msg);
     if (STATUS_FAILED(status)) {
