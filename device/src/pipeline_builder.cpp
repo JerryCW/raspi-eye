@@ -3,6 +3,8 @@
 #include "pipeline_builder.h"
 #include "camera_source.h"
 #include "kvs_sink_factory.h"
+#include "webrtc_media.h"
+#include <gst/app/gstappsink.h>
 #include <spdlog/spdlog.h>
 #include <array>
 
@@ -99,6 +101,30 @@ bool link_tee_to_element(GstElement* tee, GstElement* element,
     return true;
 }
 
+// --- on_new_sample ---------------------------------------------------------
+// appsink callback: extract H.264 frame from GstBuffer and broadcast to
+// all connected PeerConnections via WebRtcMediaManager.
+
+static GstFlowReturn on_new_sample(GstElement* sink, gpointer user_data) {
+    auto* manager = static_cast<WebRtcMediaManager*>(user_data);
+    GstSample* sample = gst_app_sink_pull_sample(GST_APP_SINK(sink));
+    if (!sample) return GST_FLOW_ERROR;
+
+    GstBuffer* buffer = gst_sample_get_buffer(sample);
+    GstMapInfo map;
+    if (gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+        uint64_t pts = GST_BUFFER_PTS(buffer);
+        bool is_keyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
+        // Convert PTS: GStreamer ns -> KVS 100ns
+        uint64_t timestamp_100ns = pts / 100;
+        manager->broadcast_frame(map.data, map.size, timestamp_100ns, is_keyframe);
+        gst_buffer_unmap(buffer, &map);
+    }
+    // gst_buffer_map failure: skip this frame, unref sample, return OK
+    gst_sample_unref(sample);
+    return GST_FLOW_OK;
+}
+
 } // anonymous namespace
 
 // --- build_tee_pipeline ------------------------------------------------
@@ -106,7 +132,8 @@ bool link_tee_to_element(GstElement* tee, GstElement* element,
 GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
                                                 CameraSource::CameraConfig config,
                                                 const KvsSinkFactory::KvsConfig* kvs_config,
-                                                const AwsConfig* aws_config) {
+                                                const AwsConfig* aws_config,
+                                                WebRtcMediaManager* webrtc_media) {
     // 1. Pipeline container
     GstElement* pipeline = gst_pipeline_new("tee-pipeline");
     if (!pipeline) {
@@ -137,7 +164,12 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     }
 
     GstElement* q_web     = gst_element_factory_make("queue",         "q-web");
-    GstElement* web_sink  = gst_element_factory_make("fakesink",      "webrtc-sink");
+    GstElement* web_sink  = nullptr;
+    if (webrtc_media) {
+        web_sink = gst_element_factory_make("appsink", "webrtc-sink");
+    } else {
+        web_sink = gst_element_factory_make("fakesink", "webrtc-sink");
+    }
 
     // 3. Null-check: if any element failed, clean up and bail out.
     //    Elements are not yet in the bin, so each must be individually unref'd.
@@ -188,7 +220,17 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     g_object_set(G_OBJECT(q_enc), "max-size-buffers", 1, nullptr);
     g_object_set(G_OBJECT(q_kvs), "max-size-buffers", 1, nullptr);
 
-    // 6. fakesink names are already set via gst_element_factory_make above
+    // 6. Configure appsink when WebRtcMediaManager is provided
+    if (webrtc_media) {
+        g_object_set(G_OBJECT(web_sink),
+            "emit-signals", TRUE,
+            "drop", TRUE,
+            "max-buffers", 1,
+            "sync", FALSE,
+            nullptr);
+        g_signal_connect(web_sink, "new-sample",
+                         G_CALLBACK(on_new_sample), webrtc_media);
+    }
 
     // 7. Add all elements to the pipeline bin
     gst_bin_add_many(GST_BIN(pipeline),

@@ -1885,3 +1885,149 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 1.1 创建 device/src/webrtc_media.h
+
+**完成概要：** 创建 WebRtcMediaManager 头文件（pImpl 模式，前向声明 WebRtcSignaling，6 个公开方法，拷贝禁用，私有构造函数）。文件已存在且内容与 design.md 一致。
+
+**测试状态：** 未运行（轻量模式，纯头文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_media.h
+
+---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 1.2 创建 device/src/webrtc_media.cpp — stub 实现
+
+**完成概要：** 创建 webrtc_media.cpp stub 实现（#ifndef HAVE_KVS_WEBRTC_SDK 分支），包含 Impl 结构体（unordered_set + mutex）、create/on_viewer_offer/on_viewer_ice_candidate/remove_peer/broadcast_frame/peer_count 全部方法。
+
+**测试状态：** 未运行（测试覆盖将在任务 5 webrtc_media_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_media.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 1.3 创建 device/src/webrtc_media.cpp — 真实实现骨架
+
+**完成概要：** 在 webrtc_media.cpp 中追加 #ifdef HAVE_KVS_WEBRTC_SDK 真实实现分支，包含 PeerInfo/CallbackContext 结构体、完整 on_viewer_offer 13 步流程（含回滚）、broadcast_frame 零拷贝帧分发（含 writeFrame 失败自动清理）、ICE/状态回调、析构清理。
+
+**测试状态：** 未运行（真实实现分支在 macOS 上不编译，测试覆盖将在任务 5 中通过 stub 路径验证）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_media.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 2.1 修改 device/CMakeLists.txt
+
+**完成概要：** CMakeLists.txt 添加 gstreamer-app-1.0 依赖、webrtc_media_module 静态库、pipeline_manager 链接 GST_APP、webrtc_media_test 测试目标、SDK 条件编译定义。创建占位 webrtc_media_test.cpp。
+
+**测试状态：** 未运行（轻量模式，CMake 配置变更）— 新增 1 个占位测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/webrtc_media_test.cpp（占位）
+
+---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 3. 检查点 — 编译通过与现有测试回归
+
+**完成概要：** cmake configure + build + ctest 全部通过，webrtc_media_module 编译 stub 路径，10/10 测试通过（含新增 webrtc_media_test 占位），ASan 无报告，总耗时 30.88s。
+
+**测试状态：** 全部通过（10/10）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 4.1 + 4.2 pipeline_builder 修改（appsink 集成）
+
+**完成概要：** pipeline_builder.h 添加 WebRtcMediaManager 前向声明和新参数，pipeline_builder.cpp 添加 on_new_sample 回调和 appsink 条件创建逻辑（webrtc_media 非空时 appsink，否则 fakesink），编译通过，全部测试通过。
+
+**测试状态：** 全部通过（10/10）— 无新增测试（测试覆盖将在任务 5 中实现）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/pipeline_builder.h, device/src/pipeline_builder.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 5.1 + 5.2 webrtc_media_test.cpp（6 example-based + 1 PBT）
+
+**完成概要：** 修复 PipelineSmokeWithAppsink 死锁问题（new-sample 回调已消费 buffer 导致 try_pull_sample 永远阻塞），改为验证管道状态。全部 7 个测试通过（6 example + 1 PBT），webrtc_media_test 0.17s，全量 10/10 通过 21.58s。
+
+**测试状态：** 全部通过（10/10 套件，webrtc_media_test 7 个测试）— 新增 7 个测试（6 example-based + 1 PBT）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | PipelineSmokeWithAppsink 死锁：gst_app_sink_try_pull_sample 永远拿不到 sample，测试超时 30s | Spec 缺少信息 | `webrtc_media_test ***Timeout 30.06 sec`，卡在 PipelineSmokeWithAppsink 的 try_pull_sample 循环。原因：appsink 的 new-sample 信号回调（on_new_sample）已经消费了 buffer，try_pull_sample 再拉就拿不到了 | 改为验证管道到达 PAUSED/PLAYING 状态（gst_element_get_state 3s 超时），不再尝试 pull sample | Design 文档中应注明：appsink 配置了 emit-signals=TRUE 时，new-sample 回调会消费 buffer，测试中不能再用 try_pull_sample 拉取 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Tasks 层：** SHALL NOT 在 appsink 配置了 emit-signals=TRUE 且注册了 new-sample 回调的情况下使用 gst_app_sink_try_pull_sample / gst_app_sink_pull_sample 拉取 buffer——回调已消费 buffer，pull 会永远阻塞
+
+**涉及文件：** device/tests/webrtc_media_test.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13-webrtc-media / 任务: 6. 最终检查点 — 全量验证
+
+**完成概要：** 全量验证通过，10/10 测试通过（smoke 0.20s + log 0.09s + tee 0.16s + camera 0.16s + health 7.46s + credential 5.23s + kvs 0.31s + yolo 6.97s + webrtc 0.82s + webrtc_media 0.17s = 21.58s），ASan 无报告。
+
+**测试状态：** 全部通过（10/10）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

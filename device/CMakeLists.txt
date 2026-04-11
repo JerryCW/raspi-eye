@@ -14,6 +14,7 @@ endif()
 # GStreamer（pkg-config）
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED gstreamer-1.0)
+pkg_check_modules(GST_APP REQUIRED gstreamer-app-1.0)
 
 # Google Test（FetchContent）
 include(FetchContent)
@@ -55,6 +56,11 @@ target_include_directories(pipeline_manager PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_LIBRARY_DIRS})
 target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module)
 target_compile_options(pipeline_manager PUBLIC ${GST_CFLAGS_OTHER})
+
+# GST_APP include/link for pipeline_manager (appsink support)
+target_include_directories(pipeline_manager PUBLIC ${GST_APP_INCLUDE_DIRS})
+target_link_directories(pipeline_manager PUBLIC ${GST_APP_LIBRARY_DIRS})
+target_link_libraries(pipeline_manager PUBLIC ${GST_APP_LIBRARIES})
 
 # 可执行文件
 add_executable(raspi-eye src/main.cpp)
@@ -161,6 +167,14 @@ add_library(webrtc_module STATIC src/webrtc_signaling.cpp)
 target_include_directories(webrtc_module PUBLIC src)
 target_link_libraries(webrtc_module PUBLIC spdlog::spdlog credential_module)
 
+# WebRTC media module
+add_library(webrtc_media_module STATIC src/webrtc_media.cpp)
+target_include_directories(webrtc_media_module PUBLIC src)
+target_link_libraries(webrtc_media_module PUBLIC spdlog::spdlog webrtc_module)
+
+# Link webrtc_media_module to pipeline_manager
+target_link_libraries(pipeline_manager PUBLIC webrtc_media_module)
+
 # Linux: find KVS WebRTC C SDK
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # User can specify SDK path via -DKVS_WEBRTC_SDK_DIR=/path/to/sdk
@@ -183,6 +197,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_compile_definitions(webrtc_module PRIVATE HAVE_KVS_WEBRTC_SDK=1)
         target_include_directories(webrtc_module PRIVATE ${KVS_WEBRTC_INCLUDE_DIR})
         target_link_libraries(webrtc_module PRIVATE ${KVS_WEBRTC_SIGNALING_LIB})
+        target_compile_definitions(webrtc_media_module PRIVATE HAVE_KVS_WEBRTC_SDK=1)
+        target_include_directories(webrtc_media_module PRIVATE ${KVS_WEBRTC_INCLUDE_DIR})
+        target_link_libraries(webrtc_media_module PRIVATE ${KVS_WEBRTC_SIGNALING_LIB})
         message(STATUS "WebRTC module: ENABLED (KVS WebRTC C SDK found)")
     else()
         message(WARNING "KVS WebRTC C SDK not found, using stub on Linux")
@@ -199,4 +216,15 @@ target_link_libraries(webrtc_test PRIVATE
     rapidcheck
     rapidcheck_gtest)
 add_test(NAME webrtc_test COMMAND webrtc_test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# WebRTC media test
+add_executable(webrtc_media_test tests/webrtc_media_test.cpp)
+target_link_libraries(webrtc_media_test PRIVATE
+    webrtc_media_module
+    pipeline_manager
+    GTest::gtest
+    rapidcheck
+    rapidcheck_gtest)
+add_test(NAME webrtc_media_test COMMAND webrtc_media_test
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
