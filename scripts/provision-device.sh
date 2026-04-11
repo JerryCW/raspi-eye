@@ -17,6 +17,7 @@ POLICY_NAME=""
 ROLE_NAME=""
 ROLE_ALIAS=""
 KVS_STREAM_NAME=""
+SIGNALING_CHANNEL_NAME=""
 MODE="provision"  # provision | verify | cleanup
 
 # Runtime variables (dynamically resolved)
@@ -123,6 +124,7 @@ print_usage() {
     printf "  --role-alias NAME        Role Alias name (default: {project-name}RoleAlias)\n"
     printf "  --region REGION          AWS Region (default: from aws configure)\n"
     printf "  --kvs-stream-name NAME   KVS Stream name (default: {thing-name}Stream)\n"
+    printf "  --signaling-channel-name NAME   Signaling channel name (default: {thing-name}Channel)\n"
     printf "  --verify                 Verify mode: check existing resources\n"
     printf "  --cleanup                Cleanup mode: delete all resources\n"
     printf "  --help                   Show this help message\n"
@@ -172,6 +174,10 @@ parse_args() {
                 KVS_STREAM_NAME="$2"
                 shift 2
                 ;;
+            --signaling-channel-name)
+                SIGNALING_CHANNEL_NAME="$2"
+                shift 2
+                ;;
             --verify)
                 MODE="verify"
                 shift
@@ -204,6 +210,7 @@ parse_args() {
     ROLE_NAME="${ROLE_NAME:-${PROJECT_NAME}IotRole}"
     ROLE_ALIAS="${ROLE_ALIAS:-${PROJECT_NAME}RoleAlias}"
     KVS_STREAM_NAME="${KVS_STREAM_NAME:-${THING_NAME}Stream}"
+    SIGNALING_CHANNEL_NAME="${SIGNALING_CHANNEL_NAME:-${THING_NAME}Channel}"
 
     log_info "Thing: ${THING_NAME}, Mode: ${MODE}"
     log_info "Policy: ${POLICY_NAME}, Role: ${ROLE_NAME}, Alias: ${ROLE_ALIAS}"
@@ -429,6 +436,38 @@ attach_kvs_iam_policy() {
     log_success "Attached KVS IAM policy '${policy_name}'"
 }
 
+create_signaling_channel() {
+    local channel_name="${SIGNALING_CHANNEL_NAME}"
+    log_info "Checking signaling channel '${channel_name}'..."
+    if aws kinesisvideo describe-signaling-channel --channel-name "$channel_name" &>/dev/null; then
+        log_info "Signaling channel '${channel_name}' already exists, skipping"
+        return 0
+    fi
+    log_info "Creating signaling channel '${channel_name}'..."
+    aws kinesisvideo create-signaling-channel \
+        --channel-name "$channel_name" \
+        --channel-type SINGLE_MASTER
+    log_success "Created signaling channel '${channel_name}'"
+}
+
+attach_webrtc_iam_policy() {
+    local policy_name="${PROJECT_NAME}WebRtcPolicy"
+    log_info "Checking IAM inline policy '${policy_name}' on role '${ROLE_NAME}'..."
+    if aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$policy_name" &>/dev/null; then
+        log_info "WebRTC IAM policy already attached, skipping"
+        return 0
+    fi
+    local channel_arn="arn:aws:kinesisvideo:${AWS_REGION}:${AWS_ACCOUNT_ID}:channel/${SIGNALING_CHANNEL_NAME}/*"
+    local policy_doc
+    policy_doc=$(printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["kinesisvideo:DescribeSignalingChannel","kinesisvideo:GetSignalingChannelEndpoint","kinesisvideo:GetIceServerConfig","kinesisvideo:ConnectAsMaster"],"Resource":"%s"}]}' "$channel_arn")
+    log_info "Attaching WebRTC IAM policy to role '${ROLE_NAME}'..."
+    aws iam put-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-name "$policy_name" \
+        --policy-document "$policy_doc"
+    log_success "Attached WebRTC IAM policy '${policy_name}'"
+}
+
 get_credential_endpoint() {
     log_info "Retrieving IoT Credential Provider endpoint..."
     CREDENTIAL_ENDPOINT=$(aws iot describe-endpoint \
@@ -487,6 +526,21 @@ generate_toml_config() {
     fi
     printf '\n%s\n' "$kvs_section" >> "$config_file"
 
+    # [webrtc] section
+    local webrtc_section=""
+    webrtc_section+="[webrtc]"
+    webrtc_section+=$'\n'
+    webrtc_section+="channel_name = \"${SIGNALING_CHANNEL_NAME}\""
+    webrtc_section+=$'\n'
+    webrtc_section+="aws_region = \"${AWS_REGION}\""
+
+    if [[ -f "$config_file" ]]; then
+        local tmp_webrtc="${config_file}.tmp"
+        awk '/^\[webrtc\]/{skip=1; next} /^\[/{skip=0} !skip' "$config_file" > "$tmp_webrtc"
+        mv "$tmp_webrtc" "$config_file"
+    fi
+    printf '\n%s\n' "$webrtc_section" >> "$config_file"
+
     log_success "TOML config written to ${config_file}"
 }
 
@@ -507,6 +561,7 @@ print_summary() {
     log_info "Key file:            ${OUTPUT_DIR}/device-private.key"
     log_info "CA file:             ${OUTPUT_DIR}/root-ca.pem"
     log_info "KVS Stream:          ${KVS_STREAM_NAME}"
+    log_info "Signaling Channel:   ${SIGNALING_CHANNEL_NAME}"
     log_info "Config file:         device/config/config.toml"
     log_info "======================================="
     log_success "Provisioning complete!"
@@ -524,6 +579,8 @@ do_provision() {
     create_role_alias
     create_kvs_stream
     attach_kvs_iam_policy
+    create_signaling_channel
+    attach_webrtc_iam_policy
     get_credential_endpoint
     generate_toml_config
     print_summary
@@ -607,6 +664,22 @@ verify_resources() {
         failures=$((failures + 1))
     fi
 
+    # Signaling channel
+    if aws kinesisvideo describe-signaling-channel --channel-name "$SIGNALING_CHANNEL_NAME" &>/dev/null; then
+        log_success "Signaling channel '${SIGNALING_CHANNEL_NAME}' exists"
+    else
+        log_error "[FAIL] Signaling channel '${SIGNALING_CHANNEL_NAME}' not found"
+        failures=$((failures + 1))
+    fi
+
+    # WebRTC IAM inline policy
+    if aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "${PROJECT_NAME}WebRtcPolicy" &>/dev/null; then
+        log_success "WebRTC IAM policy '${PROJECT_NAME}WebRtcPolicy' exists"
+    else
+        log_error "[FAIL] WebRTC IAM policy '${PROJECT_NAME}WebRtcPolicy' not found"
+        failures=$((failures + 1))
+    fi
+
     # 8. TOML config file
     local config_file="device/config/config.toml"
     if [[ -f "$config_file" ]]; then
@@ -663,6 +736,27 @@ cleanup_resources() {
             || { log_warn "Failed to delete KVS Stream"; errors=$((errors + 1)); }
     else
         log_warn "KVS Stream '${KVS_STREAM_NAME}' not found, skipping"
+    fi
+
+    # Step 0c: Delete WebRTC IAM inline policy
+    log_info "Deleting WebRTC IAM inline policy '${PROJECT_NAME}WebRtcPolicy'..."
+    aws iam delete-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-name "${PROJECT_NAME}WebRtcPolicy" 2>/dev/null \
+        || { log_warn "Failed to delete WebRTC IAM inline policy"; errors=$((errors + 1)); }
+
+    # Step 0d: Delete signaling channel
+    log_info "Deleting signaling channel '${SIGNALING_CHANNEL_NAME}'..."
+    local channel_arn=""
+    channel_arn=$(aws kinesisvideo describe-signaling-channel \
+        --channel-name "$SIGNALING_CHANNEL_NAME" \
+        --query 'ChannelInfo.ChannelARN' \
+        --output text 2>/dev/null || echo "")
+    if [[ -n "$channel_arn" ]] && [[ "$channel_arn" != "None" ]]; then
+        aws kinesisvideo delete-signaling-channel --channel-arn "$channel_arn" 2>/dev/null \
+            || { log_warn "Failed to delete signaling channel"; errors=$((errors + 1)); }
+    else
+        log_warn "Signaling channel '${SIGNALING_CHANNEL_NAME}' not found, skipping"
     fi
 
     # Step 1: Detach certificate from Thing

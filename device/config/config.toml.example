@@ -17,3 +17,10 @@ ca_path = "device/certs/root-ca.pem"
 [kvs]
 stream_name = "<your-kvs-stream-name>"
 aws_region = "<your-aws-region>"
+
+# KVS WebRTC signaling channel configuration
+# channel_name: signaling channel name (must be pre-created via provision script or AWS CLI)
+# aws_region: AWS region where the signaling channel is located
+[webrtc]
+channel_name = "<your-signaling-channel-name>"
+aws_region = "<your-aws-region>"

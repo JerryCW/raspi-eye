@@ -155,3 +155,48 @@ if(ENABLE_YOLO)
 else()
     message(STATUS "YOLO module: DISABLED (ENABLE_YOLO=OFF)")
 endif()
+
+# WebRTC signaling module
+add_library(webrtc_module STATIC src/webrtc_signaling.cpp)
+target_include_directories(webrtc_module PUBLIC src)
+target_link_libraries(webrtc_module PUBLIC spdlog::spdlog credential_module)
+
+# Linux: find KVS WebRTC C SDK
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # User can specify SDK path via -DKVS_WEBRTC_SDK_DIR=/path/to/sdk
+    set(KVS_WEBRTC_SEARCH_PATHS /usr/local/lib /opt/kvs-webrtc/lib)
+    set(KVS_WEBRTC_INCLUDE_SEARCH_PATHS /usr/local/include /opt/kvs-webrtc/include)
+    if(KVS_WEBRTC_SDK_DIR)
+        list(INSERT KVS_WEBRTC_SEARCH_PATHS 0 "${KVS_WEBRTC_SDK_DIR}/lib")
+        list(INSERT KVS_WEBRTC_INCLUDE_SEARCH_PATHS 0 "${KVS_WEBRTC_SDK_DIR}/include")
+    endif()
+
+    find_library(KVS_WEBRTC_SIGNALING_LIB kvsWebrtcSignalingClient
+        PATHS ${KVS_WEBRTC_SEARCH_PATHS}
+        NO_DEFAULT_PATH)
+    find_path(KVS_WEBRTC_INCLUDE_DIR
+        com/amazonaws/kinesis/video/webrtcclient/Include.h
+        PATHS ${KVS_WEBRTC_INCLUDE_SEARCH_PATHS}
+        NO_DEFAULT_PATH)
+
+    if(KVS_WEBRTC_SIGNALING_LIB AND KVS_WEBRTC_INCLUDE_DIR)
+        target_compile_definitions(webrtc_module PRIVATE HAVE_KVS_WEBRTC_SDK=1)
+        target_include_directories(webrtc_module PRIVATE ${KVS_WEBRTC_INCLUDE_DIR})
+        target_link_libraries(webrtc_module PRIVATE ${KVS_WEBRTC_SIGNALING_LIB})
+        message(STATUS "WebRTC module: ENABLED (KVS WebRTC C SDK found)")
+    else()
+        message(WARNING "KVS WebRTC C SDK not found, using stub on Linux")
+    endif()
+else()
+    message(STATUS "WebRTC module: using stub (non-Linux platform)")
+endif()
+
+# WebRTC test
+add_executable(webrtc_test tests/webrtc_test.cpp)
+target_link_libraries(webrtc_test PRIVATE
+    webrtc_module
+    GTest::gtest_main
+    rapidcheck
+    rapidcheck_gtest)
+add_test(NAME webrtc_test COMMAND webrtc_test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")

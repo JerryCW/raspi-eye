@@ -1740,3 +1740,148 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/kvs_sink_factory.cpp, device/tests/kvs_test.cpp, device/plugins/.gitkeep, .gitignore, docs/pi-setup.md, .kiro/specs/spec-8-kvs-producer/requirements.md
 
 ---
+
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 1.1 创建 device/src/webrtc_signaling.h
+
+**完成概要：** webrtc_signaling.h 已在之前的迭代中创建完成，包含 WebRtcConfig POD、build_webrtc_config 声明、WebRtcSignaling 类（pImpl + 回调 + 消息发送），内容与 design.md 一致。
+
+**测试状态：** 未运行（轻量模式，纯头文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。文件已存在且内容正确，直接标记完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_signaling.h
+
+---
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 1.2 创建 device/src/webrtc_signaling.cpp
+
+**完成概要：** 创建 webrtc_signaling.cpp，包含 build_webrtc_config（member pointer 遍历模式）、`#ifdef HAVE_KVS_WEBRTC_SDK` 条件编译（SDK 真实实现 + stub 实现）、RAII 析构、消息长度检查、回调转发。
+
+**测试状态：** 未运行（轻量模式，CMakeLists.txt 尚未更新，测试覆盖将在任务 3.2 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。文件已在之前迭代中创建，内容与 design.md 一致。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_signaling.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 1.3 修改 device/CMakeLists.txt
+
+**完成概要：** 在 CMakeLists.txt 末尾添加 webrtc_module 静态库、Linux SDK 查找逻辑（HAVE_KVS_WEBRTC_SDK 条件编译）、webrtc_test 测试目标，创建占位 webrtc_test.cpp。子代理已验证编译和 9/9 测试通过。
+
+**测试状态：** 全部通过（9/9，含新增 webrtc_test placeholder）— 新增 1 个占位测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。文件已在之前迭代中修改完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/webrtc_test.cpp（占位）
+
+---
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 2. 检查点 — 编译通过与现有测试回归
+
+**完成概要：** cmake 配置 + 编译 + ctest 全部通过，9/9 测试通过（含新增 webrtc_test placeholder），ASan 无报告。
+
+**测试状态：** 全部通过（9/9）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 3. 配置文件更新与测试（3.1 + 3.2 + 3.3 + 3.4）
+
+**完成概要：** 更新 config.toml.example 添加 [webrtc] section；创建完整 webrtc_test.cpp 包含 6 个 example-based 测试（MissingSectionReturnsError、StubCreateAndConnect、StubDisconnect、SendFailsWhenNotConnected、StubReconnect、SendSucceedsWhenConnected）+ 2 个 PBT 属性（RoundTrip、MissingFieldsDetected）。子代理已验证编译和 9/9 测试通过（webrtc_test 2.35s），ASan 无报告。
+
+**测试状态：** 全部通过（9/9）— 新增 8 个测试（6 example-based + 2 PBT，替换 placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/config/config.toml.example, device/tests/webrtc_test.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 4. 检查点 — 测试全部通过
+
+**完成概要：** cmake 配置 + 编译 + ctest 全部通过，9/9 测试通过（含 webrtc_test 8 个用例：6 example-based + 2 PBT），ASan 无报告，现有测试零回归。
+
+**测试状态：** 全部通过（9/9）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 5.1 修改 scripts/provision-device.sh
+
+**完成概要：** 扩展 provision-device.sh，新增 `--signaling-channel-name` 参数、`create_signaling_channel()` 和 `attach_webrtc_iam_policy()` 函数、`generate_toml_config()` 追加 [webrtc] section、verify/cleanup/summary 扩展。`bash -n` 语法检查通过。
+
+**测试状态：** 未运行（轻量模式，Bash 脚本变更，需要真实 AWS 环境手动验证）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/provision-device.sh
+
+---
+
+### 2026-04-11 — Spec: spec-12-webrtc-signaling / 任务: 6. 最终检查点 — 全量验证
+
+**完成概要：** 最终全量验证通过。cmake 配置 + 编译 + 9/9 ctest 全部通过（含 webrtc_test 8 个用例），ASan 无报告，`bash -n` 脚本语法正确，现有测试零回归。
+
+**测试状态：** 全部通过（9/9）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
