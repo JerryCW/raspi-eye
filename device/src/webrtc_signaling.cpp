@@ -128,6 +128,16 @@ struct WebRtcSignaling::Impl {
     }
 
     bool init_credential_provider(std::string* error_msg) {
+        // Initialize KVS WebRTC SDK before any SDK calls
+        STATUS init_status = initKvsWebRtc();
+        if (STATUS_FAILED(init_status)) {
+            if (error_msg) {
+                *error_msg = "Failed to initialize KVS WebRTC SDK, status: 0x"
+                    + to_hex(init_status);
+            }
+            return false;
+        }
+
         STATUS status = createLwsIotCredentialProvider(
             const_cast<PCHAR>(aws_config.credential_endpoint.c_str()),
             const_cast<PCHAR>(aws_config.cert_path.c_str()),
@@ -255,6 +265,7 @@ struct WebRtcSignaling::Impl {
             freeIotCredentialProvider(&credential_provider);
             credential_provider = nullptr;
         }
+        deinitKvsWebRtc();
     }
 
     static std::string to_hex(STATUS status) {

@@ -232,16 +232,7 @@ static std::string status_to_hex(STATUS status) {
 
 std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
     WebRtcSignaling& signaling, const std::string& aws_region,
-    std::string* error_msg) {
-    // Initialize KVS WebRTC SDK (safe to call multiple times, internally idempotent)
-    STATUS ret = initKvsWebRtc();
-    if (STATUS_FAILED(ret)) {
-        auto logger = spdlog::get("pipeline");
-        if (logger) logger->error("initKvsWebRtc failed, status: {}", status_to_hex(ret));
-        if (error_msg) *error_msg = "initKvsWebRtc failed: " + status_to_hex(ret);
-        return nullptr;
-    }
-
+    std::string* /*error_msg*/) {
     auto obj = std::unique_ptr<WebRtcMediaManager>(new WebRtcMediaManager());
     obj->impl_ = std::make_unique<Impl>(signaling);
     obj->impl_->region = aws_region;
