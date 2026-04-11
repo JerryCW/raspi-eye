@@ -2031,3 +2031,129 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-11 — Spec: spec-13.5-main-integration / 任务: 1.1 + 1.2 ShutdownHandler 模块创建
+
+**完成概要：** 创建 shutdown_handler.h（pImpl 模式，删除拷贝语义）和 shutdown_handler.cpp（逆序执行、5s 单步超时、30s 总超时、异常隔离、shutdown summary 日志），getDiagnostics 零错误。
+
+**测试状态：** 未运行（轻量模式，测试覆盖将在任务 6 shutdown_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/shutdown_handler.h, device/src/shutdown_handler.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13.5-main-integration / 任务: 2.1 + 2.2 AppContext 模块创建
+
+**完成概要：** 创建 app_context.h（pImpl 模式，三阶段接口，删除拷贝语义）和 app_context.cpp（Impl 持有全部 config + 4 个 unique_ptr 模块 + ShutdownHandler；init 解析 3 个 TOML section、创建 Signaling/MediaManager、注册回调和 shutdown steps；start 构建管道、启动、创建 HealthMonitor、注册 rebuild/health 回调、connect 信令；stop 委托 shutdown_handler.execute()），getDiagnostics 零错误。
+
+**测试状态：** 未运行（轻量模式，AppContext 为集成代码，由现有测试回归 + 冒烟运行验证）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.h, device/src/app_context.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13.5-main-integration / 任务: 3. 更新 CMakeLists.txt
+
+**完成概要：** pipeline_manager 库添加 shutdown_handler.cpp 和 app_context.cpp，新增 shutdown_test 测试目标（GTest::gtest_main + rapidcheck + rapidcheck_gtest），创建占位 shutdown_test.cpp。
+
+**测试状态：** 未运行（轻量模式，编译验证在任务 4 检查点中进行）— 新增 1 个占位测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/shutdown_test.cpp（占位）
+
+---
+
+### 2026-04-11 — Spec: spec-13.5-main-integration / 任务: 4. 编译检查点
+
+**完成概要：** cmake configure + build + ctest 全部通过，shutdown_handler.cpp 和 app_context.cpp 编译零错误，11/11 测试通过（含 shutdown_test placeholder），ASan 无报告。
+
+**测试状态：** 全部通过（11/11）— 无新增测试（shutdown_test placeholder 已在任务 3 创建）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。linker 有 "ignoring duplicate libraries" 警告（rapidcheck 重复链接），属于非关键警告。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-11 — Spec: spec-13.5-main-integration / 任务: 5.1 重构 main.cpp
+
+**完成概要：** main.cpp 重构为 AppContext 三阶段生命周期：移除 pipeline_manager/pipeline_builder/pipeline_health 的 include，新增 app_context.h 和 --config 参数解析（默认 device/config/config.toml），替换直接模块创建为 AppContext init/start/stop，新增 SIGTERM 信号处理。编译通过，11/11 测试通过。
+
+**测试状态：** 全部通过（11/11）— 无新增测试（main.cpp 为应用入口，由现有测试回归覆盖）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/main.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13.5-main-integration / 任务: 6.1 + 6.2 + 6.3 ShutdownHandler 测试
+
+**完成概要：** 实现完整 shutdown_test.cpp：3 个 example-based 测试（TimeoutProtection、EmptySteps、NoCopy static_assert）+ 2 个 PBT 属性测试（ReverseOrderInvariant 100+ 迭代、ExceptionIsolationInvariant 100+ 迭代），全部通过，11/11 套件零回归。
+
+**测试状态：** 全部通过（11/11）— 新增 5 个测试（3 example-based + 2 PBT，替换 placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/shutdown_test.cpp
+
+---
+
+### 2026-04-11 — Spec: spec-13.5-main-integration / 任务: 7. 最终检查点
+
+**完成概要：** 全量验证通过，编译零错误，11/11 测试套件全部通过（含 shutdown_test 5 个测试），ASan 无报告，总耗时 31.40s。
+
+**测试状态：** 全部通过（11/11 套件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

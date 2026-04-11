@@ -51,7 +51,7 @@ target_include_directories(log_module PUBLIC src)
 target_link_libraries(log_module PUBLIC spdlog::spdlog)
 
 # 主程序库（供测试和 main 共用）
-add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/camera_source.cpp src/pipeline_health.cpp)
+add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/camera_source.cpp src/pipeline_health.cpp src/shutdown_handler.cpp src/app_context.cpp)
 target_include_directories(pipeline_manager PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_LIBRARY_DIRS})
 target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module)
@@ -87,6 +87,10 @@ add_test(NAME camera_test COMMAND camera_test)
 add_executable(health_test tests/health_test.cpp)
 target_link_libraries(health_test PRIVATE pipeline_manager GTest::gtest rapidcheck rapidcheck_gtest)
 add_test(NAME health_test COMMAND health_test)
+
+add_executable(shutdown_test tests/shutdown_test.cpp)
+target_link_libraries(shutdown_test PRIVATE pipeline_manager GTest::gtest_main rapidcheck rapidcheck_gtest)
+add_test(NAME shutdown_test COMMAND shutdown_test)
 
 # 凭证模块库
 add_library(credential_module STATIC src/credential_provider.cpp)
