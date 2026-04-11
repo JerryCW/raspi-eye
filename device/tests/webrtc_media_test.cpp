@@ -35,7 +35,7 @@ TEST(WebRtcMediaTest, StubCreateSuccess) {
     auto sig = create_stub_signaling();
     ASSERT_NE(sig, nullptr);
     std::string err;
-    auto mgr = WebRtcMediaManager::create(*sig, &err);
+    auto mgr = WebRtcMediaManager::create(*sig, "", &err);
     ASSERT_NE(mgr, nullptr) << "create() failed: " << err;
     EXPECT_EQ(mgr->peer_count(), 0u);
 }

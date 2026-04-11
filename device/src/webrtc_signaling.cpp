@@ -227,6 +227,28 @@ struct WebRtcSignaling::Impl {
         connected = false;
     }
 
+    uint32_t ice_config_count() const {
+        UINT32 count = 0;
+        signalingClientGetIceConfigInfoCount(signaling_handle, &count);
+        return count;
+    }
+
+    bool ice_config(uint32_t index,
+                    std::vector<WebRtcSignaling::IceServerInfo>& servers) const {
+        PIceConfigInfo info = nullptr;
+        STATUS ret = signalingClientGetIceConfigInfo(signaling_handle, index, &info);
+        if (STATUS_FAILED(ret) || info == nullptr) return false;
+        servers.clear();
+        for (UINT32 j = 0; j < info->uriCount; j++) {
+            servers.push_back({
+                std::string(info->uris[j]),
+                std::string(info->userName),
+                std::string(info->password)
+            });
+        }
+        return true;
+    }
+
     ~Impl() {
         release_signaling_client();
         if (credential_provider != nullptr) {
@@ -269,6 +291,9 @@ struct WebRtcSignaling::Impl {
     void release_signaling_client() {
         connected = false;
     }
+
+    uint32_t ice_config_count() const { return 0; }
+    bool ice_config(uint32_t, std::vector<WebRtcSignaling::IceServerInfo>&) const { return false; }
 
     ~Impl() = default;
 };
@@ -400,4 +425,13 @@ bool WebRtcSignaling::send_ice_candidate(const std::string& peer_id,
     if (logger) logger->info("Stub: sent ICE candidate to peer: {}", peer_id);
 #endif
     return true;
+}
+
+uint32_t WebRtcSignaling::get_ice_config_count() const {
+    return impl_->ice_config_count();
+}
+
+bool WebRtcSignaling::get_ice_config(uint32_t index,
+                                     std::vector<IceServerInfo>& servers) const {
+    return impl_->ice_config(index, servers);
 }

@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include "credential_provider.h"  // AwsConfig, parse_toml_section
 
 // WebRTC signaling configuration (parsed from TOML [webrtc] section)
@@ -58,6 +59,23 @@ public:
 
     // Send ICE Candidate to a specific Viewer
     bool send_ice_candidate(const std::string& peer_id, const std::string& candidate);
+
+    // ICE server info returned by get_ice_config()
+    struct IceServerInfo {
+        std::string uri;
+        std::string username;
+        std::string credential;
+    };
+
+    // Get ICE config count (TURN server count from signaling channel)
+    // stub returns 0
+    uint32_t get_ice_config_count() const;
+
+    // Get ICE server info for the i-th config entry
+    // Populates servers vector with URI/username/credential
+    // stub returns false
+    bool get_ice_config(uint32_t index,
+                        std::vector<IceServerInfo>& servers) const;
 
     ~WebRtcSignaling();
     WebRtcSignaling(const WebRtcSignaling&) = delete;

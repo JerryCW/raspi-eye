@@ -13,6 +13,7 @@ class WebRtcMediaManager {
 public:
     static std::unique_ptr<WebRtcMediaManager> create(
         WebRtcSignaling& signaling,
+        const std::string& aws_region = "",
         std::string* error_msg = nullptr);
 
     bool on_viewer_offer(const std::string& peer_id,

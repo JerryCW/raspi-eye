@@ -2201,3 +2201,24 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/webrtc_signaling.cpp, device/src/webrtc_media.cpp, device/CMakeLists.txt
 
 ---
+
+
+### 2026-04-11 — Spec: spec-14-webrtc-sdp-fix / 任务: 1-5 全部任务
+
+**完成概要：** 修复 WebRTC `setRemoteDescription` 返回 `0x40100001` 的 5 个根因：补 `addSupportedCodec`、配 ICE 服务器（STUN+TURN）、改 SDP answer 流程顺序为 SDK 期望的 `setLocalDescription → createAnswer`、改 ICE candidate 反序列化为 `deserializeRtcIceCandidateInit`、改 transceiver direction 为 SENDRECV。新增 `WebRtcSignaling::get_ice_config_count/get_ice_config` 接口。macOS 11/11 测试通过。
+
+**测试状态：** 全部通过（11/11，35.40s）— 无新增测试（修改仅在 SDK 分支，macOS 走 stub 路径）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | `WebRtcMediaManager::create` 签名变更后测试编译失败：`create(*sig, &err)` 的 `&err` 被解释为 `aws_region` 参数 | Spec 不够精确 | `error: reference to type 'const std::string' could not bind to an rvalue of type 'std::string *'` | 测试中改为 `create(*sig, "", &err)` 显式传空 region | 签名变更时 tasks.md 应包含测试文件的同步修改 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（签名变更导致测试编译失败为单次问题，一次修复）
+
+**涉及文件：** device/src/webrtc_signaling.h, device/src/webrtc_signaling.cpp, device/src/webrtc_media.h, device/src/webrtc_media.cpp, device/src/app_context.cpp, device/tests/webrtc_media_test.cpp
+
+---

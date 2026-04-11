@@ -22,7 +22,8 @@ struct WebRtcMediaManager::Impl {
 };
 
 std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
-    WebRtcSignaling& signaling, std::string* /*error_msg*/) {
+    WebRtcSignaling& signaling, const std::string& /*aws_region*/,
+    std::string* /*error_msg*/) {
     auto obj = std::unique_ptr<WebRtcMediaManager>(new WebRtcMediaManager());
     obj->impl_ = std::make_unique<Impl>(signaling);
     auto logger = spdlog::get("pipeline");
@@ -125,6 +126,7 @@ struct WebRtcMediaManager::Impl {
         std::string peer_id;
     };
     WebRtcSignaling& signaling;
+    std::string region;
     std::unordered_map<std::string, PeerInfo> peers;
     mutable std::mutex peers_mutex;
 
@@ -223,9 +225,11 @@ static std::string status_to_hex(STATUS status) {
 // ---- Factory ----
 
 std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
-    WebRtcSignaling& signaling, std::string* /*error_msg*/) {
+    WebRtcSignaling& signaling, const std::string& aws_region,
+    std::string* /*error_msg*/) {
     auto obj = std::unique_ptr<WebRtcMediaManager>(new WebRtcMediaManager());
     obj->impl_ = std::make_unique<Impl>(signaling);
+    obj->impl_->region = aws_region;
     auto logger = spdlog::get("pipeline");
     if (logger) logger->info("Created WebRtcMediaManager (KVS WebRTC SDK)");
     return obj;
@@ -272,10 +276,38 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 4. Create PeerConnection
+    // 4. Configure RtcConfiguration (STUN + TURN servers)
     RtcConfiguration rtc_config;
-    MEMSET(&rtc_config, 0, SIZEOF(RtcConfiguration));
+    MEMSET(&rtc_config, 0x00, SIZEOF(RtcConfiguration));
+    rtc_config.iceTransportPolicy = ICE_TRANSPORT_POLICY_ALL;
 
+    // STUN server (slot 0)
+    SNPRINTF(rtc_config.iceServers[0].urls, MAX_ICE_CONFIG_URI_LEN,
+             "stun:stun.kinesisvideo.%s.amazonaws.com:443",
+             impl_->region.c_str());
+
+    // TURN servers (slot 1+) — from signaling client
+    uint32_t ice_count = impl_->signaling.get_ice_config_count();
+    uint32_t uri_idx = 0;
+    uint32_t max_turn = (ice_count > 0) ? 1 : 0;  // use only 1 TURN server
+    for (uint32_t i = 0; i < max_turn; i++) {
+        std::vector<WebRtcSignaling::IceServerInfo> servers;
+        if (impl_->signaling.get_ice_config(i, servers)) {
+            for (const auto& s : servers) {
+                if (uri_idx + 1 < MAX_ICE_SERVERS_COUNT) {
+                    STRNCPY(rtc_config.iceServers[uri_idx + 1].urls,
+                             s.uri.c_str(), MAX_ICE_CONFIG_URI_LEN);
+                    STRNCPY(rtc_config.iceServers[uri_idx + 1].credential,
+                             s.credential.c_str(), MAX_ICE_CONFIG_CREDENTIAL_LEN);
+                    STRNCPY(rtc_config.iceServers[uri_idx + 1].username,
+                             s.username.c_str(), MAX_ICE_CONFIG_USER_NAME_LEN);
+                    uri_idx++;
+                }
+            }
+        }
+    }
+
+    // 5. Create PeerConnection
     PRtcPeerConnection peer_connection = NULL;
     STATUS ret = createPeerConnection(&rtc_config, &peer_connection);
     if (STATUS_FAILED(ret)) {
@@ -285,7 +317,20 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 5. Add video transceiver (H.264)
+    // 6. Register supported codecs (must be before addTransceiver)
+    ret = addSupportedCodec(peer_connection,
+        RTC_CODEC_H264_PROFILE_42E01F_LEVEL_ASYMMETRY_ALLOWED_PACKETIZATION_MODE);
+    if (STATUS_FAILED(ret)) {
+        if (logger) logger->error("addSupportedCodec (H.264) failed for peer {}, status: {}",
+                                  peer_id, status_to_hex(ret));
+        if (error_msg) *error_msg = "addSupportedCodec (H.264) failed: " + status_to_hex(ret);
+        freePeerConnection(&peer_connection);
+        return false;
+    }
+
+    addSupportedCodec(peer_connection, RTC_CODEC_OPUS);  // non-fatal
+
+    // 7. Add video transceiver (H.264, SENDRECV)
     RtcMediaStreamTrack video_track;
     MEMSET(&video_track, 0, SIZEOF(RtcMediaStreamTrack));
     video_track.kind = MEDIA_STREAM_TRACK_KIND_VIDEO;
@@ -293,8 +338,12 @@ bool WebRtcMediaManager::on_viewer_offer(
     STRCPY(video_track.streamId, "raspiEyeVideo");
     STRCPY(video_track.trackId, "videoTrack");
 
+    RtcRtpTransceiverInit video_init;
+    MEMSET(&video_init, 0, SIZEOF(RtcRtpTransceiverInit));
+    video_init.direction = RTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV;
+
     PRtcRtpTransceiver video_transceiver = NULL;
-    ret = addTransceiver(peer_connection, &video_track, NULL, &video_transceiver);
+    ret = addTransceiver(peer_connection, &video_track, &video_init, &video_transceiver);
     if (STATUS_FAILED(ret)) {
         if (logger) logger->error("addTransceiver (video) failed for peer {}, status: {}",
                                   peer_id, status_to_hex(ret));
@@ -303,7 +352,7 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 5b. Add audio transceiver (recvonly — viewer may send audio section)
+    // 7b. Add audio transceiver (SENDRECV)
     RtcMediaStreamTrack audio_track;
     MEMSET(&audio_track, 0, SIZEOF(RtcMediaStreamTrack));
     audio_track.kind = MEDIA_STREAM_TRACK_KIND_AUDIO;
@@ -313,7 +362,7 @@ bool WebRtcMediaManager::on_viewer_offer(
 
     RtcRtpTransceiverInit audio_init;
     MEMSET(&audio_init, 0, SIZEOF(RtcRtpTransceiverInit));
-    audio_init.direction = RTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY;
+    audio_init.direction = RTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV;
 
     PRtcRtpTransceiver audio_transceiver = NULL;
     ret = addTransceiver(peer_connection, &audio_track, &audio_init, &audio_transceiver);
@@ -323,10 +372,10 @@ bool WebRtcMediaManager::on_viewer_offer(
         // Non-fatal: continue without audio
     }
 
-    // 6. Create callback context (heap-allocated, SDK stores raw pointer)
+    // 8. Create callback context (heap-allocated, SDK stores raw pointer)
     auto* cb_ctx = new Impl::CallbackContext{impl_.get(), peer_id};
 
-    // 7. Register ICE candidate callback
+    // 9. Register ICE candidate callback
     ret = peerConnectionOnIceCandidate(peer_connection,
                                        reinterpret_cast<UINT64>(cb_ctx),
                                        Impl::on_ice_candidate_handler);
@@ -339,7 +388,7 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 8. Register connection state change callback
+    // 10. Register connection state change callback
     ret = peerConnectionOnConnectionStateChange(peer_connection,
                                                 reinterpret_cast<UINT64>(cb_ctx),
                                                 Impl::on_connection_state_change);
@@ -352,8 +401,8 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 9. Set remote description (Viewer's Offer) — use SDK's deserializer
-    //    like the official sample (handles JSON {"type":"offer","sdp":"..."})
+    // 11. Set remote description (Viewer's Offer) — use SDK's deserializer
+    //     like the official sample (handles JSON {"type":"offer","sdp":"..."})
     RtcSessionDescriptionInit offer_sdp;
     MEMSET(&offer_sdp, 0, SIZEOF(RtcSessionDescriptionInit));
 
@@ -380,9 +429,9 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 10. Set local description (before createAnswer, per SDK sample pattern)
+    // 12. Set local description (empty answer_sdp — SDK populates it)
     RtcSessionDescriptionInit answer_sdp;
-    MEMSET(&answer_sdp, 0, SIZEOF(RtcSessionDescriptionInit));
+    MEMSET(&answer_sdp, 0x00, SIZEOF(RtcSessionDescriptionInit));
     ret = setLocalDescription(peer_connection, &answer_sdp);
     if (STATUS_FAILED(ret)) {
         if (logger) logger->error("setLocalDescription failed for peer {}, status: {}",
@@ -393,7 +442,7 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 11. Create answer
+    // 13. Create answer
     ret = createAnswer(peer_connection, &answer_sdp);
     if (STATUS_FAILED(ret)) {
         if (logger) logger->error("createAnswer failed for peer {}, status: {}",
@@ -404,7 +453,7 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 12. Serialize answer to JSON and send via signaling
+    // 14. Serialize answer to JSON and send via signaling
     UINT32 serialized_len = MAX_SIGNALING_MESSAGE_LEN;
     CHAR serialized_answer[MAX_SIGNALING_MESSAGE_LEN];
     ret = serializeSessionDescriptionInit(&answer_sdp, serialized_answer, &serialized_len);
@@ -425,7 +474,7 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 13. Store in peers map
+    // 15. Store in peers map
     PeerInfo info;
     info.peer_connection = peer_connection;
     info.video_transceiver = video_transceiver;
@@ -453,11 +502,20 @@ bool WebRtcMediaManager::on_viewer_ice_candidate(
         return false;
     }
 
-    RtcIceCandidateInit ice_candidate;
-    MEMSET(&ice_candidate, 0, SIZEOF(RtcIceCandidateInit));
-    STRNCPY(ice_candidate.candidate, candidate.c_str(), MAX_ICE_CANDIDATE_INIT_CANDIDATE_LEN);
+    RtcIceCandidateInit candidate_init;
+    MEMSET(&candidate_init, 0, SIZEOF(RtcIceCandidateInit));
+    STATUS ret = deserializeRtcIceCandidateInit(
+        const_cast<PCHAR>(candidate.c_str()),
+        static_cast<UINT32>(candidate.size()),
+        &candidate_init);
+    if (STATUS_FAILED(ret)) {
+        if (logger) logger->warn("deserializeRtcIceCandidateInit failed for peer {}, status: {}",
+                                 peer_id, status_to_hex(ret));
+        if (error_msg) *error_msg = "deserializeRtcIceCandidateInit failed: " + status_to_hex(ret);
+        return false;
+    }
 
-    STATUS ret = addIceCandidate(it->second.peer_connection, ice_candidate.candidate);
+    ret = addIceCandidate(it->second.peer_connection, candidate_init.candidate);
     if (STATUS_FAILED(ret)) {
         if (logger) logger->warn("addIceCandidate failed for peer {}, status: {}",
                                  peer_id, status_to_hex(ret));

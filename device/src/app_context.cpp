@@ -90,7 +90,7 @@ bool AppContext::init(const std::string& config_path,
 
     // --- Create MediaManager ---
     impl_->media_manager = WebRtcMediaManager::create(
-        *impl_->signaling, error_msg);
+        *impl_->signaling, impl_->webrtc_config.aws_region, error_msg);
     if (!impl_->media_manager) {
         return false;
     }
