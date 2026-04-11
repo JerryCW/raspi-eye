@@ -128,12 +128,12 @@ struct WebRtcSignaling::Impl {
 
     bool init_credential_provider(std::string* error_msg) {
         STATUS status = createLwsIotCredentialProvider(
-            aws_config.credential_endpoint.c_str(),
-            aws_config.cert_path.c_str(),
-            aws_config.key_path.c_str(),
-            aws_config.ca_path.c_str(),
-            aws_config.role_alias.c_str(),
-            aws_config.thing_name.c_str(),
+            const_cast<PCHAR>(aws_config.credential_endpoint.c_str()),
+            const_cast<PCHAR>(aws_config.cert_path.c_str()),
+            const_cast<PCHAR>(aws_config.key_path.c_str()),
+            const_cast<PCHAR>(aws_config.ca_path.c_str()),
+            const_cast<PCHAR>(aws_config.role_alias.c_str()),
+            const_cast<PCHAR>(aws_config.thing_name.c_str()),
             &credential_provider);
 
         if (STATUS_FAILED(status)) {
