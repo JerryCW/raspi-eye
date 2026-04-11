@@ -184,6 +184,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # User can specify SDK path via -DKVS_WEBRTC_SDK_DIR=/path/to/sdk
     set(KVS_WEBRTC_SEARCH_PATHS /usr/local/lib /opt/kvs-webrtc/lib)
     set(KVS_WEBRTC_INCLUDE_SEARCH_PATHS /usr/local/include /opt/kvs-webrtc/include)
+    # Also search SDK open-source/lib for transitive dependencies (kvsCommonLws, libwebsockets)
+    set(KVS_WEBRTC_OPEN_SOURCE_LIB_PATHS)
     if(KVS_WEBRTC_SDK_DIR)
         list(INSERT KVS_WEBRTC_SEARCH_PATHS 0 "${KVS_WEBRTC_SDK_DIR}/lib")
         list(INSERT KVS_WEBRTC_INCLUDE_SEARCH_PATHS 0 "${KVS_WEBRTC_SDK_DIR}/include")
@@ -192,18 +194,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_library(KVS_WEBRTC_SIGNALING_LIB kvsWebrtcSignalingClient
         PATHS ${KVS_WEBRTC_SEARCH_PATHS}
         NO_DEFAULT_PATH)
+    find_library(KVS_WEBRTC_CLIENT_LIB kvsWebrtcClient
+        PATHS ${KVS_WEBRTC_SEARCH_PATHS}
+        NO_DEFAULT_PATH)
     find_path(KVS_WEBRTC_INCLUDE_DIR
         com/amazonaws/kinesis/video/webrtcclient/Include.h
         PATHS ${KVS_WEBRTC_INCLUDE_SEARCH_PATHS}
         NO_DEFAULT_PATH)
 
-    if(KVS_WEBRTC_SIGNALING_LIB AND KVS_WEBRTC_INCLUDE_DIR)
+    if(KVS_WEBRTC_SIGNALING_LIB AND KVS_WEBRTC_CLIENT_LIB AND KVS_WEBRTC_INCLUDE_DIR)
+        # SDK dependencies: kvsCommonLws is in the SDK's open-source/lib
+        # Add rpath so the linker can find transitive .so dependencies
+        set(KVS_WEBRTC_ALL_LIBS ${KVS_WEBRTC_SIGNALING_LIB} ${KVS_WEBRTC_CLIENT_LIB})
+
         target_compile_definitions(webrtc_module PRIVATE HAVE_KVS_WEBRTC_SDK=1)
         target_include_directories(webrtc_module PRIVATE ${KVS_WEBRTC_INCLUDE_DIR})
-        target_link_libraries(webrtc_module PRIVATE ${KVS_WEBRTC_SIGNALING_LIB})
+        target_link_libraries(webrtc_module PRIVATE ${KVS_WEBRTC_ALL_LIBS})
         target_compile_definitions(webrtc_media_module PRIVATE HAVE_KVS_WEBRTC_SDK=1)
         target_include_directories(webrtc_media_module PRIVATE ${KVS_WEBRTC_INCLUDE_DIR})
-        target_link_libraries(webrtc_media_module PRIVATE ${KVS_WEBRTC_SIGNALING_LIB})
+        target_link_libraries(webrtc_media_module PRIVATE ${KVS_WEBRTC_ALL_LIBS})
         message(STATUS "WebRTC module: ENABLED (KVS WebRTC C SDK found)")
     else()
         message(WARNING "KVS WebRTC C SDK not found, using stub on Linux")
