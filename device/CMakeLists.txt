@@ -197,15 +197,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_library(KVS_WEBRTC_CLIENT_LIB kvsWebrtcClient
         PATHS ${KVS_WEBRTC_SEARCH_PATHS}
         NO_DEFAULT_PATH)
+    find_library(KVS_COMMON_LWS_LIB kvsCommonLws
+        PATHS ${KVS_WEBRTC_SEARCH_PATHS}
+        NO_DEFAULT_PATH)
     find_path(KVS_WEBRTC_INCLUDE_DIR
         com/amazonaws/kinesis/video/webrtcclient/Include.h
         PATHS ${KVS_WEBRTC_INCLUDE_SEARCH_PATHS}
         NO_DEFAULT_PATH)
 
     if(KVS_WEBRTC_SIGNALING_LIB AND KVS_WEBRTC_CLIENT_LIB AND KVS_WEBRTC_INCLUDE_DIR)
-        # SDK dependencies: kvsCommonLws is in the SDK's open-source/lib
-        # Add rpath so the linker can find transitive .so dependencies
+        # Collect all SDK libs (kvsCommonLws may or may not be found separately)
         set(KVS_WEBRTC_ALL_LIBS ${KVS_WEBRTC_SIGNALING_LIB} ${KVS_WEBRTC_CLIENT_LIB})
+        if(KVS_COMMON_LWS_LIB)
+            list(APPEND KVS_WEBRTC_ALL_LIBS ${KVS_COMMON_LWS_LIB})
+        endif()
 
         target_compile_definitions(webrtc_module PRIVATE HAVE_KVS_WEBRTC_SDK=1)
         target_include_directories(webrtc_module PRIVATE ${KVS_WEBRTC_INCLUDE_DIR})
