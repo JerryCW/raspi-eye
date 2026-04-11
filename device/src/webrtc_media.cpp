@@ -115,6 +115,7 @@ struct PeerInfo {
     PRtcPeerConnection peer_connection = nullptr;
     PRtcRtpTransceiver video_transceiver = nullptr;
     uint32_t consecutive_write_failures = 0;
+    bool connected = false;  // true after ICE connected
 };
 
 // CallbackContext and SDK callbacks are inside Impl to access private scope.
@@ -157,7 +158,12 @@ struct WebRtcMediaManager::Impl {
 
         auto logger = spdlog::get("pipeline");
         if (new_state == RTC_PEER_CONNECTION_STATE_CONNECTED) {
+            std::lock_guard<std::mutex> lock(ctx->impl->peers_mutex);
             if (logger) logger->info("Peer {} connected", ctx->peer_id);
+            auto it = ctx->impl->peers.find(ctx->peer_id);
+            if (it != ctx->impl->peers.end()) {
+                it->second.connected = true;
+            }
             return;
         }
         if (new_state == RTC_PEER_CONNECTION_STATE_FAILED ||
@@ -226,7 +232,16 @@ static std::string status_to_hex(STATUS status) {
 
 std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
     WebRtcSignaling& signaling, const std::string& aws_region,
-    std::string* /*error_msg*/) {
+    std::string* error_msg) {
+    // Initialize KVS WebRTC SDK (safe to call multiple times, internally idempotent)
+    STATUS ret = initKvsWebRtc();
+    if (STATUS_FAILED(ret)) {
+        auto logger = spdlog::get("pipeline");
+        if (logger) logger->error("initKvsWebRtc failed, status: {}", status_to_hex(ret));
+        if (error_msg) *error_msg = "initKvsWebRtc failed: " + status_to_hex(ret);
+        return nullptr;
+    }
+
     auto obj = std::unique_ptr<WebRtcMediaManager>(new WebRtcMediaManager());
     obj->impl_ = std::make_unique<Impl>(signaling);
     obj->impl_->region = aws_region;
@@ -549,6 +564,7 @@ void WebRtcMediaManager::broadcast_frame(
 
     for (auto& [id, info] : impl_->peers) {
         if (!info.video_transceiver) continue;
+        if (!info.connected) continue;  // skip peers still in ICE negotiation
 
         Frame frame;
         MEMSET(&frame, 0, SIZEOF(Frame));
