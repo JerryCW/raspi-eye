@@ -116,17 +116,14 @@ struct PeerInfo {
     uint32_t consecutive_write_failures = 0;
 };
 
-// CallbackContext carries Impl* + peer_id for SDK callbacks.
-// Defined before Impl so Impl methods can use it directly.
-// Impl is forward-declared here; CallbackContext only stores a pointer.
-struct WebRtcMediaManager::Impl;
-
-struct CallbackContext {
-    WebRtcMediaManager::Impl* impl = nullptr;
-    std::string peer_id;
-};
+// CallbackContext and SDK callbacks are inside Impl to access private scope.
 
 struct WebRtcMediaManager::Impl {
+    // Context passed to SDK callbacks via UINT64 customData.
+    struct CallbackContext {
+        Impl* impl = nullptr;
+        std::string peer_id;
+    };
     WebRtcSignaling& signaling;
     std::unordered_map<std::string, PeerInfo> peers;
     mutable std::mutex peers_mutex;
@@ -137,6 +134,41 @@ struct WebRtcMediaManager::Impl {
     std::unordered_map<std::string, CallbackContext*> callback_contexts;
 
     explicit Impl(WebRtcSignaling& sig) : signaling(sig) {}
+
+    // SDK callback: local ICE candidate generated.
+    static VOID on_ice_candidate_handler(UINT64 custom_data, PCHAR candidate_json) {
+        auto* ctx = reinterpret_cast<CallbackContext*>(custom_data);
+        if (!ctx || !ctx->impl) return;
+        if (candidate_json == NULL) return;
+
+        auto logger = spdlog::get("pipeline");
+        if (logger) logger->debug("Sending ICE candidate to peer: {}", ctx->peer_id);
+        ctx->impl->signaling.send_ice_candidate(ctx->peer_id,
+                                                 std::string(candidate_json));
+    }
+
+    // SDK callback: PeerConnection state changed.
+    static VOID on_connection_state_change(UINT64 custom_data,
+                                           RTC_PEER_CONNECTION_STATE new_state) {
+        auto* ctx = reinterpret_cast<CallbackContext*>(custom_data);
+        if (!ctx || !ctx->impl) return;
+
+        auto logger = spdlog::get("pipeline");
+        if (new_state == RTC_PEER_CONNECTION_STATE_CONNECTED) {
+            if (logger) logger->info("Peer {} connected", ctx->peer_id);
+            return;
+        }
+        if (new_state == RTC_PEER_CONNECTION_STATE_FAILED ||
+            new_state == RTC_PEER_CONNECTION_STATE_CLOSED) {
+            const char* reason = (new_state == RTC_PEER_CONNECTION_STATE_FAILED)
+                                     ? "connection_failed"
+                                     : "connection_closed";
+            if (logger) logger->info("Peer {} state changed, removing: {}",
+                                     ctx->peer_id, reason);
+            std::lock_guard<std::mutex> lock(ctx->impl->peers_mutex);
+            ctx->impl->remove_peer_locked(ctx->peer_id, reason);
+        }
+    }
 
     // Remove a peer while already holding the lock.
     void remove_peer_locked(const std::string& peer_id, const char* reason) {
@@ -181,44 +213,6 @@ struct WebRtcMediaManager::Impl {
         if (logger) logger->info("WebRtcMediaManager destroyed, all peers released");
     }
 };
-
-// SDK callback: local ICE candidate generated.
-// candidateJson == NULL means ICE gathering is complete — ignore.
-static VOID on_ice_candidate_handler(UINT64 custom_data, PCHAR candidate_json) {
-    auto* ctx = reinterpret_cast<CallbackContext*>(custom_data);
-    if (!ctx || !ctx->impl) return;
-    if (candidate_json == NULL) return;  // ICE gathering complete
-
-    auto logger = spdlog::get("pipeline");
-    if (logger) logger->debug("Sending ICE candidate to peer: {}", ctx->peer_id);
-    ctx->impl->signaling.send_ice_candidate(ctx->peer_id,
-                                             std::string(candidate_json));
-}
-
-// SDK callback: PeerConnection state changed.
-// FAILED / CLOSED → schedule peer removal.
-static VOID on_connection_state_change(UINT64 custom_data,
-                                       RTC_PEER_CONNECTION_STATE new_state) {
-    auto* ctx = reinterpret_cast<CallbackContext*>(custom_data);
-    if (!ctx || !ctx->impl) return;
-
-    auto logger = spdlog::get("pipeline");
-    if (new_state == RTC_PEER_CONNECTION_STATE_CONNECTED) {
-        if (logger) logger->info("Peer {} connected", ctx->peer_id);
-        return;
-    }
-    if (new_state == RTC_PEER_CONNECTION_STATE_FAILED ||
-        new_state == RTC_PEER_CONNECTION_STATE_CLOSED) {
-        const char* reason = (new_state == RTC_PEER_CONNECTION_STATE_FAILED)
-                                 ? "connection_failed"
-                                 : "connection_closed";
-        if (logger) logger->info("Peer {} state changed, removing: {}",
-                                 ctx->peer_id, reason);
-        // Lock and remove.
-        std::lock_guard<std::mutex> lock(ctx->impl->peers_mutex);
-        ctx->impl->remove_peer_locked(ctx->peer_id, reason);
-    }
-}
 
 static std::string status_to_hex(STATUS status) {
     char buf[16];
@@ -310,12 +304,12 @@ bool WebRtcMediaManager::on_viewer_offer(
     }
 
     // 6. Create callback context (heap-allocated, SDK stores raw pointer)
-    auto* cb_ctx = new CallbackContext{impl_.get(), peer_id};
+    auto* cb_ctx = new Impl::CallbackContext{impl_.get(), peer_id};
 
     // 7. Register ICE candidate callback
     ret = peerConnectionOnIceCandidate(peer_connection,
                                        reinterpret_cast<UINT64>(cb_ctx),
-                                       on_ice_candidate_handler);
+                                       Impl::on_ice_candidate_handler);
     if (STATUS_FAILED(ret)) {
         if (logger) logger->error("peerConnectionOnIceCandidate failed for peer {}, status: {}",
                                   peer_id, status_to_hex(ret));
@@ -328,7 +322,7 @@ bool WebRtcMediaManager::on_viewer_offer(
     // 8. Register connection state change callback
     ret = peerConnectionOnConnectionStateChange(peer_connection,
                                                 reinterpret_cast<UINT64>(cb_ctx),
-                                                on_connection_state_change);
+                                                Impl::on_connection_state_change);
     if (STATUS_FAILED(ret)) {
         if (logger) logger->error("peerConnectionOnConnectionStateChange failed for peer {}, status: {}",
                                   peer_id, status_to_hex(ret));
