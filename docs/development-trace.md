@@ -2175,3 +2175,29 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/camera_source.cpp, device/src/main.cpp
 
 ---
+
+### 2026-04-11 — WebRTC SDK v1.18.0 适配（Pi 5 端到端集成）
+
+**完成概要：** 适配 KVS WebRTC C SDK v1.18.0，修复编译错误（类型名变更、const_cast、private 访问、链接库缺失），Pi 5 编译链接通过，9/11 测试通过。
+
+**测试状态：** Pi 5 9/11 通过，macOS 11/11 通过 — 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | `PCredentialProvider` 和 `SIGNALING_CLIENT_STATE_TYPE` 类型名不存在 | Spec 缺少信息 | spec-12 写代码时用了训练数据中旧版 SDK API，未查实际头文件 | 从 GitHub v1.18.0 头文件确认后改为 `PAwsCredentialProvider` 和 `SIGNALING_CLIENT_STATE` | SHALL NOT 在不确定外部 SDK API 时凭猜测编写代码 |
+| 2 | `const char*` 到 `PCHAR`（`char*`）隐式转换失败 | Spec 缺少信息 | KVS SDK C API 参数类型为 `PCHAR`（非 const），C++ `c_str()` 返回 `const char*` | 加 `const_cast<PCHAR>(...)` | Design 文档中 C SDK 调用示例应包含 const_cast |
+| 3 | `CallbackContext` 和 SDK 回调函数在 `Impl`（private）外部定义，GCC 报 private 访问错误 | 模型能力边界 | macOS Clang 不报错（stub 路径），Pi 5 GCC 严格检查 private 访问 | 将 `CallbackContext` 和回调函数移入 `Impl` 作为 static 成员 | SHALL NOT 在 pImpl 模式中将需要访问 Impl 的类型/函数定义在 Impl 外部 |
+| 4 | 链接时缺少 `kvsWebrtcClient` 和 `kvsCommonLws` 库 | Spec 缺少信息 | CMakeLists.txt 只链接了 `kvsWebrtcSignalingClient`，缺少 PeerConnection API 所在的 `kvsWebrtcClient` 和传递依赖 `kvsCommonLws` | find_library 查找并链接三个库 | CMakeLists.txt 中 WebRTC SDK 链接应包含完整依赖链 |
+| 5 | WebRTC SDK `open-source/` 缓存旧版 producer-c 依赖导致编译失败 | Spec 缺少信息 | `CONTROL_PLANE_URI_POSTFIX_DUAL_STACK` 宏未定义，因为 `kvsCommonLws already built` 跳过了重新编译 | 删除 `open-source/` 目录强制重新下载编译依赖 | pi-setup.md 中记录：升级 WebRTC SDK 版本时必须同时删除 `open-source/` 目录 |
+| 6 | Pi 5 上 webrtc_test 和 webrtc_media_test 用假凭证调用真实 SDK 失败（5+2 个测试） | Spec 不够精确 | `createLwsIotCredentialProvider` 用空证书路径调用，SDK 内部 LWS 初始化 TLS 失败 | 待修：测试应检测 SDK 可用性，有真实 SDK 时 GTEST_SKIP 假凭证测试 | 后续 spec 统一修复 webrtc_test/webrtc_media_test 的 Pi 5 兼容性 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在 pImpl 模式中将需要访问 private Impl 的回调函数或辅助类型定义在 Impl 外部——GCC 严格检查 private 访问，应将它们作为 Impl 的 static 成员
+- **Tasks 层：** SHALL NOT 在测试中用假凭证数据调用可能触发真实 SDK TLS 初始化的函数——Pi 5 上有真实 SDK 时会失败，应先检测 SDK 可用性后 GTEST_SKIP
+
+**涉及文件：** device/src/webrtc_signaling.cpp, device/src/webrtc_media.cpp, device/CMakeLists.txt
+
+---

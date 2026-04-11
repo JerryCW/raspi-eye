@@ -45,6 +45,10 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
   - 原因：macOS 要求 NSApplication 在主线程运行，否则 GStreamer-GL 报警告且可能崩溃
   - 建议：用 `gst_macos_main()` 包装管道运行逻辑
 
+- SHALL NOT 在 pImpl 模式中将需要访问 private Impl 的回调函数或辅助类型定义在 Impl 外部（来源：WebRTC SDK v1.18 适配）
+  - 原因：GCC 严格检查 private 访问，macOS Clang 走 stub 路径不报错，Pi 5 上才暴露
+  - 建议：将 SDK 回调函数和 CallbackContext 等辅助类型作为 Impl 的 static 成员
+
 ---
 
 ## Tasks 层
