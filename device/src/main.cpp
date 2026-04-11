@@ -15,6 +15,9 @@ static void sigint_handler(int /*sig*/) {
 }
 
 static int run_pipeline(int argc, char* argv[]) {
+    // GStreamer init (on macOS, gst_macos_main handles this)
+    gst_init(&argc, &argv);
+
     // Phase 1: Parse all command-line arguments before log init
     bool use_json = false;
     CameraSource::CameraConfig cam_config;
