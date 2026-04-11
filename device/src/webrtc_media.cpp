@@ -116,8 +116,15 @@ struct PeerInfo {
     uint32_t consecutive_write_failures = 0;
 };
 
-// Forward declaration — CallbackContext carries Impl* + peer_id for SDK callbacks.
-struct CallbackContext;
+// CallbackContext carries Impl* + peer_id for SDK callbacks.
+// Defined before Impl so Impl methods can use it directly.
+// Impl is forward-declared here; CallbackContext only stores a pointer.
+struct WebRtcMediaManager::Impl;
+
+struct CallbackContext {
+    WebRtcMediaManager::Impl* impl = nullptr;
+    std::string peer_id;
+};
 
 struct WebRtcMediaManager::Impl {
     WebRtcSignaling& signaling;
@@ -173,13 +180,6 @@ struct WebRtcMediaManager::Impl {
         callback_contexts.clear();
         if (logger) logger->info("WebRtcMediaManager destroyed, all peers released");
     }
-};
-
-// Context passed to SDK callbacks via UINT64 customData.
-// Must be heap-allocated because the SDK stores a raw pointer cast.
-struct CallbackContext {
-    WebRtcMediaManager::Impl* impl = nullptr;
-    std::string peer_id;
 };
 
 // SDK callback: local ICE candidate generated.
