@@ -296,11 +296,31 @@ bool WebRtcMediaManager::on_viewer_offer(
     PRtcRtpTransceiver video_transceiver = NULL;
     ret = addTransceiver(peer_connection, &video_track, NULL, &video_transceiver);
     if (STATUS_FAILED(ret)) {
-        if (logger) logger->error("addTransceiver failed for peer {}, status: {}",
+        if (logger) logger->error("addTransceiver (video) failed for peer {}, status: {}",
                                   peer_id, status_to_hex(ret));
-        if (error_msg) *error_msg = "addTransceiver failed: " + status_to_hex(ret);
+        if (error_msg) *error_msg = "addTransceiver (video) failed: " + status_to_hex(ret);
         freePeerConnection(&peer_connection);
         return false;
+    }
+
+    // 5b. Add audio transceiver (recvonly — viewer may send audio section)
+    RtcMediaStreamTrack audio_track;
+    MEMSET(&audio_track, 0, SIZEOF(RtcMediaStreamTrack));
+    audio_track.kind = MEDIA_STREAM_TRACK_KIND_AUDIO;
+    audio_track.codec = RTC_CODEC_OPUS;
+    STRCPY(audio_track.streamId, "raspiEyeAudio");
+    STRCPY(audio_track.trackId, "audioTrack");
+
+    RtcRtpTransceiverInit audio_init;
+    MEMSET(&audio_init, 0, SIZEOF(RtcRtpTransceiverInit));
+    audio_init.direction = RTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY;
+
+    PRtcRtpTransceiver audio_transceiver = NULL;
+    ret = addTransceiver(peer_connection, &audio_track, &audio_init, &audio_transceiver);
+    if (STATUS_FAILED(ret)) {
+        if (logger) logger->warn("addTransceiver (audio) failed for peer {}, status: {} — continuing without audio",
+                                 peer_id, status_to_hex(ret));
+        // Non-fatal: continue without audio
     }
 
     // 6. Create callback context (heap-allocated, SDK stores raw pointer)
