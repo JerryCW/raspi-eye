@@ -336,6 +336,13 @@ bool WebRtcMediaManager::on_viewer_offer(
     RtcSessionDescriptionInit offer_sdp;
     MEMSET(&offer_sdp, 0, SIZEOF(RtcSessionDescriptionInit));
     offer_sdp.type = SDP_TYPE_OFFER;
+
+    // Diagnostic: log first 200 chars of SDP to verify content
+    if (logger) {
+        std::string sdp_preview = sdp_offer.substr(0, 200);
+        logger->info("SDP offer preview for peer {}: [{}]", peer_id, sdp_preview);
+    }
+
     if (sdp_offer.size() < MAX_SESSION_DESCRIPTION_INIT_SDP_LEN) {
         STRNCPY(offer_sdp.sdp, sdp_offer.c_str(), MAX_SESSION_DESCRIPTION_INIT_SDP_LEN);
     } else {
