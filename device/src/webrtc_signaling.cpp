@@ -177,6 +177,7 @@ struct WebRtcSignaling::Impl {
         channel_info.channelRoleType = SIGNALING_CHANNEL_ROLE_TYPE_MASTER;
         channel_info.cachingPolicy = SIGNALING_API_CALL_CACHE_TYPE_FILE;
         channel_info.pRegion = const_cast<PCHAR>(config.aws_region.c_str());
+        channel_info.pCertPath = const_cast<PCHAR>(aws_config.ca_path.c_str());
 
         // Create signaling client
         STATUS status = createSignalingClientSync(
