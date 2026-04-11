@@ -61,10 +61,15 @@ static int run_pipeline(int argc, char* argv[]) {
         if (logger) logger->warn("--device ignored (only used with v4l2)");
     }
 
+    if (cam_config.type == CameraSource::CameraType::V4L2 && !has_device) {
+        if (logger) logger->error("V4L2 camera requires --device (e.g. --device /dev/IMX678)");
+        log_init::shutdown();
+        return 1;
+    }
+
     if (logger) {
         if (cam_config.type == CameraSource::CameraType::V4L2) {
-            const char* dev = cam_config.device.empty() ? "/dev/video0" : cam_config.device.c_str();
-            logger->info("Starting with camera: v4l2src (device={})", dev);
+            logger->info("Starting with camera: v4l2src (device={})", cam_config.device.c_str());
         } else {
             logger->info("Starting with camera: {}",
                          CameraSource::camera_type_name(cam_config.type));

@@ -2157,3 +2157,21 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-11 — Spec: spec-4.5-camera-source-v2 / 任务: 1~4 全部任务
+
+**完成概要：** 重写 camera_source.cpp（create_source 返回 GstBin + ghost pad，新增 V4L2 格式探测 + MJPG 解码链），main.cpp 强制 V4L2 类型提供 --device，camera_source.h 接口不变，现有测试零修改通过。
+
+**测试状态：** 全部通过（11/11 套件，30.89s）— 无新增测试（Spec 约束不修改现有测试文件，新增匿名 namespace 函数在 macOS 无法测试 v4l2src，将在 Pi 5 端到端验证覆盖）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。编译零错误，ASan 无报告，所有 11 个测试套件通过。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/camera_source.cpp, device/src/main.cpp
+
+---
