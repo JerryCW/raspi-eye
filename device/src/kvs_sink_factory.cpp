@@ -67,17 +67,22 @@ GstElement* create_kvs_sink(
         if (pl) pl->info("Created fakesink stub for kvs-sink (Linux fallback)");
         return sink;  // fakesink: skip kvssink property setup
     }
-    // Set all kvssink properties in a single call.
-    // kvssink internally initializes KVS SDK on first property set;
-    // splitting into multiple g_object_set calls can cause the SDK to
-    // read uninitialized iot-certificate, leading to 52GB allocation abort.
-    std::string iot_cert = build_iot_certificate_string(aws_config);
+    // Set kvssink properties.
+    // iot-certificate MUST be set via gst_util_set_object_arg (same path as
+    // gst-launch / gst_parse_launch) because kvssink's set_property internally
+    // calls gst_structure_from_string on the value. g_object_set passes the
+    // raw C string which kvssink misinterprets as a serialized GstStructure,
+    // causing gst_structure_copy to read a corrupt size field (52GB abort).
+    // gst_util_set_object_arg handles the string-to-GstStructure conversion
+    // correctly through GParamSpec deserialization.
     g_object_set(G_OBJECT(sink),
         "stream-name", kvs_config.stream_name.c_str(),
         "aws-region",  kvs_config.aws_region.c_str(),
-        "iot-certificate", iot_cert.c_str(),
         "restart-on-error", FALSE,
         nullptr);
+    std::string iot_cert = build_iot_certificate_string(aws_config);
+    gst_util_set_object_arg(G_OBJECT(sink), "iot-certificate",
+                            iot_cert.c_str());
     // Log only stream-name and aws-region (no credential paths)
     if (pl) pl->info("Created kvssink: stream-name={}, aws-region={}",
                      kvs_config.stream_name, kvs_config.aws_region);
