@@ -309,6 +309,15 @@ GstElement* create_source(const CameraConfig& config,
 
         case CameraType::V4L2: {
 #ifdef __linux__
+            // If device path is empty, skip format probe and create a simple
+            // v4l2src bin (backward compatible with tests using default config).
+            // Format probe only runs when --device is explicitly specified.
+            if (config.device.empty()) {
+                GstElement* bin = create_single_element_bin("v4l2src", "v4l2-source", error_msg);
+                if (bin && pl) pl->info("Camera source created: v4l2src (Source Bin, no device specified)");
+                return bin;
+            }
+
             // Probe device formats
             auto formats = probe_v4l2_formats(config.device, error_msg);
             if (formats.empty()) {
