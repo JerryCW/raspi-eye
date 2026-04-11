@@ -97,20 +97,8 @@ struct WebRtcSignaling::Impl {
             case SIGNALING_MESSAGE_TYPE_OFFER:
                 if (logger) logger->info("Received SDP offer from peer: {}", peer_id);
                 if (self->offer_cb) {
-                    std::string raw(pMsg->signalingMessage.payload,
+                    std::string sdp(pMsg->signalingMessage.payload,
                                     pMsg->signalingMessage.payloadLen);
-                    // Payload may be JSON {"type":"offer","sdp":"..."} or raw SDP
-                    std::string sdp;
-                    try {
-                        auto j = nlohmann::json::parse(raw);
-                        if (j.contains("sdp")) {
-                            sdp = j["sdp"].get<std::string>();
-                        } else {
-                            sdp = raw;
-                        }
-                    } catch (...) {
-                        sdp = raw;  // Not JSON, use as-is
-                    }
                     self->offer_cb(peer_id, sdp);
                 } else {
                     if (logger) logger->warn(
@@ -121,20 +109,8 @@ struct WebRtcSignaling::Impl {
             case SIGNALING_MESSAGE_TYPE_ICE_CANDIDATE:
                 if (logger) logger->info("Received ICE candidate from peer: {}", peer_id);
                 if (self->ice_cb) {
-                    std::string raw(pMsg->signalingMessage.payload,
-                                    pMsg->signalingMessage.payloadLen);
-                    // Payload may be JSON {"candidate":"..."} or raw candidate
-                    std::string candidate;
-                    try {
-                        auto j = nlohmann::json::parse(raw);
-                        if (j.contains("candidate")) {
-                            candidate = j["candidate"].get<std::string>();
-                        } else {
-                            candidate = raw;
-                        }
-                    } catch (...) {
-                        candidate = raw;
-                    }
+                    std::string candidate(pMsg->signalingMessage.payload,
+                                          pMsg->signalingMessage.payloadLen);
                     self->ice_cb(peer_id, candidate);
                 } else {
                     if (logger) logger->warn(

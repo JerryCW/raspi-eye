@@ -352,23 +352,19 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 9. Set remote description (Viewer's Offer)
+    // 9. Set remote description (Viewer's Offer) — use SDK's deserializer
+    //    like the official sample (handles JSON {"type":"offer","sdp":"..."})
     RtcSessionDescriptionInit offer_sdp;
     MEMSET(&offer_sdp, 0, SIZEOF(RtcSessionDescriptionInit));
-    offer_sdp.type = SDP_TYPE_OFFER;
 
-    // Diagnostic: log first 200 chars of SDP to verify content
-    if (logger) {
-        std::string sdp_preview = sdp_offer.substr(0, 200);
-        logger->info("SDP offer preview for peer {}: [{}]", peer_id, sdp_preview);
-    }
-
-    if (sdp_offer.size() < MAX_SESSION_DESCRIPTION_INIT_SDP_LEN) {
-        STRNCPY(offer_sdp.sdp, sdp_offer.c_str(), MAX_SESSION_DESCRIPTION_INIT_SDP_LEN);
-    } else {
-        if (logger) logger->error("SDP offer too large for peer {} ({} bytes)",
-                                  peer_id, sdp_offer.size());
-        if (error_msg) *error_msg = "SDP offer too large";
+    ret = deserializeSessionDescriptionInit(
+        const_cast<PCHAR>(sdp_offer.c_str()),
+        static_cast<UINT32>(sdp_offer.size()),
+        &offer_sdp);
+    if (STATUS_FAILED(ret)) {
+        if (logger) logger->error("deserializeSessionDescriptionInit failed for peer {}, status: {}",
+                                  peer_id, status_to_hex(ret));
+        if (error_msg) *error_msg = "deserializeSessionDescriptionInit failed: " + status_to_hex(ret);
         delete cb_ctx;
         freePeerConnection(&peer_connection);
         return false;
@@ -384,20 +380,9 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 10. Create answer
+    // 10. Set local description (before createAnswer, per SDK sample pattern)
     RtcSessionDescriptionInit answer_sdp;
     MEMSET(&answer_sdp, 0, SIZEOF(RtcSessionDescriptionInit));
-    ret = createAnswer(peer_connection, &answer_sdp);
-    if (STATUS_FAILED(ret)) {
-        if (logger) logger->error("createAnswer failed for peer {}, status: {}",
-                                  peer_id, status_to_hex(ret));
-        if (error_msg) *error_msg = "createAnswer failed: " + status_to_hex(ret);
-        delete cb_ctx;
-        freePeerConnection(&peer_connection);
-        return false;
-    }
-
-    // 11. Set local description
     ret = setLocalDescription(peer_connection, &answer_sdp);
     if (STATUS_FAILED(ret)) {
         if (logger) logger->error("setLocalDescription failed for peer {}, status: {}",
@@ -408,8 +393,31 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
-    // 12. Send answer via signaling
-    if (!impl_->signaling.send_answer(peer_id, std::string(answer_sdp.sdp))) {
+    // 11. Create answer
+    ret = createAnswer(peer_connection, &answer_sdp);
+    if (STATUS_FAILED(ret)) {
+        if (logger) logger->error("createAnswer failed for peer {}, status: {}",
+                                  peer_id, status_to_hex(ret));
+        if (error_msg) *error_msg = "createAnswer failed: " + status_to_hex(ret);
+        delete cb_ctx;
+        freePeerConnection(&peer_connection);
+        return false;
+    }
+
+    // 12. Serialize answer to JSON and send via signaling
+    UINT32 serialized_len = MAX_SIGNALING_MESSAGE_LEN;
+    CHAR serialized_answer[MAX_SIGNALING_MESSAGE_LEN];
+    ret = serializeSessionDescriptionInit(&answer_sdp, serialized_answer, &serialized_len);
+    if (STATUS_FAILED(ret)) {
+        if (logger) logger->error("serializeSessionDescriptionInit failed for peer {}, status: {}",
+                                  peer_id, status_to_hex(ret));
+        if (error_msg) *error_msg = "serializeSessionDescriptionInit failed: " + status_to_hex(ret);
+        delete cb_ctx;
+        freePeerConnection(&peer_connection);
+        return false;
+    }
+
+    if (!impl_->signaling.send_answer(peer_id, std::string(serialized_answer, serialized_len))) {
         if (logger) logger->error("Failed to send SDP answer for peer {}", peer_id);
         if (error_msg) *error_msg = "send_answer failed";
         delete cb_ctx;
