@@ -21,6 +21,9 @@ CameraType default_camera_type();
 struct CameraConfig {
     CameraType type = default_camera_type();
     std::string device;  // v4l2src device path, empty defaults to /dev/video0
+    int width = 1280;       // Resolution width (parse/store only, pipeline use in future spec)
+    int height = 720;       // Resolution height
+    int framerate = 15;     // Capture framerate
 };
 
 // Return GStreamer factory name for the given CameraType

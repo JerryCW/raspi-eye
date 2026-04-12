@@ -2539,3 +2539,201 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/tests/shutdown_test.cpp
 
 ---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 1.1 扩展 CameraConfig 结构体
+
+**完成概要：** 在 CameraConfig 中新增 width=1280、height=720、framerate=15 三个 int 字段，带默认值和英文注释。
+
+**测试状态：** 未运行（轻量模式，纯头文件 POD 扩展）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/camera_source.h
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 1.2 为 StreamModeController 构造函数添加 debounce_ms 参数
+
+**完成概要：** 构造函数新增 `int debounce_ms = 3000` 参数，Impl 中存储并替换原 static constexpr，向后兼容。
+
+**测试状态：** 全部通过（13/13）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/stream_mode_controller.h, device/src/stream_mode_controller.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 1.3 为 log_init 添加 LoggingConfig 重载
+
+**完成概要：** 创建最小 config_manager.h（含 LoggingConfig），log_init.h 添加前向声明和新重载，log_init.cpp 实现新重载（委托 init(bool) + spdlog::set_level）。
+
+**测试状态：** 全部通过（13/13）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/config_manager.h（新建最小版本）, device/src/log_init.h, device/src/log_init.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 2.1 创建 config_manager.h
+
+**完成概要：** 扩展 config_manager.h 为完整版本：StreamingConfig、LoggingConfig、5 个纯函数声明、ConfigOverrides、ConfigManager 类（含内联 accessor）。
+
+**测试状态：** 未运行（轻量模式，纯头文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/config_manager.h
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 2.2 实现 config_manager.cpp
+
+**完成概要：** 实现 config_manager.cpp 全部 7 个函数：parse_camera_config、parse_streaming_config、parse_logging_config、validate_streaming_config、to_bitrate_config、ConfigManager::load（14 步）、ConfigManager::apply_overrides（4 步）。
+
+**测试状态：** 未运行（CMakeLists.txt 尚未添加 config_module，task 3 中编译验证）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/config_manager.cpp（新建）
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 3. 更新 CMakeLists.txt 并编译验证
+
+**完成概要：** 新增 config_module 静态库和 config_test 测试目标，链接到 pipeline_manager，log_module 添加 GST_INCLUDE_DIRS，编译通过 14/14 测试通过。
+
+**测试状态：** 全部通过（14/14）— 新增 1 个占位测试（config_test Placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/config_test.cpp（占位）
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 4.1-4.9 编写测试（Example-based + 8 PBT）
+
+**完成概要：** 在 config_test.cpp 中实现 16 个 example-based 单元测试和 8 个 PBT 属性测试，全部通过。
+
+**测试状态：** 全部通过（14/14 套件）— 新增 24 个测试（16 example + 8 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/config_test.cpp, device/CMakeLists.txt
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 5. 检查点 - 编译与测试验证
+
+**完成概要：** 全量编译通过，14/14 测试套件全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（14/14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 6.1-6.2 改造 AppContext + main.cpp
+
+**完成概要：** AppContext::init() 改为接受 ConfigOverrides，内部通过 ConfigManager 统一加载。main.cpp 命令行解析填入 ConfigOverrides，先加载配置获取 LoggingConfig 初始化日志，再传递 overrides 给 AppContext。
+
+**测试状态：** 全部通过（14/14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.h, device/src/app_context.cpp, device/src/main.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 6.3 更新 config.toml.example
+
+**完成概要：** 在 config.toml.example 中添加 [camera]、[streaming]、[logging] section 示例。
+
+**测试状态：** 未运行（轻量模式，纯文档变更）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/config/config.toml.example
+
+---
+
+### 2026-04-12 — Spec: spec-19-config-file / 任务: 7. 最终检查点 - 全量编译与测试
+
+**完成概要：** 全量 cmake configure + build + ctest 通过，14/14 测试套件全部通过，ASan 无报告，git status 确认无敏感文件被跟踪。
+
+**测试状态：** 全部通过（14/14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

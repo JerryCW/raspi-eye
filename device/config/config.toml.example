@@ -24,3 +24,38 @@ aws_region = "<your-aws-region>"
 [webrtc]
 channel_name = "<your-signaling-channel-name>"
 aws_region = "<your-aws-region>"
+
+# Camera configuration (optional, defaults shown)
+# type: test (macOS dev), v4l2 (USB camera), libcamera (CSI camera)
+# device: device path, only used with v4l2 (e.g. /dev/video0, /dev/IMX678)
+# width/height/framerate: capture resolution and framerate (parse/store only, pipeline use in future)
+[camera]
+# type = "v4l2"
+# device = "/dev/video0"
+# width = 1280
+# height = 720
+# framerate = 15
+
+# Adaptive bitrate + stream mode configuration (optional, defaults shown)
+# bitrate_min_kbps: minimum bitrate in kbps (default: 1000)
+# bitrate_max_kbps: maximum bitrate in kbps (default: 4000)
+# bitrate_step_kbps: bitrate adjustment step in kbps (default: 500)
+# bitrate_default_kbps: initial bitrate in kbps, must be in [min, max] (default: 2500)
+# bitrate_eval_interval_sec: evaluation interval in seconds (default: 5)
+# bitrate_rampup_interval_sec: ramp-up interval in seconds (default: 30)
+# debounce_sec: stream mode switch debounce in seconds (default: 3)
+[streaming]
+# bitrate_min_kbps = 1000
+# bitrate_max_kbps = 4000
+# bitrate_step_kbps = 500
+# bitrate_default_kbps = 2500
+# bitrate_eval_interval_sec = 5
+# bitrate_rampup_interval_sec = 30
+# debounce_sec = 3
+
+# Logging configuration (optional, defaults: level=info, format=text)
+# level: trace | debug | info | warn | error
+# format: text (human-readable) | json (structured single-line)
+[logging]
+# level = "info"
+# format = "text"

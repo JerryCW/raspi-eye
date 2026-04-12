@@ -4,7 +4,7 @@
 
 #include <memory>
 #include <string>
-#include "camera_source.h"
+#include "config_manager.h"
 #include "shutdown_handler.h"
 
 class AppContext {
@@ -18,7 +18,7 @@ public:
 
     // Phase 1: config loading + module creation + callback registration
     bool init(const std::string& config_path,
-              const CameraSource::CameraConfig& cam_config,
+              const ConfigOverrides& overrides,
               std::string* error_msg = nullptr);
 
     // Phase 2: pipeline build + start + signaling connect + health monitor

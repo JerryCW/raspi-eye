@@ -109,25 +109,26 @@ ShutdownSummary ShutdownHandler::execute() {
         StepStatus status = StepStatus::OK;
 
         // 每个 step 使用 thread + condition_variable 执行
-        std::mutex step_mtx;
-        std::condition_variable step_cv;
-        std::atomic<bool> step_done{false};
-        std::exception_ptr step_exception{nullptr};
+        // 使用 shared_ptr 延长变量生命周期，避免 detach 后访问已销毁的栈变量
+        auto step_mtx = std::make_shared<std::mutex>();
+        auto step_cv = std::make_shared<std::condition_variable>();
+        auto step_done = std::make_shared<std::atomic<bool>>(false);
+        auto step_exception_ptr = std::make_shared<std::exception_ptr>(nullptr);
 
-        std::thread worker([&]() {
+        std::thread worker([&fn, step_done, step_cv, step_exception_ptr]() {
             try {
                 fn();
             } catch (...) {
-                step_exception = std::current_exception();
+                *step_exception_ptr = std::current_exception();
             }
-            step_done.store(true, std::memory_order_release);
-            step_cv.notify_one();
+            step_done->store(true, std::memory_order_release);
+            step_cv->notify_one();
         });
 
         {
-            std::unique_lock<std::mutex> lock(step_mtx);
-            if (!step_cv.wait_for(lock, kStepTimeout,
-                                  [&] { return step_done.load(std::memory_order_acquire); })) {
+            std::unique_lock<std::mutex> lock(*step_mtx);
+            if (!step_cv->wait_for(lock, kStepTimeout,
+                                  [&] { return step_done->load(std::memory_order_acquire); })) {
                 // 超时：detach 线程，标记 TIMEOUT
                 worker.detach();
                 status = StepStatus::TIMEOUT;
@@ -136,7 +137,7 @@ ShutdownSummary ShutdownHandler::execute() {
                 // 正常完成：join 回收线程
                 worker.join();
                 // 检查是否有异常
-                if (step_exception) {
+                if (*step_exception_ptr) {
                     status = StepStatus::EXCEPTION;
                     logger->error("shutdown: step [{}] threw exception", name);
                 }

@@ -1,7 +1,7 @@
 // main.cpp
 // Application entry point - thin wrapper around AppContext lifecycle.
 #include "app_context.h"
-#include "camera_source.h"
+#include "config_manager.h"
 #include "log_init.h"
 #include "shutdown_handler.h"
 #include <spdlog/spdlog.h>
@@ -33,71 +33,54 @@ static gboolean check_shutdown(gpointer data) {
 }
 
 static int run_pipeline(int argc, char* argv[]) {
-    // GStreamer init (on macOS, gst_macos_main handles this)
     gst_init(&argc, &argv);
 
-    // Phase 1: Parse all command-line arguments before log init
-    bool use_json = false;
-    CameraSource::CameraConfig cam_config;
-    bool has_device = false;
-    bool camera_parse_ok = true;
-    std::string camera_raw_value;
+    // Phase 1: Parse command-line arguments into ConfigOverrides
+    ConfigOverrides overrides;
     std::string config_path = "device/config/config.toml";
 
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
         if (arg == "--log-json") {
-            use_json = true;
+            overrides.log_json = true;
         } else if (arg == "--camera" && i + 1 < argc) {
-            camera_raw_value = argv[++i];
-            CameraSource::CameraType type;
-            if (!CameraSource::parse_camera_type(camera_raw_value, type)) {
-                camera_parse_ok = false;
-            } else {
-                cam_config.type = type;
-            }
+            overrides.camera_type = argv[++i];
         } else if (arg == "--device" && i + 1 < argc) {
-            cam_config.device = argv[++i];
-            has_device = true;
+            overrides.device = argv[++i];
         } else if (arg == "--config" && i + 1 < argc) {
             config_path = argv[++i];
         }
     }
 
-    // Phase 2: Initialize logging
-    log_init::init(use_json);
+    // Phase 2: Load config to get logging settings
+    ConfigManager config;
+    std::string err;
+    if (!config.load(config_path, &err)) {
+        // Fallback: init logging with basic settings, then report error
+        log_init::init(overrides.log_json);
+        auto logger = spdlog::get("main");
+        if (logger) logger->error("Config load failed: {}", err);
+        log_init::shutdown();
+        return 1;
+    }
+    if (!config.apply_overrides(overrides, &err)) {
+        log_init::init(overrides.log_json);
+        auto logger = spdlog::get("main");
+        if (logger) logger->error("Config override failed: {}", err);
+        log_init::shutdown();
+        return 1;
+    }
+
+    // Phase 3: Initialize logging with full config (level + format)
+    log_init::init(config.logging_config());
+    log_init::create_logger("app");
+    log_init::create_logger("config");
+    log_init::create_logger("stream");
     auto logger = spdlog::get("main");
 
-    // Phase 3: Validate parsed values
-    if (!camera_parse_ok) {
-        if (logger) logger->error("Invalid camera type: {}", camera_raw_value);
-        log_init::shutdown();
-        return 1;
-    }
-
-    if (has_device && cam_config.type != CameraSource::CameraType::V4L2) {
-        if (logger) logger->warn("--device ignored (only used with v4l2)");
-    }
-
-    if (cam_config.type == CameraSource::CameraType::V4L2 && !has_device) {
-        if (logger) logger->error("V4L2 camera requires --device (e.g. --device /dev/IMX678)");
-        log_init::shutdown();
-        return 1;
-    }
-
-    if (logger) {
-        if (cam_config.type == CameraSource::CameraType::V4L2) {
-            logger->info("Starting with camera: v4l2src (device={})", cam_config.device.c_str());
-        } else {
-            logger->info("Starting with camera: {}",
-                         CameraSource::camera_type_name(cam_config.type));
-        }
-    }
-
-    // Phase 4: AppContext init
+    // Phase 4: AppContext init (will re-load config internally)
     AppContext ctx;
-    std::string err;
-    if (!ctx.init(config_path, cam_config, &err)) {
+    if (!ctx.init(config_path, overrides, &err)) {
         if (logger) logger->error("AppContext init failed: {}", err);
         log_init::shutdown();
         return 1;

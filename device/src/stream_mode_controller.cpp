@@ -52,9 +52,8 @@ const char* stream_mode_name(StreamMode mode) {
 // Impl structure
 // ---------------------------------------------------------------------------
 
-static constexpr int kDebounceMs = 3000;
-
 struct StreamModeController::Impl {
+    int debounce_ms_ = 3000;
     StreamMode current_mode_ = StreamMode::FULL;
     BranchStatus kvs_confirmed_ = BranchStatus::HEALTHY;
     BranchStatus webrtc_confirmed_ = BranchStatus::HEALTHY;
@@ -144,7 +143,7 @@ gboolean StreamModeController::Impl::evaluate_cb(gpointer user_data) {
         if (kvs_changed) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - impl->pending_kvs_time_).count();
-            if (elapsed >= kDebounceMs) {
+            if (elapsed >= impl->debounce_ms_) {
                 auto logger = spdlog::get("stream");
                 if (logger) {
                     logger->warn("KVS branch status confirmed: {}",
@@ -159,7 +158,7 @@ gboolean StreamModeController::Impl::evaluate_cb(gpointer user_data) {
         if (webrtc_changed) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - impl->pending_webrtc_time_).count();
-            if (elapsed >= kDebounceMs) {
+            if (elapsed >= impl->debounce_ms_) {
                 auto logger = spdlog::get("stream");
                 if (logger) {
                     logger->warn("WebRTC branch status confirmed: {}",
@@ -214,9 +213,10 @@ gboolean StreamModeController::Impl::evaluate_cb(gpointer user_data) {
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
 
-StreamModeController::StreamModeController(GstElement* pipeline)
+StreamModeController::StreamModeController(GstElement* pipeline, int debounce_ms)
     : impl_(std::make_unique<Impl>()) {
     impl_->pipeline_ = pipeline;
+    impl_->debounce_ms_ = debounce_ms;
 }
 
 StreamModeController::~StreamModeController() {
@@ -282,7 +282,7 @@ void StreamModeController::start() {
     auto logger = spdlog::get("stream");
     if (logger) {
         logger->info("StreamModeController started (debounce={}ms)",
-                     kDebounceMs);
+                     impl_->debounce_ms_);
     }
 }
 

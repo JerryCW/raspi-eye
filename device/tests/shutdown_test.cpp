@@ -142,15 +142,16 @@ RC_GTEST_PROP(ShutdownPBT, ReverseOrderInvariant, ()) {
 
 RC_GTEST_PROP(ShutdownPBT, ExceptionIsolationInvariant, ()) {
     const auto count = *rc::gen::inRange(2, 6);
-    // 为每个 step 随机决定是否抛异常，确保至少一个非异常 step
+    // Generate a bitmask for which steps throw (at least one must not throw)
+    auto bitmask = *rc::gen::container<std::vector<bool>>(
+        count, rc::gen::arbitrary<bool>());
+    // Ensure at least one non-exception step
+    bool has_ok = false;
+    for (bool b : bitmask) { if (!b) { has_ok = true; break; } }
+    if (!has_ok) { bitmask[0] = false; }
     std::set<int> exception_set;
     for (int i = 0; i < count; ++i) {
-        if (*rc::gen::inRange(0, 2) == 1) {
-            exception_set.insert(i);
-        }
-    }
-    if (static_cast<int>(exception_set.size()) >= count) {
-        exception_set.erase(exception_set.begin());
+        if (bitmask[i]) exception_set.insert(i);
     }
 
     ShutdownHandler handler;

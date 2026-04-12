@@ -51,7 +51,7 @@ const char* stream_mode_name(StreamMode mode);
 class StreamModeController {
 public:
     // pipeline: not owned, must outlive the controller (or be replaced via set_pipeline).
-    explicit StreamModeController(GstElement* pipeline);
+    explicit StreamModeController(GstElement* pipeline, int debounce_ms = 3000);
     ~StreamModeController();
 
     // No copy

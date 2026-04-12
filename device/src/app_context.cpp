@@ -3,9 +3,9 @@
 #include "app_context.h"
 
 #include <spdlog/spdlog.h>
-#include <unordered_map>
 
 #include "bitrate_adapter.h"
+#include "config_manager.h"
 #include "credential_provider.h"
 #include "kvs_sink_factory.h"
 #include "pipeline_builder.h"
@@ -26,6 +26,8 @@ struct AppContext::Impl {
     KvsSinkFactory::KvsConfig kvs_config;
     WebRtcConfig webrtc_config;
     CameraSource::CameraConfig cam_config;
+    StreamingConfig streaming_config;
+    LoggingConfig logging_config;
 
     // Modules (declaration order determines destruction order)
     std::unique_ptr<WebRtcSignaling> signaling;
@@ -51,39 +53,26 @@ AppContext::~AppContext() = default;
 // ============================================================
 
 bool AppContext::init(const std::string& config_path,
-                     const CameraSource::CameraConfig& cam_config,
+                     const ConfigOverrides& overrides,
                      std::string* error_msg) {
     auto logger = spdlog::get("app");
 
-    impl_->cam_config = cam_config;
-
-    // --- Parse [aws] section ---
-    std::unordered_map<std::string, std::string> kv;
-    kv = parse_toml_section(config_path, "aws", error_msg);
-    if (kv.empty() && error_msg && !error_msg->empty()) {
+    // --- Load all config via ConfigManager ---
+    ConfigManager config;
+    if (!config.load(config_path, error_msg)) {
         return false;
     }
-    if (!build_aws_config(kv, impl_->aws_config, error_msg)) {
+    if (!config.apply_overrides(overrides, error_msg)) {
         return false;
     }
 
-    // --- Parse [kvs] section ---
-    kv = parse_toml_section(config_path, "kvs", error_msg);
-    if (kv.empty() && error_msg && !error_msg->empty()) {
-        return false;
-    }
-    if (!KvsSinkFactory::build_kvs_config(kv, impl_->kvs_config, error_msg)) {
-        return false;
-    }
-
-    // --- Parse [webrtc] section ---
-    kv = parse_toml_section(config_path, "webrtc", error_msg);
-    if (kv.empty() && error_msg && !error_msg->empty()) {
-        return false;
-    }
-    if (!build_webrtc_config(kv, impl_->webrtc_config, error_msg)) {
-        return false;
-    }
+    // --- Store configs from ConfigManager ---
+    impl_->aws_config = config.aws_config();
+    impl_->kvs_config = config.kvs_config();
+    impl_->webrtc_config = config.webrtc_config();
+    impl_->cam_config = config.camera_config();
+    impl_->streaming_config = config.streaming_config();
+    impl_->logging_config = config.logging_config();
 
     // --- Create Signaling ---
     impl_->signaling = WebRtcSignaling::create(
@@ -163,11 +152,13 @@ bool AppContext::start(std::string* error_msg) {
 
     // --- Create StreamModeController ---
     impl_->stream_controller = std::make_unique<StreamModeController>(
-        impl_->pipeline_manager->pipeline());
+        impl_->pipeline_manager->pipeline(),
+        impl_->streaming_config.debounce_sec * 1000);
 
     // --- Create BitrateAdapter ---
     impl_->bitrate_adapter = std::make_unique<BitrateAdapter>(
-        impl_->pipeline_manager->pipeline());
+        impl_->pipeline_manager->pipeline(),
+        to_bitrate_config(impl_->streaming_config));
 
     // --- Register mode change callback: notify BitrateAdapter ---
     impl_->stream_controller->set_mode_change_callback(

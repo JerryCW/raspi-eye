@@ -47,7 +47,7 @@ find_package(CURL REQUIRED)
 
 # 日志模块库
 add_library(log_module STATIC src/json_formatter.cpp src/log_init.cpp)
-target_include_directories(log_module PUBLIC src)
+target_include_directories(log_module PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_libraries(log_module PUBLIC spdlog::spdlog)
 
 # 流模式控制模块
@@ -190,6 +190,14 @@ target_link_libraries(webrtc_media_module PUBLIC spdlog::spdlog webrtc_module)
 # Link webrtc_media_module to pipeline_manager
 target_link_libraries(pipeline_manager PUBLIC webrtc_media_module)
 
+# 配置管理模块
+add_library(config_module STATIC src/config_manager.cpp)
+target_include_directories(config_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_libraries(config_module PUBLIC credential_module kvs_module webrtc_module log_module bitrate_module)
+
+# Link config_module to pipeline_manager
+target_link_libraries(pipeline_manager PUBLIC config_module)
+
 # Linux: find KVS WebRTC C SDK
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # User can specify SDK path via -DKVS_WEBRTC_SDK_DIR=/path/to/sdk
@@ -278,6 +286,11 @@ target_link_libraries(bitrate_test PRIVATE
     rapidcheck
     rapidcheck_gtest)
 add_test(NAME bitrate_test COMMAND bitrate_test)
+
+# 配置管理测试
+add_executable(config_test tests/config_test.cpp)
+target_link_libraries(config_test PRIVATE config_module pipeline_manager GTest::gtest_main rapidcheck rapidcheck_gtest)
+add_test(NAME config_test COMMAND config_test)
 
 # GLib 在 _dl_init 中有 16KB 分配被 LeakSanitizer 误报，
 # 为所有测试禁用 leak detection，保留 ASan 其他检查（heap-use-after-free 等）
