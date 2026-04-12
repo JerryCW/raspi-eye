@@ -21,6 +21,8 @@ INSTALL_BIN="/usr/local/bin/raspi-eye"
 CONFIG_DIR="/etc/raspi-eye"
 CERTS_DIR="/etc/raspi-eye/certs"
 PLUGINS_DIR="/usr/local/lib/raspi-eye/plugins"
+MODELS_DIR="/opt/raspi-eye/models"
+EVENTS_DIR="/var/lib/raspi-eye/events"
 SERVICE_NAME="raspi-eye.service"
 
 # --- Deploy summary tracking ---
@@ -28,6 +30,7 @@ SUMMARY_BINARY=""
 SUMMARY_CONFIG=""
 SUMMARY_CERTS=""
 SUMMARY_PLUGINS=""
+SUMMARY_MODELS=""
 SUMMARY_SERVICE=""
 
 # --- Logging ---
@@ -135,8 +138,10 @@ deploy_config() {
     fi
 
     sudo cp "${src}" "${CONFIG_DIR}/config.toml"
-    # Replace dev cert paths with system paths (first deploy only)
+    # Replace dev paths with system paths (first deploy only)
     sudo sed -i 's|device/certs/|/etc/raspi-eye/certs/|g' "${CONFIG_DIR}/config.toml"
+    sudo sed -i 's|device/models/|/opt/raspi-eye/models/|g' "${CONFIG_DIR}/config.toml"
+    sudo sed -i 's|device/events/|/var/lib/raspi-eye/events/|g' "${CONFIG_DIR}/config.toml"
     sudo chmod 640 "${CONFIG_DIR}/config.toml"
     sudo chown pi:pi "${CONFIG_DIR}/config.toml"
     SUMMARY_CONFIG="new (from ${src})"
@@ -217,6 +222,48 @@ install_plugins() {
     log "Plugins installed to ${PLUGINS_DIR}/"
 }
 
+deploy_models() {
+    log "Deploying models..."
+    local has_onnx=false
+    for f in device/models/*.onnx; do
+        if [[ -f "${f}" ]]; then
+            has_onnx=true
+            break
+        fi
+    done
+
+    if [[ "${has_onnx}" == "false" ]]; then
+        log "WARNING: No .onnx files in device/models/, skipping model deploy"
+        SUMMARY_MODELS="skipped (no .onnx files)"
+        return
+    fi
+
+    sudo mkdir -p "${MODELS_DIR}"
+    sudo chown pi:pi "${MODELS_DIR}"
+
+    for f in device/models/*.onnx device/models/*.onnx.optimized; do
+        if [[ -f "${f}" ]]; then
+            local dest="${MODELS_DIR}/$(basename "${f}")"
+            # Only copy if source is newer or dest doesn't exist
+            if [[ ! -f "${dest}" ]] || [[ "${f}" -nt "${dest}" ]]; then
+                sudo cp "${f}" "${dest}"
+                sudo chmod 644 "${dest}"
+                sudo chown pi:pi "${dest}"
+                log "  copied $(basename "${f}")"
+            else
+                log "  $(basename "${f}") up to date"
+            fi
+        fi
+    done
+
+    # Create events directory
+    sudo mkdir -p "${EVENTS_DIR}"
+    sudo chown pi:pi "${EVENTS_DIR}"
+
+    SUMMARY_MODELS="deployed to ${MODELS_DIR}"
+    log "Models deployed to ${MODELS_DIR}/"
+}
+
 restart_service() {
     log "Restarting ${SERVICE_NAME}..."
 
@@ -248,6 +295,7 @@ print_summary() {
     log "Config:   ${SUMMARY_CONFIG:-not run}"
     log "Certs:    ${SUMMARY_CERTS:-not run}"
     log "Plugins:  ${SUMMARY_PLUGINS:-not run}"
+    log "Models:   ${SUMMARY_MODELS:-not run}"
     log "Service:  ${SUMMARY_SERVICE:-not run}"
     log "========================================="
     log "Deploy complete!"
@@ -265,6 +313,7 @@ main() {
     deploy_config
     deploy_certs
     install_plugins
+    deploy_models
     restart_service
     print_summary
 }

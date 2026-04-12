@@ -3425,3 +3425,39 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证检查点）
 
 ---
+
+### 2026-04-13 — Spec: spec-16-pipeline-cpu-optimization / Pi 5 端到端验证与热修复
+
+**完成概要：** Pi 5 端到端验证 spec-16 优化效果，发现并修复三个部署问题：g_idle_add busy loop、merge conflict、systemd ProtectSystem 阻止 ONNX Runtime 写优化模型。最终 KVS+WebRTC+AI(yolo11n@2fps) 三路全开 CPU ~67%，较优化前 ~120%（无 AI）大幅下降。
+
+**测试状态：** Pi 5 端到端验证通过 — 无新增单元测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | 主线程 99.9% CPU，gst-launch 同管道只有 20% | Spec 缺少信息 | `g_idle_add(check_shutdown, loop)` 在 GMainLoop 空闲时不断调用回调，每次返回 G_SOURCE_CONTINUE 立刻再调，形成 busy loop | `g_idle_add` → `g_timeout_add(200, ...)` 每 200ms 检查一次 | SHALL NOT 使用 g_idle_add 做轮询检查，必须用 g_timeout_add 设置合理间隔 |
+| 2 | git pull --rebase 后 CMakeLists.txt 有未解决的 merge conflict（<<<<<<< HEAD 标记） | 操作失误 | `Parse error. Expected a command name, got unquoted argument` at line 66 | 手动解决冲突，统一用 camera_module 名字，git add + git rebase --continue | rebase 后必须检查所有文件的冲突标记 |
+| 3 | AI 启动失败：ONNX Runtime 无法写优化模型 | Spec 缺少信息 | `open file "/opt/raspi-eye/models/yolo11s.onnx.optimized" failed: Read-only file system`，systemd `ProtectSystem=strict` 导致 /opt 只读 | raspi-eye.service 的 ReadWritePaths 加上 `/opt/raspi-eye/models /var/lib/raspi-eye` | SHALL NOT 在 systemd ProtectSystem=strict 下遗漏 ONNX Runtime 需要写入优化模型的目录 |
+| 4 | AI 日志不输出：`spdlog::info()` 用默认 logger 但未初始化 | Spec 缺少信息 | AI skip/create 日志用 `spdlog::info()` 而非命名 logger，默认 logger 未初始化导致日志静默丢失 | 改为使用 `logger->info()`（app logger） | SHALL NOT 在 app_context 中使用 spdlog 全局函数，必须用命名 logger |
+| 5 | /etc/raspi-eye/config.toml 证书路径是相对路径，systemd WorkingDirectory=/tmp 找不到 | Spec 缺少信息 | `Unable to load SSL Client certs file from device/certs/root-ca.pem` | deploy 脚本自动替换相对路径为系统绝对路径 | config.toml 中所有文件路径必须是绝对路径 |
+
+**CPU 性能对比：**
+
+| 配置 | CPU 占用 | 说明 |
+|------|---------|------|
+| 优化前（YUYV + videoconvert + g_idle_add） | ~120% | 无 AI，KVS only |
+| 优化后（MJPG + jpegdec + g_timeout_add，KVS only） | ~40% | 与 gst-launch 基线一致 |
+| 优化后（KVS + WebRTC） | ~27% | 三路中两路开启 |
+| 优化后（KVS + WebRTC + AI yolo11n@2fps） | ~67% | 三路全开 |
+| 优化后（KVS + WebRTC + AI yolo11s@2fps） | ~227% | 大模型太重 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 使用 `g_idle_add` 做轮询检查（如 shutdown flag），必须用 `g_timeout_add` 设置合理间隔（来源：spec-16 Pi 5 验证）
+- **Tasks 层：** SHALL NOT 在 systemd `ProtectSystem=strict` 下遗漏应用需要写入的目录（如 ONNX Runtime 优化模型目录），必须在 `ReadWritePaths` 中列出
+- **Tasks 层：** SHALL NOT 在 app_context 中使用 `spdlog::info()` 等全局函数，必须用命名 logger（如 `spdlog::get("app")`），否则默认 logger 未初始化时日志静默丢失
+
+**涉及文件：** device/src/main.cpp, device/src/app_context.cpp, device/CMakeLists.txt, device/config/config.toml, scripts/raspi-eye.service, scripts/pi-deploy.sh
+
+---

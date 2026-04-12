@@ -130,20 +130,24 @@ bool AppContext::init(const std::string& config_path,
     // --- Create AiPipelineHandler (optional, ENABLE_YOLO only) ---
 #ifdef ENABLE_YOLO
     const auto& ai_cfg = config.ai_config();
-    if (!ai_cfg.model_path.empty() && std::filesystem::exists(ai_cfg.model_path)) {
+    if (ai_cfg.enabled && !ai_cfg.model_path.empty() && std::filesystem::exists(ai_cfg.model_path)) {
         std::string det_err;
         auto detector = YoloDetector::create(ai_cfg.model_path, DetectorConfig{}, &det_err);
         if (detector) {
             std::string ai_err;
             impl_->ai_handler_ = AiPipelineHandler::create(std::move(detector), ai_cfg, &ai_err);
             if (!impl_->ai_handler_) {
-                spdlog::warn("Failed to create AiPipelineHandler: {}", ai_err);
+                if (logger) logger->warn("Failed to create AiPipelineHandler: {}", ai_err);
+            } else {
+                if (logger) logger->info("AiPipelineHandler created: model={}", ai_cfg.model_path);
             }
         } else {
-            spdlog::warn("Failed to create YoloDetector: {}", det_err);
+            if (logger) logger->warn("Failed to create YoloDetector: {}", det_err);
         }
     } else {
-        spdlog::info("AI pipeline skipped: model_path empty or file not found");
+        if (logger) logger->info("AI pipeline skipped: enabled={}, model_path='{}', exists={}",
+                                  ai_cfg.enabled, ai_cfg.model_path,
+                                  !ai_cfg.model_path.empty() && std::filesystem::exists(ai_cfg.model_path));
     }
 #endif
 

@@ -39,7 +39,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-ReadWritePaths=/etc/raspi-eye
+ReadWritePaths=/etc/raspi-eye /opt/raspi-eye/models /var/lib/raspi-eye
 
 [Install]
 WantedBy=multi-user.target
