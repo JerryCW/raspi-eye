@@ -2939,3 +2939,111 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/pipeline_builder.cpp（修复条件编译）
 
 ---
+
+### 2026-04-12 — Spec: spec-11-s3-uploader / 任务: 1.1 + 1.2 SigV4 纯函数与 S3Uploader 头文件
+
+**完成概要：** 创建 s3_uploader.h（S3Config POD、12 个 SigV4 纯函数声明、S3PutFunction 类型别名、S3Uploader 类声明）和 s3_uploader.cpp（SigV4 纯函数实现：to_hex、sha256_hex/OpenSSL EVP、hmac_sha256/OpenSSL HMAC、uri_encode、build_canonical_request、build_string_to_sign、derive_signing_key/4步HMAC链、build_authorization_header、build_s3_key/字段校验）。
+
+**测试状态：** 未运行（轻量模式，纯源文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/s3_uploader.h, device/src/s3_uploader.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-11-s3-uploader / 任务: 2.1 + 2.2 S3Uploader 类核心实现
+
+**完成概要：** 在 s3_uploader.cpp 中实现 S3Uploader 类方法（create 工厂/构造函数/默认 libcurl PUT/set_put_function/start/stop/析构）和扫描上传逻辑（scan_loop/scan_closed_events 自由函数/upload_event/upload_file + SigV4 签名 + 指数退避重试）。scan_closed_events 声明添加到 s3_uploader.h 以便测试。
+
+**测试状态：** 未运行（测试覆盖将在任务 6 s3_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/s3_uploader.h, device/src/s3_uploader.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-11-s3-uploader / 任务: 3.1 + 3.2 ConfigManager S3Config 扩展
+
+**完成概要：** config_manager.h 添加 `#include "s3_uploader.h"`、声明 parse_s3_config() 纯函数、ConfigManager 新增 s3_config_ 成员和 s3_config() 访问器。config_manager.cpp 实现 parse_s3_config()（bucket、region、scan_interval_sec < 5 回退默认 30、max_retries），ConfigManager::load() 新增 [s3] section 解析。
+
+**测试状态：** 未运行（轻量模式，配置扩展）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/config_manager.h, device/src/config_manager.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-11-s3-uploader / 任务: 4.1 + 4.2 + 4.3 AppContext 集成 + CMake + config.toml
+
+**完成概要：** app_context.cpp 集成 S3Uploader 生命周期（init 创建 + start 启动 + shutdown 注册 stop）。CMakeLists.txt 新增 find_package(OpenSSL)、s3_module 静态库（始终编译）、s3_test 测试目标。config.toml 新增 [s3] section。cmake configure + build + 16/16 tests passed。
+
+**测试状态：** 全部通过（16/16）— 新增 1 个占位测试（s3_test Placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.cpp, device/CMakeLists.txt, device/config/config.toml, device/tests/s3_test.cpp（占位）
+
+---
+
+### 2026-04-12 — Spec: spec-11-s3-uploader / 任务: 6.1-6.7 Example-based 测试 + 6 个 PBT 属性
+
+**完成概要：** 创建完整 s3_test.cpp：12 个 example-based 测试（SHA256 AWS 向量、HMAC-SHA256、derive_signing_key AWS 向量、SigV4 完整签名格式、build_s3_key 正常/非法输入、create() nullptr/空桶、URI 编码、parse_s3_config 有效/无效）+ 12 个 PBT 属性测试（Property 1-6 各 2 个子属性）。全量 16/16 测试套件通过，ASan 无报告。
+
+**测试状态：** 全部通过（16/16 套件，s3_test 含 24 个测试）— 新增 24 个测试（替换 placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/s3_test.cpp, device/CMakeLists.txt（s3_test 链接依赖更新）
+
+---
+
+### 2026-04-12 — Spec: spec-11-s3-uploader / 任务: 7 + 8 检查点 — 全量测试 + 最终验证
+
+**完成概要：** 任务 7 全量测试 16/16 通过（ENABLE_YOLO=ON）。任务 8 最终检查点：ENABLE_YOLO=OFF 编译通过 + 14/14 测试通过（s3_module 不依赖 YOLO），现有测试行为不变，ASan 无报告。Pi 5 Release 验证 SKIPPED（用户要求跳过）。未执行 git commit。
+
+**测试状态：** 全部通过（ENABLE_YOLO=ON: 16/16, ENABLE_YOLO=OFF: 14/14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证检查点）
+
+---

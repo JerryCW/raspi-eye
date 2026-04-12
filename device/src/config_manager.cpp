@@ -263,6 +263,46 @@ bool parse_ai_config(
 }
 
 // ============================================================
+// parse_s3_config
+// ============================================================
+
+bool parse_s3_config(
+    const std::unordered_map<std::string, std::string>& kv,
+    S3Config& config,
+    std::string* error_msg) {
+
+    auto log = config_logger();
+
+    // bucket
+    if (auto* val = find_value(kv, "bucket")) {
+        config.bucket = *val;
+    }
+
+    // region
+    if (auto* val = find_value(kv, "region")) {
+        config.region = *val;
+    }
+
+    // scan_interval_sec (< 5 uses default 30)
+    if (auto* val = find_value(kv, "scan_interval_sec")) {
+        int interval = std::stoi(*val);
+        if (interval < 5) {
+            if (log) log->warn("scan_interval_sec={} is below minimum 5, using default 30", interval);
+            config.scan_interval_sec = 30;
+        } else {
+            config.scan_interval_sec = interval;
+        }
+    }
+
+    // max_retries
+    if (auto* val = find_value(kv, "max_retries")) {
+        config.max_retries = std::stoi(*val);
+    }
+
+    return true;
+}
+
+// ============================================================
 // ConfigManager::load
 // ============================================================
 
@@ -331,6 +371,13 @@ bool ConfigManager::load(const std::string& config_path,
     }
     // Set device_id from aws config
     ai_config_.device_id = aws_config_.thing_name;
+
+    // Parse [s3] (optional)
+    std::string s3_err;
+    auto kv_s3 = parse_toml_section(config_path, "s3", &s3_err);
+    if (!parse_s3_config(kv_s3, s3_config_, error_msg)) {
+        return false;
+    }
 
     if (log) {
         log->info("Configuration loaded from {}", config_path);

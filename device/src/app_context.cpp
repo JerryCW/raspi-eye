@@ -13,6 +13,7 @@
 #include "pipeline_manager.h"
 #include "shutdown_handler.h"
 #include "stream_mode_controller.h"
+#include "s3_uploader.h"
 #include "webrtc_media.h"
 #include "webrtc_signaling.h"
 
@@ -46,6 +47,8 @@ struct AppContext::Impl {
 #ifdef ENABLE_YOLO
     std::unique_ptr<AiPipelineHandler> ai_handler_;
 #endif
+
+    std::unique_ptr<S3Uploader> s3_uploader_;
 
     // Cleanup manager
     ShutdownHandler shutdown_handler;
@@ -136,6 +139,30 @@ bool AppContext::init(const std::string& config_path,
         spdlog::info("AI pipeline skipped: model_path empty or file not found");
     }
 #endif
+
+    // --- Create S3Uploader (optional, requires S3 bucket config) ---
+    const auto& s3_cfg = config.s3_config();
+    if (!s3_cfg.bucket.empty()) {
+        auto http_client = std::make_shared<CurlHttpClient>();
+        std::string cred_err;
+        auto cred_provider = CredentialProvider::create(config_path, http_client, &cred_err);
+        if (cred_provider) {
+            std::string s3_err;
+            impl_->s3_uploader_ = S3Uploader::create(
+                s3_cfg,
+                config.ai_config().snapshot_dir,
+                impl_->aws_config.thing_name,
+                std::shared_ptr<CredentialProvider>(cred_provider.release()),
+                &s3_err);
+            if (!impl_->s3_uploader_) {
+                spdlog::warn("Failed to create S3Uploader: {}", s3_err);
+            }
+        } else {
+            spdlog::info("S3Uploader skipped: credentials not available ({})", cred_err);
+        }
+    } else {
+        spdlog::info("S3Uploader skipped: S3 bucket not configured");
+    }
 
     // --- Info log (only resource identifiers, no secrets) ---
     if (logger) {
@@ -292,6 +319,11 @@ bool AppContext::start(std::string* error_msg) {
         });
     }
 #endif
+    if (impl_->s3_uploader_) {
+        impl_->shutdown_handler.register_step("s3_uploader", [this]() {
+            impl_->s3_uploader_->stop();
+        });
+    }
     impl_->shutdown_handler.register_step("pipeline", [this]() {
         impl_->pipeline_manager->stop();
         impl_->pipeline_manager.reset();
@@ -303,6 +335,16 @@ bool AppContext::start(std::string* error_msg) {
         if (logger) {
             logger->warn("Signaling connect failed (will retry): {}",
                          connect_err);
+        }
+    }
+
+    // --- Start S3Uploader (independent of GStreamer pipeline) ---
+    if (impl_->s3_uploader_) {
+        std::string s3_start_err;
+        if (!impl_->s3_uploader_->start(&s3_start_err)) {
+            if (logger) {
+                logger->warn("Failed to start S3Uploader: {}", s3_start_err);
+            }
         }
     }
 

@@ -45,6 +45,9 @@ FetchContent_MakeAvailable(json)
 # libcurl（系统包）
 find_package(CURL REQUIRED)
 
+# OpenSSL（SigV4 签名用 libcrypto）
+find_package(OpenSSL REQUIRED)
+
 # 日志模块库
 add_library(log_module STATIC src/json_formatter.cpp src/log_init.cpp)
 target_include_directories(log_module PUBLIC src ${GST_INCLUDE_DIRS})
@@ -140,6 +143,19 @@ target_link_libraries(kvs_test PRIVATE
     rapidcheck_gtest)
 add_test(NAME kvs_test COMMAND kvs_test
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# S3 upload module (always compiled, independent of ENABLE_YOLO)
+add_library(s3_module STATIC src/s3_uploader.cpp)
+target_include_directories(s3_module PUBLIC src)
+target_link_libraries(s3_module PUBLIC
+    credential_module
+    nlohmann_json::nlohmann_json
+    CURL::libcurl
+    spdlog::spdlog
+    OpenSSL::Crypto)
+
+# Link s3_module to pipeline_manager
+target_link_libraries(pipeline_manager PUBLIC s3_module)
 
 # YOLO detector module (optional, requires ONNX Runtime)
 option(ENABLE_YOLO "Build YOLO detector module (requires ONNX Runtime)" ON)
@@ -304,6 +320,17 @@ add_test(NAME bitrate_test COMMAND bitrate_test)
 add_executable(config_test tests/config_test.cpp)
 target_link_libraries(config_test PRIVATE config_module pipeline_manager GTest::gtest_main rapidcheck rapidcheck_gtest)
 add_test(NAME config_test COMMAND config_test)
+
+# S3 upload test
+add_executable(s3_test tests/s3_test.cpp)
+target_link_libraries(s3_test PRIVATE
+    s3_module
+    config_module
+    pipeline_manager
+    GTest::gtest_main
+    rapidcheck
+    rapidcheck_gtest)
+add_test(NAME s3_test COMMAND s3_test)
 
 # GLib 在 _dl_init 中有 16KB 分配被 LeakSanitizer 误报，
 # 为所有测试禁用 leak detection，保留 ASan 其他检查（heap-use-after-free 等）
