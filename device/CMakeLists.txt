@@ -195,6 +195,19 @@ if(ENABLE_YOLO)
         add_test(NAME yolo_test COMMAND yolo_test)
         set_tests_properties(yolo_test PROPERTIES LABELS "slow")
 
+        add_library(ai_pipeline_module STATIC src/ai_pipeline_handler.cpp)
+        target_link_libraries(ai_pipeline_module PUBLIC
+            yolo_module pipeline_manager nlohmann_json::nlohmann_json)
+        target_include_directories(ai_pipeline_module PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+
+        add_executable(ai_pipeline_test tests/ai_pipeline_test.cpp)
+        target_link_libraries(ai_pipeline_test PRIVATE
+            ai_pipeline_module GTest::gtest_main rapidcheck rapidcheck_gtest)
+        add_test(NAME ai_pipeline_test COMMAND ai_pipeline_test)
+
+        target_compile_definitions(pipeline_manager PRIVATE ENABLE_YOLO)
+        target_link_libraries(pipeline_manager PUBLIC ai_pipeline_module)
+
         message(STATUS "YOLO module: ENABLED (ONNX Runtime found)")
     else()
         message(STATUS "YOLO module: DISABLED (ONNX Runtime not found)")

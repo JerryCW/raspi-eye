@@ -18,6 +18,7 @@
 #include "kvs_sink_factory.h"
 
 class WebRtcMediaManager;  // Forward declaration
+class AiPipelineHandler;   // Forward declaration
 
 namespace PipelineBuilder {
 
@@ -33,6 +34,7 @@ GstElement* build_tee_pipeline(
     CameraSource::CameraConfig config = CameraSource::CameraConfig{},
     const KvsSinkFactory::KvsConfig* kvs_config = nullptr,
     const AwsConfig* aws_config = nullptr,
-    WebRtcMediaManager* webrtc_media = nullptr);
+    WebRtcMediaManager* webrtc_media = nullptr,
+    AiPipelineHandler* ai_handler = nullptr);
 
 } // namespace PipelineBuilder
