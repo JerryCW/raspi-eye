@@ -50,11 +50,21 @@ add_library(log_module STATIC src/json_formatter.cpp src/log_init.cpp)
 target_include_directories(log_module PUBLIC src)
 target_link_libraries(log_module PUBLIC spdlog::spdlog)
 
+# 流模式控制模块
+add_library(stream_mode_module STATIC src/stream_mode_controller.cpp)
+target_include_directories(stream_mode_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_libraries(stream_mode_module PUBLIC ${GST_LIBRARIES} spdlog::spdlog)
+
+# 自适应码率模块
+add_library(bitrate_module STATIC src/bitrate_adapter.cpp)
+target_include_directories(bitrate_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_libraries(bitrate_module PUBLIC stream_mode_module ${GST_LIBRARIES} spdlog::spdlog)
+
 # 主程序库（供测试和 main 共用）
 add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/camera_source.cpp src/pipeline_health.cpp src/shutdown_handler.cpp src/app_context.cpp)
 target_include_directories(pipeline_manager PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_LIBRARY_DIRS})
-target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module)
+target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module stream_mode_module bitrate_module)
 target_compile_options(pipeline_manager PUBLIC ${GST_CFLAGS_OTHER})
 
 # GST_APP include/link for pipeline_manager (appsink support)
@@ -246,3 +256,24 @@ target_link_libraries(webrtc_media_test PRIVATE
     rapidcheck_gtest)
 add_test(NAME webrtc_media_test COMMAND webrtc_media_test
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# 流模式控制测试
+add_executable(stream_mode_test tests/stream_mode_test.cpp)
+target_link_libraries(stream_mode_test PRIVATE
+    stream_mode_module
+    pipeline_manager
+    GTest::gtest
+    rapidcheck
+    rapidcheck_gtest)
+add_test(NAME stream_mode_test COMMAND stream_mode_test)
+
+# 自适应码率测试
+add_executable(bitrate_test tests/bitrate_test.cpp)
+target_link_libraries(bitrate_test PRIVATE
+    bitrate_module
+    stream_mode_module
+    pipeline_manager
+    GTest::gtest
+    rapidcheck
+    rapidcheck_gtest)
+add_test(NAME bitrate_test COMMAND bitrate_test)

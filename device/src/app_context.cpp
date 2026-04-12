@@ -5,12 +5,14 @@
 #include <spdlog/spdlog.h>
 #include <unordered_map>
 
+#include "bitrate_adapter.h"
 #include "credential_provider.h"
 #include "kvs_sink_factory.h"
 #include "pipeline_builder.h"
 #include "pipeline_health.h"
 #include "pipeline_manager.h"
 #include "shutdown_handler.h"
+#include "stream_mode_controller.h"
 #include "webrtc_media.h"
 #include "webrtc_signaling.h"
 
@@ -30,6 +32,8 @@ struct AppContext::Impl {
     std::unique_ptr<WebRtcMediaManager> media_manager;
     std::unique_ptr<PipelineManager> pipeline_manager;
     std::unique_ptr<PipelineHealthMonitor> health_monitor;
+    std::unique_ptr<StreamModeController> stream_controller;
+    std::unique_ptr<BitrateAdapter> bitrate_adapter;
 
     // Cleanup manager
     ShutdownHandler shutdown_handler;
@@ -157,6 +161,21 @@ bool AppContext::start(std::string* error_msg) {
     impl_->health_monitor = std::make_unique<PipelineHealthMonitor>(
         impl_->pipeline_manager->pipeline());
 
+    // --- Create StreamModeController ---
+    impl_->stream_controller = std::make_unique<StreamModeController>(
+        impl_->pipeline_manager->pipeline());
+
+    // --- Create BitrateAdapter ---
+    impl_->bitrate_adapter = std::make_unique<BitrateAdapter>(
+        impl_->pipeline_manager->pipeline());
+
+    // --- Register mode change callback: notify BitrateAdapter ---
+    impl_->stream_controller->set_mode_change_callback(
+        [this](StreamMode old_mode, StreamMode new_mode,
+               const std::string& /*reason*/) {
+            impl_->bitrate_adapter->on_mode_changed(old_mode, new_mode);
+        });
+
     // --- Register rebuild callback ---
     impl_->health_monitor->set_rebuild_callback([this]() -> GstElement* {
         std::string err;
@@ -177,6 +196,10 @@ bool AppContext::start(std::string* error_msg) {
             return nullptr;
         }
         impl_->pipeline_manager = std::move(new_pm);
+        impl_->stream_controller->set_pipeline(
+            impl_->pipeline_manager->pipeline());
+        impl_->bitrate_adapter->set_pipeline(
+            impl_->pipeline_manager->pipeline());
         return impl_->pipeline_manager->pipeline();
     });
 
@@ -191,12 +214,25 @@ bool AppContext::start(std::string* error_msg) {
             }
         });
 
+    // --- Start stream controller and bitrate adapter ---
+    impl_->stream_controller->start();
+    impl_->bitrate_adapter->start();
+
     // --- Start health monitoring ---
     impl_->health_monitor->start("src");
 
     // --- Register shutdown steps for pipeline and health monitor ---
+    // Steps execute in reverse registration order, so register
+    // stream_controller/bitrate_adapter after health_monitor to ensure
+    // they stop before health_monitor.
     impl_->shutdown_handler.register_step("health_monitor", [this]() {
         impl_->health_monitor->stop();
+    });
+    impl_->shutdown_handler.register_step("stream_controller", [this]() {
+        impl_->stream_controller->stop();
+    });
+    impl_->shutdown_handler.register_step("bitrate_adapter", [this]() {
+        impl_->bitrate_adapter->stop();
     });
     impl_->shutdown_handler.register_step("pipeline", [this]() {
         impl_->pipeline_manager->stop();

@@ -2248,3 +2248,129 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/webrtc_signaling.cpp, device/src/webrtc_media.cpp, device/src/pipeline_builder.cpp
 
 ---
+
+### 2026-04-12 — Spec: spec-15-adaptive-streaming / 任务: 1.1 + 1.2 StreamModeController 模块创建
+
+**完成概要：** 创建 stream_mode_controller.h（StreamMode/BranchStatus 枚举 + QueueParams/BranchQueueParams POD + 3 个纯函数声明 + StreamModeController pImpl 类）和 stream_mode_controller.cpp（compute_target_mode/compute_queue_params/stream_mode_name 纯函数 + Impl 防抖状态机 + evaluate_cb 定时器回调 + apply_mode queue 属性设置），getDiagnostics 零错误。
+
+**测试状态：** 未运行（轻量模式，测试覆盖将在任务 4 stream_mode_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/stream_mode_controller.h, device/src/stream_mode_controller.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-15-adaptive-streaming / 任务: 2.1 + 2.2 BitrateAdapter 模块创建
+
+**完成概要：** 创建 bitrate_adapter.h（BitrateConfig POD + compute_next_bitrate 纯函数 + BitrateAdapter pImpl 类）和 bitrate_adapter.cpp（Impl 结构体 + 纯函数实现 + apply_bitrate encoder/kvssink 属性设置 + g_timeout_add 评估定时器 + 所有公共 API），getDiagnostics 零错误。
+
+**测试状态：** 未运行（轻量模式，测试覆盖将在任务 5 bitrate_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/bitrate_adapter.h, device/src/bitrate_adapter.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-15-adaptive-streaming / 任务: 3.1 + 3.2 CMakeLists.txt 更新与编译检查点
+
+**完成概要：** CMakeLists.txt 添加 stream_mode_module 和 bitrate_module 静态库 + stream_mode_test 和 bitrate_test 测试目标，创建占位测试文件，编译零错误，13/13 测试全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（13/13）— 新增 2 个占位测试（stream_mode_test + bitrate_test）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt, device/tests/stream_mode_test.cpp（占位）, device/tests/bitrate_test.cpp（占位）
+
+---
+
+### 2026-04-12 — Spec: spec-15-adaptive-streaming / 任务: 4.1 + 4.2 + 4.3 StreamModeController 测试
+
+**完成概要：** 实现 stream_mode_test.cpp 包含 5 个 example-based 测试（AllCombinations、AllModes、InitialMode、Callback、NullPipeline）+ 2 个 PBT 属性测试（Property 1 模式决策正确性、Property 3 Queue 参数映射正确性），全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（13/13）— 新增 7 个测试（替换 placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/stream_mode_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-15-adaptive-streaming / 任务: 5.1 + 5.2 BitrateAdapter 测试
+
+**完成概要：** 实现 bitrate_test.cpp 包含 5 个 example-based 测试（UnhealthyDecreases、HealthyRampup、DegradedForcesMin、ClampToRange、InitialBitrate）+ 1 个 PBT 属性测试（Property 4 码率范围不变量），全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（13/13）— 新增 6 个测试（替换 placeholder）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/bitrate_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-15-adaptive-streaming / 任务: 6.1 AppContext 集成
+
+**完成概要：** 修改 app_context.cpp 集成 StreamModeController 和 BitrateAdapter：Impl 新增两个成员、start() 中创建/注册回调/启动、rebuild 回调中 set_pipeline、shutdown_handler 注册 stop 步骤。编译零错误，13/13 测试全部通过，ASan 无报告。
+
+**测试状态：** 全部通过（13/13，36.83s）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-15-adaptive-streaming / 任务: 7. 最终检查点 — 全量验证
+
+**完成概要：** 干净 build 全量验证通过，CMake 配置成功（GStreamer + ONNX Runtime + spdlog + RapidCheck）、编译零错误、13/13 测试全部通过（smoke_test 0.19s + log_test 0.12s + tee_test 0.17s + camera_test 0.15s + health_test 6.95s + shutdown_test 10.30s + credential_test 3.25s + kvs_test 0.28s + yolo_test 6.76s + webrtc_test 0.85s + webrtc_media_test 0.17s + stream_mode_test 7.20s + bitrate_test 0.17s = 36.60s）、ASan 无报告。Pi 5 Release 验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（13/13，36.60s）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

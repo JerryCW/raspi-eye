@@ -49,6 +49,18 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
   - 原因：GCC 严格检查 private 访问，macOS Clang 走 stub 路径不报错，Pi 5 上才暴露
   - 建议：将 SDK 回调函数和 CallbackContext 等辅助类型作为 Impl 的 static 成员
 
+- SHALL NOT 在 KVS WebRTC SDK 的 `SignalingMessage.payloadLen` 中使用 `std::string::size()`（来源：spec-14 Pi 5 端到端调试）
+  - 原因：`std::string::size()` 可能包含 null terminator，导致 viewer 端解析 SDP/ICE 异常，ICE 协商失败 `0x5a00000d`
+  - 建议：必须用 `(UINT32) STRLEN(msg.payload)` 确保不含 null terminator，同时设置 `msg.correlationId[0] = '\0'`
+
+- SHALL NOT 将 AVC 格式（length-prefixed）的 H.264 数据传给 KVS WebRTC SDK 的 `writeFrame`（来源：spec-14 Pi 5 端到端调试）
+  - 原因：SDK 期望 Annex B（byte-stream）格式，AVC 格式报 `STATUS_RTP_INVALID_NALU (0x5c000003)`
+  - 建议：在 `h264parse` 后加 capsfilter 强制 `stream-format=byte-stream,alignment=au`；kvssink 分支单独做 AVC 转换
+
+- SHALL NOT 在 GStreamer tee 后的单个分支上设置与其他分支冲突的 H.264 stream-format caps（来源：spec-14 Pi 5 端到端调试）
+  - 原因：tee 无法同时输出两种格式，caps 协商冲突导致 pipeline 崩溃重建
+  - 建议：tee 前统一为一种格式（byte-stream），各分支按需转换
+
 ---
 
 ## Tasks 层

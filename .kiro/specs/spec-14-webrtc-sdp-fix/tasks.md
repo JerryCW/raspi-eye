@@ -33,6 +33,14 @@
 - [x] 5.2 macOS 11/11 测试通过（`ctest --test-dir device/build --output-on-failure`）
 - [x] 5.3 `git status` 确认无敏感文件
 
+### 任务 6: Pi 5 端到端调试追加修复
+
+- [x] 6.1 `payloadLen` 改用 `STRLEN(msg.payload)` + `correlationId[0] = '\0'`（webrtc_signaling.cpp）
+- [x] 6.2 ICE candidate 缓存：`pending_candidates` 队列 + `on_viewer_offer` 末尾 flush（webrtc_media.cpp）
+- [x] 6.3 H.264 stream-format 两级架构：tee 前 byte-stream，kvssink 分支 avc 转换（pipeline_builder.cpp）
+- [x] 6.4 `broadcast_frame` 只向已 CONNECTED 的 peer 发帧（webrtc_media.cpp）
+- [x] 6.5 `initKvsWebRtc()` 移到 signaling init_credential_provider 最开头（webrtc_signaling.cpp）
+
 ## 验证
 
 macOS: `cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device/build && ctest --test-dir device/build --output-on-failure` → 11/11 通过
@@ -46,8 +54,9 @@ Pi 5 端到端验证（用户手动）：
 
 | 文件 | 修改类型 |
 |------|---------|
-| `device/src/webrtc_signaling.h` | 新增接口 |
-| `device/src/webrtc_signaling.cpp` | 新增实现 |
+| `device/src/webrtc_signaling.h` | 新增 ICE 配置接口 |
+| `device/src/webrtc_signaling.cpp` | 新增实现 + payloadLen 修复 + initKvsWebRtc |
 | `device/src/webrtc_media.h` | 签名变更 |
-| `device/src/webrtc_media.cpp` | 重写 on_viewer_offer + on_viewer_ice_candidate |
+| `device/src/webrtc_media.cpp` | 重写 on_viewer_offer + on_viewer_ice_candidate + ICE 缓存 + connected 标志 |
 | `device/src/app_context.cpp` | 更新 create 调用 |
+| `device/src/pipeline_builder.cpp` | H.264 两级架构（byte-stream tee + kvs avc 转换） |

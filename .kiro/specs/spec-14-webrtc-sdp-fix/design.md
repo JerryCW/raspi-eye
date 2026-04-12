@@ -237,3 +237,19 @@ static std::unique_ptr<WebRtcMediaManager> create(
 - signaling 重连逻辑优化（后续 spec）
 - credential 刷新集成（后续 spec）
 - 性能优化（broadcast_frame 异步化等，后续 spec）
+
+## 5. payloadLen 修复（Pi 5 端到端发现）
+
+`send_answer` 和 `send_ice_candidate` 中 `payloadLen` 必须用 `STRLEN(msg.payload)` 而非 `std::string::size()`，同时设置 `msg.correlationId[0] = '\0'`。否则 null terminator 导致 viewer 端解析异常。
+
+## 6. ICE candidate 缓存机制（Pi 5 端到端发现）
+
+Trickle ICE 时序下 viewer 的 ICE candidate 可能在 SDP offer 之前到达。在 `Impl` 中添加 `pending_candidates` 缓存（`unordered_map<string, vector<string>>`，最多 50 条），`on_viewer_ice_candidate` 在 peer 不存在时缓存而非丢弃，`on_viewer_offer` 末尾 flush 缓存的 candidate。
+
+## 7. H.264 stream-format 两级架构（Pi 5 端到端发现）
+
+WebRTC SDK 的 `writeFrame` 期望 Annex B（byte-stream）格式，kvssink 期望 AVC 格式。解决方案：
+- `h264parse` 后加 capsfilter 强制 `stream-format=byte-stream,alignment=au`
+- `enc_tee` 统一输出 byte-stream
+- WebRTC appsink 分支直接使用 byte-stream
+- kvssink 分支加 `h264parse → capsfilter(stream-format=avc)` 做格式转换
