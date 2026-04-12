@@ -18,6 +18,7 @@
 
 // AI pipeline configuration (POD)
 struct AiConfig {
+    bool enabled = true;                         // AI branch enabled (from config)
     std::string model_path;                      // ONNX model path
     int inference_fps = 2;                       // Frame sampling rate (frames per second)
     float confidence_threshold = 0.25f;          // Global confidence threshold

@@ -143,21 +143,6 @@ bool parse_logging_config(
 }
 
 // ============================================================
-// parse_ai_config
-// ============================================================
-
-bool parse_ai_config(
-    const std::unordered_map<std::string, std::string>& kv,
-    AiConfig& config,
-    std::string* error_msg) {
-
-    if (!parse_bool_field(kv, "enabled", config.enabled, error_msg)) {
-        return false;
-    }
-    return true;
-}
-
-// ============================================================
 // validate_streaming_config
 // ============================================================
 
@@ -206,6 +191,11 @@ bool parse_ai_config(
     std::string* error_msg) {
 
     auto log = config_logger();
+
+    // enabled (bool field)
+    if (!parse_bool_field(kv, "enabled", config.enabled, error_msg)) {
+        return false;
+    }
 
     // model_path
     if (auto* val = find_value(kv, "model_path")) {

@@ -30,11 +30,6 @@ struct LoggingConfig {
     std::string format = "text";   // text|json
 };
 
-// AI 分支配置（parsed from TOML [ai] section）
-struct AiConfig {
-    bool enabled = true;  // AI 分支是否启用
-};
-
 // --- Pure parse functions (testable / PBT-friendly) ---
 // parse_bool_field 已移至 config_util.h（打破循环依赖）
 
