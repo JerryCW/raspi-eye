@@ -1,0 +1,44 @@
+# raspi-eye.service
+# systemd service unit for raspi-eye smart camera application
+#
+# 安装方法:
+#   sudo cp scripts/raspi-eye.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable raspi-eye.service
+#   sudo systemctl start raspi-eye.service
+#
+# 查看日志:
+#   journalctl -u raspi-eye.service -f
+
+[Unit]
+Description=RaspiEye Smart Camera Service
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=notify
+ExecStart=/home/pi/raspi-eye/device/build/raspi-eye --config /home/pi/raspi-eye/device/config/config.toml
+Restart=on-failure
+RestartSec=5
+WatchdogSec=30
+TimeoutStartSec=60
+TimeoutStopSec=35
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=raspi-eye
+WorkingDirectory=/home/pi/raspi-eye
+User=pi
+Group=pi
+SupplementaryGroups=video
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/home/pi/raspi-eye/device/config
+
+[Install]
+WantedBy=multi-user.target
