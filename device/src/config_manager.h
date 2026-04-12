@@ -9,6 +9,7 @@
 #include "kvs_sink_factory.h"     // KvsSinkFactory::KvsConfig
 #include "webrtc_signaling.h"     // WebRtcConfig
 #include "bitrate_adapter.h"      // BitrateConfig
+#include "ai_pipeline_handler.h"  // AiConfig (value member, needs full definition)
 
 // Streaming configuration (parsed from TOML [streaming] section)
 struct StreamingConfig {
@@ -50,6 +51,13 @@ bool parse_logging_config(
     LoggingConfig& config,
     std::string* error_msg = nullptr);
 
+// Parse AI config from kv map. Missing fields keep defaults.
+// target_classes is a comma-separated string: "name[:confidence],..."
+bool parse_ai_config(
+    const std::unordered_map<std::string, std::string>& kv,
+    AiConfig& config,
+    std::string* error_msg = nullptr);
+
 // Validate streaming config consistency: min <= default <= max.
 bool validate_streaming_config(
     const StreamingConfig& config,
@@ -87,6 +95,7 @@ public:
     const CameraSource::CameraConfig& camera_config() const { return camera_config_; }
     const StreamingConfig& streaming_config() const { return streaming_config_; }
     const LoggingConfig& logging_config() const { return logging_config_; }
+    const AiConfig& ai_config() const { return ai_config_; }
 
 private:
     AwsConfig aws_config_;
@@ -95,4 +104,5 @@ private:
     CameraSource::CameraConfig camera_config_;
     StreamingConfig streaming_config_;
     LoggingConfig logging_config_;
+    AiConfig ai_config_;
 };

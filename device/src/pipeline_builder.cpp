@@ -4,6 +4,9 @@
 #include "camera_source.h"
 #include "kvs_sink_factory.h"
 #include "webrtc_media.h"
+#ifdef ENABLE_YOLO
+#include "ai_pipeline_handler.h"
+#endif
 #include <gst/app/gstappsink.h>
 #include <spdlog/spdlog.h>
 #include <array>
@@ -133,7 +136,8 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
                                                 CameraSource::CameraConfig config,
                                                 const KvsSinkFactory::KvsConfig* kvs_config,
                                                 const AwsConfig* aws_config,
-                                                WebRtcMediaManager* webrtc_media) {
+                                                WebRtcMediaManager* webrtc_media,
+                                                AiPipelineHandler* ai_handler) {
     // 1. Pipeline container
     GstElement* pipeline = gst_pipeline_new("tee-pipeline");
     if (!pipeline) {
@@ -315,6 +319,19 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
 
     auto pl = spdlog::get("pipeline");
     if (pl) pl->info("Dual-tee pipeline built successfully (17 elements)");
+
+    // Install AI pipeline probe if handler provided
+#ifdef ENABLE_YOLO
+    if (ai_handler) {
+        std::string probe_err;
+        if (!ai_handler->install_probe(pipeline, &probe_err)) {
+            spdlog::warn("Failed to install AI probe: {}", probe_err);
+            // Non-fatal: pipeline works without AI probe
+        }
+    }
+#else
+    (void)ai_handler;
+#endif
 
     return pipeline;
 }

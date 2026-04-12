@@ -16,6 +16,12 @@
 #include "webrtc_media.h"
 #include "webrtc_signaling.h"
 
+#ifdef ENABLE_YOLO
+#include "ai_pipeline_handler.h"
+#include "yolo_detector.h"
+#include <filesystem>
+#endif
+
 // ============================================================
 // Impl definition
 // ============================================================
@@ -36,6 +42,10 @@ struct AppContext::Impl {
     std::unique_ptr<PipelineHealthMonitor> health_monitor;
     std::unique_ptr<StreamModeController> stream_controller;
     std::unique_ptr<BitrateAdapter> bitrate_adapter;
+
+#ifdef ENABLE_YOLO
+    std::unique_ptr<AiPipelineHandler> ai_handler_;
+#endif
 
     // Cleanup manager
     ShutdownHandler shutdown_handler;
@@ -107,6 +117,26 @@ bool AppContext::init(const std::string& config_path,
         impl_->signaling->disconnect();
     });
 
+    // --- Create AiPipelineHandler (optional, ENABLE_YOLO only) ---
+#ifdef ENABLE_YOLO
+    const auto& ai_cfg = config.ai_config();
+    if (!ai_cfg.model_path.empty() && std::filesystem::exists(ai_cfg.model_path)) {
+        std::string det_err;
+        auto detector = YoloDetector::create(ai_cfg.model_path, DetectorConfig{}, &det_err);
+        if (detector) {
+            std::string ai_err;
+            impl_->ai_handler_ = AiPipelineHandler::create(std::move(detector), ai_cfg, &ai_err);
+            if (!impl_->ai_handler_) {
+                spdlog::warn("Failed to create AiPipelineHandler: {}", ai_err);
+            }
+        } else {
+            spdlog::warn("Failed to create YoloDetector: {}", det_err);
+        }
+    } else {
+        spdlog::info("AI pipeline skipped: model_path empty or file not found");
+    }
+#endif
+
     // --- Info log (only resource identifiers, no secrets) ---
     if (logger) {
         logger->info("AppContext init ok: kvs_stream={}, webrtc_channel={}",
@@ -125,12 +155,17 @@ bool AppContext::start(std::string* error_msg) {
     auto logger = spdlog::get("app");
 
     // --- Build tee pipeline ---
+    AiPipelineHandler* ai_ptr = nullptr;
+#ifdef ENABLE_YOLO
+    ai_ptr = impl_->ai_handler_.get();
+#endif
     GstElement* pipeline = PipelineBuilder::build_tee_pipeline(
         error_msg,
         impl_->cam_config,
         &impl_->kvs_config,
         &impl_->aws_config,
-        impl_->media_manager.get());
+        impl_->media_manager.get(),
+        ai_ptr);
     if (!pipeline) {
         return false;
     }
@@ -145,6 +180,16 @@ bool AppContext::start(std::string* error_msg) {
     if (!impl_->pipeline_manager->start(error_msg)) {
         return false;
     }
+
+    // --- Start AI pipeline handler (after pipeline is running) ---
+#ifdef ENABLE_YOLO
+    if (impl_->ai_handler_) {
+        std::string ai_start_err;
+        if (!impl_->ai_handler_->start(&ai_start_err)) {
+            spdlog::warn("Failed to start AiPipelineHandler: {}", ai_start_err);
+        }
+    }
+#endif
 
     // --- Create HealthMonitor ---
     impl_->health_monitor = std::make_unique<PipelineHealthMonitor>(
@@ -169,13 +214,23 @@ bool AppContext::start(std::string* error_msg) {
 
     // --- Register rebuild callback ---
     impl_->health_monitor->set_rebuild_callback([this]() -> GstElement* {
+#ifdef ENABLE_YOLO
+        if (impl_->ai_handler_) {
+            impl_->ai_handler_->stop();
+        }
+#endif
         std::string err;
+        AiPipelineHandler* ai_rebuild_ptr = nullptr;
+#ifdef ENABLE_YOLO
+        ai_rebuild_ptr = impl_->ai_handler_.get();
+#endif
         GstElement* p = PipelineBuilder::build_tee_pipeline(
             &err,
             impl_->cam_config,
             &impl_->kvs_config,
             &impl_->aws_config,
-            impl_->media_manager.get());
+            impl_->media_manager.get(),
+            ai_rebuild_ptr);
         if (!p) return nullptr;
 
         auto new_pm = PipelineManager::create(p, &err);
@@ -191,6 +246,11 @@ bool AppContext::start(std::string* error_msg) {
             impl_->pipeline_manager->pipeline());
         impl_->bitrate_adapter->set_pipeline(
             impl_->pipeline_manager->pipeline());
+#ifdef ENABLE_YOLO
+        if (impl_->ai_handler_) {
+            impl_->ai_handler_->start();
+        }
+#endif
         return impl_->pipeline_manager->pipeline();
     });
 
@@ -225,6 +285,13 @@ bool AppContext::start(std::string* error_msg) {
     impl_->shutdown_handler.register_step("bitrate_adapter", [this]() {
         impl_->bitrate_adapter->stop();
     });
+#ifdef ENABLE_YOLO
+    if (impl_->ai_handler_) {
+        impl_->shutdown_handler.register_step("ai_handler", [this]() {
+            impl_->ai_handler_->stop();
+        });
+    }
+#endif
     impl_->shutdown_handler.register_step("pipeline", [this]() {
         impl_->pipeline_manager->stop();
         impl_->pipeline_manager.reset();

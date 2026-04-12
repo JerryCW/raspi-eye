@@ -2737,3 +2737,205 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 1.1 内嵌 stb_image_write.h
+
+**完成概要：** stb_image_write.h v1.16 已存在于 `device/third_party/stb/stb_image_write.h`（1724 行，public domain/MIT），无需重新下载。
+
+**测试状态：** 未运行（轻量模式，纯头文件放置）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/third_party/stb/stb_image_write.h
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 1.2 创建 ai_pipeline_handler.h
+
+**完成概要：** 创建 ai_pipeline_handler.h，包含 AiConfig POD、DetectionCallback 类型、4 个独立函数声明（i420_to_rgb、filter_detections、coco_class_name、should_sample）、AiPipelineHandler 完整类声明。
+
+**测试状态：** 未运行（轻量模式，纯头文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.h
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 1.3 创建 ai_pipeline_handler.cpp 独立函数
+
+**完成概要：** 实现 4 个独立函数：coco_class_name（80 类 COCO 映射）、i420_to_rgb（整数定点 BT.601）、filter_detections（target_classes + per-class 阈值过滤）、should_sample（抽帧节流决策）。
+
+**测试状态：** 未运行（CMakeLists.txt 尚未更新，测试覆盖将在任务 7 ai_pipeline_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 2.1 AiPipelineHandler 类核心实现
+
+**完成概要：** 实现 AiPipelineHandler 类核心方法：构造/析构、create 工厂、install_probe/remove_probe、buffer_probe_cb、start/stop、inference_loop、set_detection_callback，事件管理方法为空 stub。
+
+**测试状态：** 未运行（CMakeLists.txt 尚未更新，测试覆盖将在任务 7 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 2. AiPipelineHandler 核心实现（2.1 + 2.2）
+
+**完成概要：** 实现 AiPipelineHandler 完整类：核心方法（create/install_probe/remove_probe/buffer_probe_cb/start/stop/inference_loop/set_detection_callback）+ 事件管理（open_event/close_event/encode_snapshot/update_detections_summary/check_event_timeout/flush_cache）+ STB_IMAGE_WRITE_IMPLEMENTATION + nlohmann/json 序列化。
+
+**测试状态：** 未运行（CMakeLists.txt 尚未更新）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 3+4+5 批量修改（config_manager、pipeline_builder、CMakeLists、config.toml、.gitignore）
+
+**完成概要：** 批量完成 7 个子任务：config_manager.h/cpp 新增 parse_ai_config + ai_config 访问器，pipeline_builder.h/cpp 新增 ai_handler 参数 + probe 安装，CMakeLists.txt 新增 ai_pipeline_module + ai_pipeline_test + ENABLE_YOLO 定义，config.toml 新增 [ai] section，.gitignore 新增 device/events/ 排除。
+
+**测试状态：** 未运行（轻量模式，配置/头文件修改）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/config_manager.h, device/src/config_manager.cpp, device/src/pipeline_builder.h, device/src/pipeline_builder.cpp, device/CMakeLists.txt, device/config/config.toml, .gitignore
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 4.3 AppContext 集成 AiPipelineHandler
+
+**完成概要：** 在 app_context.cpp 中集成 AiPipelineHandler 生命周期：init 创建 YoloDetector + AiPipelineHandler，start 传入 ai_ptr 到 build_tee_pipeline 并启动推理线程，stop 通过 ShutdownHandler 停止，rebuild 回调中 stop → 重建 → start。所有 AI 代码在 `#ifdef ENABLE_YOLO` 保护下。
+
+**测试状态：** 未运行（轻量模式，集成代码修改）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 6. 检查点 — 编译通过 + 现有测试回归
+
+**完成概要：** CMake 配置 + 编译 + ctest 全部通过（15/15 测试），ASan 无报告。修复了一个链接问题：pipeline_manager 需要链接 ai_pipeline_module。
+
+**测试状态：** 全部通过（15/15）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | raspi-eye 链接失败：找不到 AiPipelineHandler 和 YoloDetector 符号 | Spec 缺少信息 | `undefined reference to AiPipelineHandler::create` 等 | 在 CMakeLists.txt 中添加 `target_link_libraries(pipeline_manager PUBLIC ai_pipeline_module)` | tasks.md 中 CMake 任务应明确说明 pipeline_manager 需要链接 ai_pipeline_module |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（链接依赖问题为单次问题，已修复）
+
+**涉及文件：** device/CMakeLists.txt（修复链接依赖）
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 7. 测试 — Example-Based 与 PBT（7.1 + 7.2 + 7.3 + 7.4）
+
+**完成概要：** 创建 ai_pipeline_test.cpp，包含 10 个 example-based 测试（I420→RGB 纯黑/纯白、CreateNullDetector、FilterDetections 空/per-class、CocoClassName 有效/越界、ParseAiConfig fps/timeout/target_classes）+ 3 个 PBT 属性测试（I420→RGB 输出不变量、抽帧节流决策一致性、target_classes 过滤正确性）。全部通过。
+
+**测试状态：** 全部通过（15/15 套件）— 新增 13 个测试（10 example-based + 3 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/ai_pipeline_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 8. 检查点 — 全量测试通过
+
+**完成概要：** 全量验证通过，15/15 测试套件全部通过（含 ai_pipeline_test 13 个测试），ASan 无报告。
+
+**测试状态：** 全部通过（15/15）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-12 — Spec: spec-10-ai-pipeline / 任务: 9. 最终检查点 — 双平台与条件编译验证
+
+**完成概要：** ENABLE_YOLO=OFF 13/13 测试通过（AI 模块完全跳过），ENABLE_YOLO=ON 15/15 测试通过，ASan 无报告。修复了 pipeline_builder.cpp 中缺少 `#ifdef ENABLE_YOLO` 保护的条件编译问题。Pi 5 SKIPPED。
+
+**测试状态：** 全部通过（ENABLE_YOLO=ON: 15/15, ENABLE_YOLO=OFF: 13/13）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | ENABLE_YOLO=OFF 时 pipeline_builder.cpp 链接失败：找不到 ai_pipeline_handler.h 中的符号 | Spec 缺少信息 | `#include "ai_pipeline_handler.h"` 和 `ai_handler->install_probe()` 缺少 `#ifdef ENABLE_YOLO` 保护 | 在 pipeline_builder.cpp 中添加条件编译守卫 | tasks.md 中应明确说明 pipeline_builder.cpp 中的 AI 相关代码需要条件编译保护 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（条件编译遗漏为单次问题，已修复）
+
+**涉及文件：** device/src/pipeline_builder.cpp（修复条件编译）
+
+---

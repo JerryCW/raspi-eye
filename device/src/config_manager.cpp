@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <sstream>
 
 // ============================================================
 // Helper: get optional spdlog logger (may not exist)
@@ -177,6 +178,91 @@ BitrateConfig to_bitrate_config(const StreamingConfig& sc) {
 }
 
 // ============================================================
+// parse_ai_config
+// ============================================================
+
+bool parse_ai_config(
+    const std::unordered_map<std::string, std::string>& kv,
+    AiConfig& config,
+    std::string* error_msg) {
+
+    auto log = config_logger();
+
+    // model_path
+    if (auto* val = find_value(kv, "model_path")) {
+        config.model_path = *val;
+    }
+
+    // inference_fps (1-30 range, 0 or out-of-range is error)
+    if (auto* val = find_value(kv, "inference_fps")) {
+        int fps = std::stoi(*val);
+        if (fps < 1 || fps > 30) {
+            if (error_msg) *error_msg = "inference_fps must be 1-30, got: " + *val;
+            return false;
+        }
+        config.inference_fps = fps;
+    }
+
+    // confidence_threshold
+    if (auto* val = find_value(kv, "confidence_threshold")) {
+        config.confidence_threshold = std::stof(*val);
+    }
+
+    // snapshot_dir
+    if (auto* val = find_value(kv, "snapshot_dir")) {
+        config.snapshot_dir = *val;
+    }
+
+    // event_timeout_sec (< 3 uses default 15 with warn)
+    if (auto* val = find_value(kv, "event_timeout_sec")) {
+        int timeout = std::stoi(*val);
+        if (timeout < 3) {
+            if (log) log->warn("event_timeout_sec={} is below minimum 3, using default 15", timeout);
+            config.event_timeout_sec = 15;
+        } else {
+            config.event_timeout_sec = timeout;
+        }
+    }
+
+    // max_cache_mb
+    if (auto* val = find_value(kv, "max_cache_mb")) {
+        config.max_cache_mb = std::stoi(*val);
+    }
+
+    // target_classes: comma-separated "name[:confidence],..."
+    if (auto* val = find_value(kv, "target_classes")) {
+        config.target_classes.clear();
+        if (!val->empty()) {
+            std::istringstream stream(*val);
+            std::string entry;
+            while (std::getline(stream, entry, ',')) {
+                // Trim whitespace
+                size_t start = entry.find_first_not_of(" \t");
+                size_t end = entry.find_last_not_of(" \t");
+                if (start == std::string::npos) continue;
+                entry = entry.substr(start, end - start + 1);
+
+                AiConfig::TargetClass tc;
+                auto colon_pos = entry.find(':');
+                if (colon_pos != std::string::npos) {
+                    tc.name = entry.substr(0, colon_pos);
+                    // Trim name
+                    size_t ns = tc.name.find_first_not_of(" \t");
+                    size_t ne = tc.name.find_last_not_of(" \t");
+                    if (ns != std::string::npos) tc.name = tc.name.substr(ns, ne - ns + 1);
+                    tc.confidence = std::stof(entry.substr(colon_pos + 1));
+                } else {
+                    tc.name = entry;
+                }
+                config.target_classes.push_back(std::move(tc));
+            }
+        }
+    }
+
+    return true;
+}
+
+// ============================================================
 // ConfigManager::load
 // ============================================================
 
@@ -236,6 +322,15 @@ bool ConfigManager::load(const std::string& config_path,
     if (!parse_logging_config(kv_logging, logging_config_, error_msg)) {
         return false;
     }
+
+    // Parse [ai] (optional)
+    std::string ai_err;
+    auto kv_ai = parse_toml_section(config_path, "ai", &ai_err);
+    if (!parse_ai_config(kv_ai, ai_config_, error_msg)) {
+        return false;
+    }
+    // Set device_id from aws config
+    ai_config_.device_id = aws_config_.thing_name;
 
     if (log) {
         log->info("Configuration loaded from {}", config_path);
