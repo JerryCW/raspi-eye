@@ -23,7 +23,7 @@ static void signal_handler(int /*sig*/) {
     g_shutdown_requested.store(true, std::memory_order_relaxed);
 }
 
-// idle callback 轮询 shutdown flag
+// timeout callback 轮询 shutdown flag（每 200ms）
 static gboolean check_shutdown(gpointer data) {
     auto* loop = static_cast<GMainLoop*>(data);
     if (g_shutdown_requested.load(std::memory_order_relaxed)) {
@@ -98,8 +98,8 @@ static int run_pipeline(int argc, char* argv[]) {
     sigaction(SIGINT, &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
 
-    // Register idle callback to poll shutdown flag
-    g_idle_add(check_shutdown, loop);
+    // Register timeout callback to poll shutdown flag (every 200ms)
+    g_timeout_add(200, check_shutdown, loop);
 
     // Phase 5: AppContext start
     if (!ctx.start(&err)) {

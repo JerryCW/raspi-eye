@@ -63,9 +63,10 @@ add_library(bitrate_module STATIC src/bitrate_adapter.cpp)
 target_include_directories(bitrate_module PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_libraries(bitrate_module PUBLIC stream_mode_module ${GST_LIBRARIES} spdlog::spdlog)
 
-# 摄像头源模块（独立库，供 config_module 和 pipeline_manager 共用）
+# 摄像头源模块（独立库，打破 config_module ↔ pipeline_manager 循环依赖）
 add_library(camera_module STATIC src/camera_source.cpp)
 target_include_directories(camera_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_directories(camera_module PUBLIC ${GST_LIBRARY_DIRS})
 target_link_libraries(camera_module PUBLIC ${GST_LIBRARIES} spdlog::spdlog)
 
 # 主程序库（供测试和 main 共用）
@@ -223,7 +224,7 @@ if(ENABLE_YOLO)
 
         add_executable(ai_pipeline_test tests/ai_pipeline_test.cpp)
         target_link_libraries(ai_pipeline_test PRIVATE
-            ai_pipeline_module GTest::gtest_main rapidcheck rapidcheck_gtest)
+            ai_pipeline_module pipeline_manager GTest::gtest_main rapidcheck rapidcheck_gtest)
         add_test(NAME ai_pipeline_test COMMAND ai_pipeline_test)
 
         target_compile_definitions(pipeline_manager PRIVATE ENABLE_YOLO)

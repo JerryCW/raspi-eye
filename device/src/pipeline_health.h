@@ -91,6 +91,9 @@ private:
                                               GstPadProbeInfo* info,
                                               gpointer user_data);
 
+    // Bus sync handler — filters messages on streaming thread (static)
+    static GstBusSyncReply bus_sync_handler(GstBus* bus, GstMessage* msg, gpointer user_data);
+
     // Bus message handler (static)
     static gboolean bus_watch_cb(GstBus* bus, GstMessage* msg, gpointer user_data);
 

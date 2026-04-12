@@ -47,9 +47,13 @@ void PipelineHealthMonitor::start(const std::string& source_element_name) {
     // Install buffer probe on source element
     install_probe(source_element_name);
 
-    // Register bus watch
+    // Register bus watch — use sync handler to filter messages on the streaming
+    // thread, only forwarding ERROR/WARNING/EOS to the GMainLoop.  This avoids
+    // waking the main loop for every STATE_CHANGED / QOS / STREAM_STATUS etc.
+    // (measured: ~3000 ppoll/s → ~10 ppoll/s after this change).
     GstBus* bus = gst_element_get_bus(pipeline_);
     if (bus) {
+        gst_bus_set_sync_handler(bus, bus_sync_handler, this, nullptr);
         bus_watch_id_ = gst_bus_add_watch(bus, bus_watch_cb, this);
         gst_object_unref(bus);
     }
@@ -186,6 +190,22 @@ GstPadProbeReturn PipelineHealthMonitor::buffer_probe_cb(
 // ---------------------------------------------------------------------------
 // Bus watch callback
 // ---------------------------------------------------------------------------
+
+// Sync handler: runs on the streaming thread that posted the message.
+// Only forward ERROR/WARNING/EOS to the async bus (→ GMainLoop).
+// All other messages (STATE_CHANGED, QOS, STREAM_STATUS, etc.) are
+// dropped here, preventing thousands of unnecessary main-loop wakeups.
+GstBusSyncReply PipelineHealthMonitor::bus_sync_handler(
+    GstBus* /*bus*/, GstMessage* msg, gpointer /*user_data*/) {
+    switch (GST_MESSAGE_TYPE(msg)) {
+        case GST_MESSAGE_ERROR:
+        case GST_MESSAGE_WARNING:
+        case GST_MESSAGE_EOS:
+            return GST_BUS_PASS;   // forward to async bus → GMainLoop
+        default:
+            return GST_BUS_DROP;   // discard, don't wake main loop
+    }
+}
 
 gboolean PipelineHealthMonitor::bus_watch_cb(
     GstBus* /*bus*/, GstMessage* msg, gpointer user_data) {
@@ -589,6 +609,7 @@ void PipelineHealthMonitor::set_pipeline(GstElement* new_pipeline,
     }
     GstBus* bus = gst_element_get_bus(pipeline_);
     if (bus) {
+        gst_bus_set_sync_handler(bus, bus_sync_handler, this, nullptr);
         bus_watch_id_ = gst_bus_add_watch(bus, bus_watch_cb, this);
         gst_object_unref(bus);
     }
