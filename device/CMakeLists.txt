@@ -63,11 +63,16 @@ add_library(bitrate_module STATIC src/bitrate_adapter.cpp)
 target_include_directories(bitrate_module PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_libraries(bitrate_module PUBLIC stream_mode_module ${GST_LIBRARIES} spdlog::spdlog)
 
+# 摄像头源模块（独立库，供 config_module 和 pipeline_manager 共用）
+add_library(camera_module STATIC src/camera_source.cpp)
+target_include_directories(camera_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_libraries(camera_module PUBLIC ${GST_LIBRARIES} spdlog::spdlog)
+
 # 主程序库（供测试和 main 共用）
-add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/camera_source.cpp src/pipeline_health.cpp src/shutdown_handler.cpp src/app_context.cpp)
+add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/pipeline_health.cpp src/shutdown_handler.cpp src/app_context.cpp)
 target_include_directories(pipeline_manager PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_LIBRARY_DIRS})
-target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module stream_mode_module bitrate_module)
+target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module stream_mode_module bitrate_module camera_module)
 target_compile_options(pipeline_manager PUBLIC ${GST_CFLAGS_OTHER})
 
 # GST_APP include/link for pipeline_manager (appsink support)
@@ -248,7 +253,7 @@ target_link_libraries(pipeline_manager PUBLIC webrtc_media_module)
 # 配置管理模块
 add_library(config_module STATIC src/config_manager.cpp)
 target_include_directories(config_module PUBLIC src ${GST_INCLUDE_DIRS})
-target_link_libraries(config_module PUBLIC credential_module kvs_module webrtc_module log_module bitrate_module config_util_module)
+target_link_libraries(config_module PUBLIC credential_module kvs_module webrtc_module log_module bitrate_module config_util_module camera_module)
 
 # Link config_module to pipeline_manager
 target_link_libraries(pipeline_manager PUBLIC config_module)
