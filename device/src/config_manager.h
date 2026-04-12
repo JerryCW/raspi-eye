@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include "camera_source.h"
+#include "config_util.h"          // parse_bool_field
 #include "credential_provider.h"  // AwsConfig, parse_toml_section
 #include "kvs_sink_factory.h"     // KvsSinkFactory::KvsConfig
 #include "webrtc_signaling.h"     // WebRtcConfig
@@ -27,7 +28,13 @@ struct LoggingConfig {
     std::string format = "text";   // text|json
 };
 
+// AI 分支配置（parsed from TOML [ai] section）
+struct AiConfig {
+    bool enabled = true;  // AI 分支是否启用
+};
+
 // --- Pure parse functions (testable / PBT-friendly) ---
+// parse_bool_field 已移至 config_util.h（打破循环依赖）
 
 // Parse camera config from kv map. Missing fields keep platform defaults.
 // Returns false with error_msg on invalid values (e.g. unknown type).
@@ -48,6 +55,13 @@ bool parse_streaming_config(
 bool parse_logging_config(
     const std::unordered_map<std::string, std::string>& kv,
     LoggingConfig& config,
+    std::string* error_msg = nullptr);
+
+// Parse AI config from kv map. Missing fields keep defaults.
+// Returns false with error_msg on invalid values.
+bool parse_ai_config(
+    const std::unordered_map<std::string, std::string>& kv,
+    AiConfig& config,
     std::string* error_msg = nullptr);
 
 // Validate streaming config consistency: min <= default <= max.
@@ -87,6 +101,7 @@ public:
     const CameraSource::CameraConfig& camera_config() const { return camera_config_; }
     const StreamingConfig& streaming_config() const { return streaming_config_; }
     const LoggingConfig& logging_config() const { return logging_config_; }
+    const AiConfig& ai_config() const { return ai_config_; }
 
 private:
     AwsConfig aws_config_;
@@ -95,4 +110,5 @@ private:
     CameraSource::CameraConfig camera_config_;
     StreamingConfig streaming_config_;
     LoggingConfig logging_config_;
+    AiConfig ai_config_;
 };

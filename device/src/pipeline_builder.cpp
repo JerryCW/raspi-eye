@@ -7,6 +7,7 @@
 #include <gst/app/gstappsink.h>
 #include <spdlog/spdlog.h>
 #include <array>
+#include <vector>
 
 namespace {
 
@@ -141,9 +142,13 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
         return nullptr;
     }
 
-    // 2. Create all 14 elements
-    GstElement* src       = CameraSource::create_source(config, error_msg);
-    GstElement* convert   = gst_element_factory_make("videoconvert",  "convert");
+    // 2. Create elements — conditionally skip videoconvert when source already outputs I420
+    CameraSource::SourceOutputFormat src_format = CameraSource::SourceOutputFormat::UNKNOWN;
+    GstElement* src       = CameraSource::create_source(config, error_msg, &src_format);
+    bool need_convert = (src_format != CameraSource::SourceOutputFormat::I420);
+    GstElement* convert   = need_convert
+                            ? gst_element_factory_make("videoconvert", "convert")
+                            : nullptr;
     GstElement* capsfilter= gst_element_factory_make("capsfilter",    "capsfilter");
     GstElement* raw_tee   = gst_element_factory_make("tee",           "raw-tee");
 
@@ -183,24 +188,32 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
 
     // 3. Null-check: if any element failed, clean up and bail out.
     //    Elements are not yet in the bin, so each must be individually unref'd.
-    GstElement* all[] = {
-        src, convert, capsfilter, raw_tee,
-        q_ai, ai_sink,
-        q_enc, encoder, parser, bs_caps, enc_tee,
-        q_kvs, kvs_parser, avc_caps, kvs_sink,
-        q_web, web_sink
-    };
-    const char* names[] = {
-        "src", "videoconvert", "capsfilter", "raw-tee",
-        "q-ai", "ai-sink",
-        "q-enc", "encoder", "h264parse", "bs-caps", "encoded-tee",
-        "q-kvs", "kvs-parser", "avc-caps", "kvs-sink",
-        "q-web", "webrtc-sink"
-    };
-    static_assert(sizeof(all) / sizeof(all[0]) == sizeof(names) / sizeof(names[0]),
-                  "element and name arrays must match");
+    //    When need_convert is false, convert is intentionally nullptr — skip it in checks.
+    //    Build dynamic arrays excluding convert when skipped.
+    std::vector<GstElement*> all;
+    std::vector<const char*> names;
 
-    for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
+    all.push_back(src);        names.push_back("src");
+    if (need_convert) {
+        all.push_back(convert);    names.push_back("videoconvert");
+    }
+    all.push_back(capsfilter); names.push_back("capsfilter");
+    all.push_back(raw_tee);    names.push_back("raw-tee");
+    all.push_back(q_ai);       names.push_back("q-ai");
+    all.push_back(ai_sink);    names.push_back("ai-sink");
+    all.push_back(q_enc);      names.push_back("q-enc");
+    all.push_back(encoder);    names.push_back("encoder");
+    all.push_back(parser);     names.push_back("h264parse");
+    all.push_back(bs_caps);    names.push_back("bs-caps");
+    all.push_back(enc_tee);    names.push_back("encoded-tee");
+    all.push_back(q_kvs);      names.push_back("q-kvs");
+    all.push_back(kvs_parser); names.push_back("kvs-parser");
+    all.push_back(avc_caps);   names.push_back("avc-caps");
+    all.push_back(kvs_sink);   names.push_back("kvs-sink");
+    all.push_back(q_web);      names.push_back("q-web");
+    all.push_back(web_sink);   names.push_back("webrtc-sink");
+
+    for (size_t i = 0; i < all.size(); ++i) {
         if (!all[i]) {
             // error_msg may already be set by create_encoder; only overwrite if empty
             if (error_msg && error_msg->empty()) {
@@ -208,7 +221,7 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
                 *error_msg += names[i];
             }
             // Clean up all non-null elements created so far (not yet in bin)
-            for (size_t j = 0; j < sizeof(all) / sizeof(all[0]); ++j) {
+            for (size_t j = 0; j < all.size(); ++j) {
                 if (all[j]) gst_object_unref(all[j]);
             }
             gst_object_unref(pipeline);
@@ -268,22 +281,40 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     }
 
     // 7. Add all elements to the pipeline bin
-    gst_bin_add_many(GST_BIN(pipeline),
-        src, convert, capsfilter, raw_tee,
-        q_ai, ai_sink,
-        q_enc, encoder, parser, bs_caps, enc_tee,
-        q_kvs, kvs_parser, avc_caps, kvs_sink,
-        q_web, web_sink,
-        nullptr);
+    if (need_convert) {
+        gst_bin_add_many(GST_BIN(pipeline),
+            src, convert, capsfilter, raw_tee,
+            q_ai, ai_sink,
+            q_enc, encoder, parser, bs_caps, enc_tee,
+            q_kvs, kvs_parser, avc_caps, kvs_sink,
+            q_web, web_sink,
+            nullptr);
+    } else {
+        gst_bin_add_many(GST_BIN(pipeline),
+            src, capsfilter, raw_tee,
+            q_ai, ai_sink,
+            q_enc, encoder, parser, bs_caps, enc_tee,
+            q_kvs, kvs_parser, avc_caps, kvs_sink,
+            q_web, web_sink,
+            nullptr);
+    }
 
     // --- From this point, pipeline owns all elements.
     // --- On failure, only gst_object_unref(pipeline) is needed.
 
-    // 8. Link trunk: src -> convert -> capsfilter -> raw-tee
-    if (!gst_element_link_many(src, convert, capsfilter, raw_tee, nullptr)) {
-        if (error_msg) *error_msg = "Failed to link trunk (src -> convert -> capsfilter -> raw-tee)";
-        gst_object_unref(pipeline);
-        return nullptr;
+    // 8. Link trunk: conditionally skip videoconvert
+    if (need_convert) {
+        if (!gst_element_link_many(src, convert, capsfilter, raw_tee, nullptr)) {
+            if (error_msg) *error_msg = "Failed to link trunk (src -> convert -> capsfilter -> raw-tee)";
+            gst_object_unref(pipeline);
+            return nullptr;
+        }
+    } else {
+        if (!gst_element_link_many(src, capsfilter, raw_tee, nullptr)) {
+            if (error_msg) *error_msg = "Failed to link trunk (src -> capsfilter -> raw-tee)";
+            gst_object_unref(pipeline);
+            return nullptr;
+        }
     }
 
     // 9. Link encoding chain: q-enc -> encoder -> parser -> bs-caps -> enc-tee
@@ -325,7 +356,18 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     }
 
     auto pl = spdlog::get("pipeline");
-    if (pl) pl->info("Dual-tee pipeline built successfully (17 elements)");
+    if (pl) {
+        if (!need_convert) {
+            pl->info("Skipping videoconvert: source already outputs I420");
+        } else {
+            const char* fmt_name = "UNKNOWN";
+            if (src_format == CameraSource::SourceOutputFormat::YUYV) fmt_name = "YUYV";
+            else if (src_format == CameraSource::SourceOutputFormat::UNKNOWN) fmt_name = "UNKNOWN";
+            pl->info("Using videoconvert: source format={}", fmt_name);
+        }
+        int elem_count = need_convert ? 17 : 16;
+        pl->info("Dual-tee pipeline built successfully ({} elements)", elem_count);
+    }
 
     return pipeline;
 }

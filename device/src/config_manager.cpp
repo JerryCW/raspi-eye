@@ -2,8 +2,10 @@
 // Unified configuration manager implementation.
 
 #include "config_manager.h"
+#include "config_util.h"
 
 #include <spdlog/spdlog.h>
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -28,6 +30,8 @@ const std::string* find_value(
 }
 
 }  // namespace
+
+// parse_bool_field 实现已移至 config_util.cpp
 
 // ============================================================
 // parse_camera_config
@@ -138,6 +142,21 @@ bool parse_logging_config(
 }
 
 // ============================================================
+// parse_ai_config
+// ============================================================
+
+bool parse_ai_config(
+    const std::unordered_map<std::string, std::string>& kv,
+    AiConfig& config,
+    std::string* error_msg) {
+
+    if (!parse_bool_field(kv, "enabled", config.enabled, error_msg)) {
+        return false;
+    }
+    return true;
+}
+
+// ============================================================
 // validate_streaming_config
 // ============================================================
 
@@ -237,11 +256,18 @@ bool ConfigManager::load(const std::string& config_path,
         return false;
     }
 
+    // Step 14: Parse [ai] (optional, 缺失时使用默认值)
+    std::string ai_err;
+    auto kv_ai = parse_toml_section(config_path, "ai", &ai_err);
+    if (!parse_ai_config(kv_ai, ai_config_, error_msg)) {
+        return false;
+    }
+
     if (log) {
         log->info("Configuration loaded from {}", config_path);
     }
 
-    // Step 14: Success
+    // Step 15: Success
     return true;
 }
 

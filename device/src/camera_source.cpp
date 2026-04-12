@@ -1,31 +1,18 @@
 // camera_source.cpp
-// Camera abstraction layer implementation.
-// Spec 4.5: create_source returns GstBin with ghost pad instead of raw element.
+// 摄像头源抽象层实现
+// Spec 4.5: create_source 返回带 ghost pad 的 GstBin 而非裸元素
 #include "camera_source.h"
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cctype>
 #include <vector>
 
+// 使用 CameraSource 命名空间中的 V4L2Format 类型简化 anonymous namespace 内部引用
+using CameraSource::V4L2Format;
+
 namespace {
 
-// ============================================================
-// 1.1 V4L2Format enum and helper functions
-// ============================================================
-
-enum class V4L2Format { I420, YUYV, MJPG, UNKNOWN };
-
-const char* v4l2_format_name(V4L2Format fmt) {
-    switch (fmt) {
-        case V4L2Format::I420:    return "I420";
-        case V4L2Format::YUYV:    return "YUYV";
-        case V4L2Format::MJPG:    return "MJPG";
-        case V4L2Format::UNKNOWN: return "UNKNOWN";
-    }
-    return "UNKNOWN";
-}
-
-// Parse a single GstStructure from caps query into V4L2Format.
+// 解析单个 GstStructure（来自 caps 查询）为 V4L2Format
 V4L2Format parse_caps_structure(const GstStructure* s) {
     const gchar* media_type = gst_structure_get_name(s);
     if (!media_type) return V4L2Format::UNKNOWN;
@@ -35,7 +22,7 @@ V4L2Format parse_caps_structure(const GstStructure* s) {
         return V4L2Format::MJPG;
     }
 
-    // video/x-raw -> check format field
+    // video/x-raw -> 检查 format 字段
     if (g_strcmp0(media_type, "video/x-raw") == 0) {
         const gchar* format = gst_structure_get_string(s, "format");
         if (!format) return V4L2Format::UNKNOWN;
@@ -46,9 +33,9 @@ V4L2Format parse_caps_structure(const GstStructure* s) {
     return V4L2Format::UNKNOWN;
 }
 
-// Probe V4L2 device supported formats via GStreamer caps query.
-// Creates a temporary v4l2src, sets it to READY, queries caps, then cleans up.
-// Returns empty vector on failure.
+// 通过 GStreamer caps 查询探测 V4L2 设备支持的格式
+// 创建临时 v4l2src，设为 READY 状态，查询 caps，然后清理
+// 失败时返回空向量
 std::vector<V4L2Format> probe_v4l2_formats(const std::string& device_path,
                                             std::string* error_msg) {
     std::vector<V4L2Format> formats;
@@ -61,7 +48,7 @@ std::vector<V4L2Format> probe_v4l2_formats(const std::string& device_path,
 
     g_object_set(G_OBJECT(tmp_src), "device", device_path.c_str(), nullptr);
 
-    // Set to READY to trigger device open
+    // 设为 READY 触发设备打开
     GstStateChangeReturn ret = gst_element_set_state(tmp_src, GST_STATE_READY);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         if (error_msg) {
@@ -74,7 +61,7 @@ std::vector<V4L2Format> probe_v4l2_formats(const std::string& device_path,
         return formats;
     }
 
-    // Query caps from src pad
+    // 从 src pad 查询 caps
     GstPad* src_pad = gst_element_get_static_pad(tmp_src, "src");
     if (!src_pad) {
         if (error_msg) {
@@ -96,7 +83,7 @@ std::vector<V4L2Format> probe_v4l2_formats(const std::string& device_path,
             const GstStructure* s = gst_caps_get_structure(caps, i);
             V4L2Format fmt = parse_caps_structure(s);
             if (fmt != V4L2Format::UNKNOWN) {
-                // Deduplicate
+                // 去重
                 bool found = false;
                 for (auto& existing : formats) {
                     if (existing == fmt) { found = true; break; }
@@ -107,7 +94,7 @@ std::vector<V4L2Format> probe_v4l2_formats(const std::string& device_path,
         gst_caps_unref(caps);
     }
 
-    // Cleanup temporary element
+    // 清理临时元素
     gst_element_set_state(tmp_src, GST_STATE_NULL);
     gst_object_unref(tmp_src);
 
@@ -118,20 +105,6 @@ std::vector<V4L2Format> probe_v4l2_formats(const std::string& device_path,
     }
 
     return formats;
-}
-
-// Select best format by priority: I420 > YUYV > MJPG
-V4L2Format select_best_format(const std::vector<V4L2Format>& formats) {
-    for (auto fmt : formats) {
-        if (fmt == V4L2Format::I420) return V4L2Format::I420;
-    }
-    for (auto fmt : formats) {
-        if (fmt == V4L2Format::YUYV) return V4L2Format::YUYV;
-    }
-    for (auto fmt : formats) {
-        if (fmt == V4L2Format::MJPG) return V4L2Format::MJPG;
-    }
-    return V4L2Format::UNKNOWN;
 }
 
 // ============================================================
@@ -192,7 +165,8 @@ GstElement* create_single_element_bin(const char* factory_name,
 
 // Build GstBin("src") containing: v4l2src -> capsfilter(image/jpeg) -> jpegdec
 // Ghost pad connects to jpegdec's src pad.
-GstElement* create_mjpg_bin(const std::string& device_path,
+// 使用 CameraConfig 中的 width/height/framerate 设置 capsfilter，为 0 时不设置对应字段。
+GstElement* create_mjpg_bin(const CameraSource::CameraConfig& config,
                              std::string* error_msg) {
     GstElement* bin = gst_bin_new("src");
     if (!bin) {
@@ -220,14 +194,20 @@ GstElement* create_mjpg_bin(const std::string& device_path,
     }
 
     // Set v4l2src device property
-    g_object_set(G_OBJECT(v4l2), "device", device_path.c_str(), nullptr);
+    g_object_set(G_OBJECT(v4l2), "device", config.device.c_str(), nullptr);
 
-    // Set capsfilter: image/jpeg, width=1920, height=1080, framerate=15/1
-    GstCaps* caps = gst_caps_new_simple("image/jpeg",
-        "width", G_TYPE_INT, 1920,
-        "height", G_TYPE_INT, 1080,
-        "framerate", GST_TYPE_FRACTION, 15, 1,
-        nullptr);
+    // Set capsfilter: image/jpeg，使用 CameraConfig 中的 width/height/framerate
+    // 为 0 时不设置对应字段，让 GStreamer 自动协商
+    GstCaps* caps = gst_caps_new_empty_simple("image/jpeg");
+    if (config.width > 0) {
+        gst_caps_set_simple(caps, "width", G_TYPE_INT, config.width, nullptr);
+    }
+    if (config.height > 0) {
+        gst_caps_set_simple(caps, "height", G_TYPE_INT, config.height, nullptr);
+    }
+    if (config.framerate > 0) {
+        gst_caps_set_simple(caps, "framerate", GST_TYPE_FRACTION, config.framerate, 1, nullptr);
+    }
     g_object_set(G_OBJECT(capsf), "caps", caps, nullptr);
     gst_caps_unref(caps);
 
@@ -264,10 +244,35 @@ GstElement* create_mjpg_bin(const std::string& device_path,
 } // anonymous namespace
 
 // ============================================================
-// CameraSource namespace implementation
+// CameraSource 命名空间实现
 // ============================================================
 
 namespace CameraSource {
+
+// 返回 V4L2Format 对应的可读名称
+const char* v4l2_format_name(V4L2Format fmt) {
+    switch (fmt) {
+        case V4L2Format::I420:    return "I420";
+        case V4L2Format::YUYV:    return "YUYV";
+        case V4L2Format::MJPG:    return "MJPG";
+        case V4L2Format::UNKNOWN: return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
+// 按优先级选择最佳格式：MJPG > I420 > YUYV
+V4L2Format select_best_format(const std::vector<V4L2Format>& formats) {
+    for (auto fmt : formats) {
+        if (fmt == V4L2Format::MJPG) return V4L2Format::MJPG;
+    }
+    for (auto fmt : formats) {
+        if (fmt == V4L2Format::I420) return V4L2Format::I420;
+    }
+    for (auto fmt : formats) {
+        if (fmt == V4L2Format::YUYV) return V4L2Format::YUYV;
+    }
+    return V4L2Format::UNKNOWN;
+}
 
 CameraType default_camera_type() {
 #ifdef __APPLE__
@@ -291,19 +296,27 @@ const char* camera_type_name(CameraType type) {
 // ============================================================
 
 GstElement* create_source(const CameraConfig& config,
-                          std::string* error_msg) {
+                          std::string* error_msg,
+                          SourceOutputFormat* out_format) {
     auto pl = spdlog::get("pipeline");
+
+    // 辅助 lambda：安全设置 out_format
+    auto set_format = [&](SourceOutputFormat fmt) {
+        if (out_format) *out_format = fmt;
+    };
 
     switch (config.type) {
         case CameraType::TEST: {
             GstElement* bin = create_single_element_bin("videotestsrc", "test-source", error_msg);
             if (bin && pl) pl->info("Camera source created: videotestsrc (Source Bin)");
+            set_format(SourceOutputFormat::UNKNOWN);
             return bin;
         }
 
         case CameraType::LIBCAMERA: {
             GstElement* bin = create_single_element_bin("libcamerasrc", "libcam-source", error_msg);
             if (bin && pl) pl->info("Camera source created: libcamerasrc (Source Bin)");
+            set_format(SourceOutputFormat::UNKNOWN);
             return bin;
         }
 
@@ -315,6 +328,7 @@ GstElement* create_source(const CameraConfig& config,
             if (config.device.empty()) {
                 GstElement* bin = create_single_element_bin("v4l2src", "v4l2-source", error_msg);
                 if (bin && pl) pl->info("Camera source created: v4l2src (Source Bin, no device specified)");
+                set_format(SourceOutputFormat::UNKNOWN);
                 return bin;
             }
 
@@ -337,17 +351,17 @@ GstElement* create_source(const CameraConfig& config,
             V4L2Format best = select_best_format(formats);
 
             if (best == V4L2Format::MJPG) {
-                GstElement* bin = create_mjpg_bin(config.device, error_msg);
+                GstElement* bin = create_mjpg_bin(config, error_msg);
                 if (bin && pl) {
                     pl->info("V4L2 device {}: selected {} -> jpegdec pipeline (Source Bin)",
                              config.device, v4l2_format_name(best));
                 }
+                set_format(SourceOutputFormat::I420);  // MJPG + jpegdec 输出 I420
                 return bin;
-            } else {
-                // Raw format (I420 or YUYV): single v4l2src bin
+            } else if (best == V4L2Format::I420) {
+                // 原生 I420：single v4l2src bin
                 GstElement* bin = create_single_element_bin("v4l2src", "v4l2-source", error_msg);
                 if (bin) {
-                    // Set device property on the inner v4l2src element
                     GstElement* inner = gst_bin_get_by_name(GST_BIN(bin), "v4l2-source");
                     if (inner) {
                         g_object_set(G_OBJECT(inner), "device", config.device.c_str(), nullptr);
@@ -358,6 +372,23 @@ GstElement* create_source(const CameraConfig& config,
                                  config.device, v4l2_format_name(best));
                     }
                 }
+                set_format(SourceOutputFormat::I420);
+                return bin;
+            } else {
+                // YUYV 或其他 raw format：single v4l2src bin
+                GstElement* bin = create_single_element_bin("v4l2src", "v4l2-source", error_msg);
+                if (bin) {
+                    GstElement* inner = gst_bin_get_by_name(GST_BIN(bin), "v4l2-source");
+                    if (inner) {
+                        g_object_set(G_OBJECT(inner), "device", config.device.c_str(), nullptr);
+                        gst_object_unref(inner);
+                    }
+                    if (pl) {
+                        pl->info("V4L2 device {}: selected {} -> raw pipeline (Source Bin)",
+                                 config.device, v4l2_format_name(best));
+                    }
+                }
+                set_format(SourceOutputFormat::YUYV);
                 return bin;
             }
 #else

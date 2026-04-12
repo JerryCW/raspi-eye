@@ -226,6 +226,197 @@ TEST(ConfigExampleTest, ApplyOverrides_InvalidCameraType) {
 }
 
 // ===========================================================================
+// AiConfig enable 开关测试
+// ===========================================================================
+
+// parse_ai_config 空 map → enabled=true（默认值）
+TEST(ConfigExampleTest, ParseAiConfig_EmptyMap_EnabledTrue) {
+    std::unordered_map<std::string, std::string> kv;
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// parse_ai_config enabled="true" → enabled=true
+TEST(ConfigExampleTest, ParseAiConfig_EnabledTrue) {
+    std::unordered_map<std::string, std::string> kv = {{"enabled", "true"}};
+    AiConfig config;
+    config.enabled = false;  // 确保被覆盖
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// parse_ai_config enabled="false" → enabled=false
+TEST(ConfigExampleTest, ParseAiConfig_EnabledFalse) {
+    std::unordered_map<std::string, std::string> kv = {{"enabled", "false"}};
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_FALSE(config.enabled);
+}
+
+// parse_ai_config enabled="TRUE" → enabled=true（大小写不敏感）
+TEST(ConfigExampleTest, ParseAiConfig_EnabledTRUE_CaseInsensitive) {
+    std::unordered_map<std::string, std::string> kv = {{"enabled", "TRUE"}};
+    AiConfig config;
+    config.enabled = false;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// parse_ai_config enabled="invalid" → 返回 false
+TEST(ConfigExampleTest, ParseAiConfig_EnabledInvalid) {
+    std::unordered_map<std::string, std::string> kv = {{"enabled", "invalid"}};
+    AiConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_ai_config(kv, config, &err));
+    EXPECT_NE(err.find("enabled"), std::string::npos);
+}
+
+// ===========================================================================
+// KvsConfig enable 开关测试
+// ===========================================================================
+
+// build_kvs_config enabled 默认 true（提供必填字段，不设 enabled）
+TEST(ConfigExampleTest, BuildKvsConfig_EnabledDefault) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"stream_name", "TestStream"},
+        {"aws_region", "us-east-1"}
+    };
+    KvsSinkFactory::KvsConfig config;
+    std::string err;
+    EXPECT_TRUE(KvsSinkFactory::build_kvs_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// build_kvs_config enabled="true" → enabled=true
+TEST(ConfigExampleTest, BuildKvsConfig_EnabledTrue) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"stream_name", "TestStream"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "true"}
+    };
+    KvsSinkFactory::KvsConfig config;
+    config.enabled = false;
+    std::string err;
+    EXPECT_TRUE(KvsSinkFactory::build_kvs_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// build_kvs_config enabled="false" → enabled=false
+TEST(ConfigExampleTest, BuildKvsConfig_EnabledFalse) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"stream_name", "TestStream"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "false"}
+    };
+    KvsSinkFactory::KvsConfig config;
+    std::string err;
+    EXPECT_TRUE(KvsSinkFactory::build_kvs_config(kv, config, &err));
+    EXPECT_FALSE(config.enabled);
+}
+
+// build_kvs_config enabled="TRUE" → enabled=true（大小写不敏感）
+TEST(ConfigExampleTest, BuildKvsConfig_EnabledTRUE_CaseInsensitive) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"stream_name", "TestStream"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "TRUE"}
+    };
+    KvsSinkFactory::KvsConfig config;
+    config.enabled = false;
+    std::string err;
+    EXPECT_TRUE(KvsSinkFactory::build_kvs_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// build_kvs_config enabled="invalid" → 返回 false
+TEST(ConfigExampleTest, BuildKvsConfig_EnabledInvalid) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"stream_name", "TestStream"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "invalid"}
+    };
+    KvsSinkFactory::KvsConfig config;
+    std::string err;
+    EXPECT_FALSE(KvsSinkFactory::build_kvs_config(kv, config, &err));
+    EXPECT_NE(err.find("enabled"), std::string::npos);
+}
+
+// ===========================================================================
+// WebRtcConfig enable 开关测试
+// ===========================================================================
+
+// build_webrtc_config enabled 默认 true（提供必填字段，不设 enabled）
+TEST(ConfigExampleTest, BuildWebRtcConfig_EnabledDefault) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"channel_name", "TestChannel"},
+        {"aws_region", "us-east-1"}
+    };
+    WebRtcConfig config;
+    std::string err;
+    EXPECT_TRUE(build_webrtc_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// build_webrtc_config enabled="true" → enabled=true
+TEST(ConfigExampleTest, BuildWebRtcConfig_EnabledTrue) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"channel_name", "TestChannel"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "true"}
+    };
+    WebRtcConfig config;
+    config.enabled = false;
+    std::string err;
+    EXPECT_TRUE(build_webrtc_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// build_webrtc_config enabled="false" → enabled=false
+TEST(ConfigExampleTest, BuildWebRtcConfig_EnabledFalse) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"channel_name", "TestChannel"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "false"}
+    };
+    WebRtcConfig config;
+    std::string err;
+    EXPECT_TRUE(build_webrtc_config(kv, config, &err));
+    EXPECT_FALSE(config.enabled);
+}
+
+// build_webrtc_config enabled="TRUE" → enabled=true（大小写不敏感）
+TEST(ConfigExampleTest, BuildWebRtcConfig_EnabledTRUE_CaseInsensitive) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"channel_name", "TestChannel"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "TRUE"}
+    };
+    WebRtcConfig config;
+    config.enabled = false;
+    std::string err;
+    EXPECT_TRUE(build_webrtc_config(kv, config, &err));
+    EXPECT_TRUE(config.enabled);
+}
+
+// build_webrtc_config enabled="invalid" → 返回 false
+TEST(ConfigExampleTest, BuildWebRtcConfig_EnabledInvalid) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"channel_name", "TestChannel"},
+        {"aws_region", "us-east-1"},
+        {"enabled", "invalid"}
+    };
+    WebRtcConfig config;
+    std::string err;
+    EXPECT_FALSE(build_webrtc_config(kv, config, &err));
+    EXPECT_NE(err.find("enabled"), std::string::npos);
+}
+
+// ===========================================================================
 // Property-Based Tests (RapidCheck)
 // ===========================================================================
 
@@ -519,6 +710,27 @@ RC_GTEST_PROP(ConfigPBT, CliOverridePriority, ()) {
     } else {
         RC_ASSERT(mgr.logging_config().format == initial_format);
     }
+}
+
+// Feature: pipeline-cpu-optimization, Property 2: 非法布尔值被拒绝
+// **Validates: Requirements 4.8**
+RC_GTEST_PROP(ConfigPBT, InvalidBoolValueRejected, ()) {
+    // 随机生成非空字符串
+    auto random_str = *rc::gen::nonEmpty<std::string>();
+
+    // 大小写不敏感比较，排除 "true" 和 "false"
+    std::string lower = random_str;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    RC_PRE(lower != "true" && lower != "false");
+
+    // 构造 kv map，将随机字符串作为布尔字段的值
+    std::unordered_map<std::string, std::string> kv = {{"test_field", random_str}};
+    bool out = false;
+    std::string err;
+
+    // parse_bool_field 应返回 false（拒绝非法布尔值）
+    RC_ASSERT(parse_bool_field(kv, "test_field", out, &err) == false);
 }
 
 // Feature: config-file, Property 8: StreamingConfig -> BitrateConfig conversion fidelity

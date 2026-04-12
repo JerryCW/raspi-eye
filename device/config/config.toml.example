@@ -14,16 +14,26 @@ ca_path = "device/certs/root-ca.pem"
 # KVS (Kinesis Video Streams) configuration
 # stream_name: KVS stream name (must be pre-created via AWS CLI or IaC)
 # aws_region: AWS region where the KVS stream is located
+# enabled: true/false, set to false to disable KVS branch (uses fakesink instead)
 [kvs]
 stream_name = "<your-kvs-stream-name>"
 aws_region = "<your-aws-region>"
+# enabled = true
 
 # KVS WebRTC signaling channel configuration
 # channel_name: signaling channel name (must be pre-created via provision script or AWS CLI)
 # aws_region: AWS region where the signaling channel is located
+# enabled: true/false, set to false to disable WebRTC branch (skips signaling and media)
 [webrtc]
 channel_name = "<your-signaling-channel-name>"
 aws_region = "<your-aws-region>"
+# enabled = true
+
+# AI inference branch configuration (optional)
+# enabled: true/false, set to false to disable AI branch
+# Currently AI branch uses fakesink; this switch is reserved for future spec-10 integration
+[ai]
+# enabled = true
 
 # Camera configuration (optional, defaults shown)
 # type: test (macOS dev), v4l2 (USB camera), libcamera (CSI camera)

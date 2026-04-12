@@ -4,6 +4,7 @@
 // HAVE_KVS_WEBRTC_SDK not defined: stub implementation (macOS / Linux without SDK)
 
 #include "webrtc_signaling.h"
+#include "config_util.h"  // parse_bool_field
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -43,6 +44,12 @@ bool build_webrtc_config(
         }
         return false;
     }
+
+    // enabled 字段（可选，默认 true）
+    if (!parse_bool_field(kv, "enabled", config.enabled, error_msg)) {
+        return false;
+    }
+
     return true;
 }
 

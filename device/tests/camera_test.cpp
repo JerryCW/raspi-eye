@@ -8,6 +8,15 @@
 #include "pipeline_manager.h"
 #include <string>
 
+// RapidCheck headers — camera_test 链接 rapidcheck 后生效（任务 8）
+#if __has_include(<rapidcheck.h>)
+#include <rapidcheck.h>
+#include <rapidcheck/gtest.h>
+#define HAS_RAPIDCHECK 1
+#else
+#define HAS_RAPIDCHECK 0
+#endif
+
 // GStreamer must be initialised before any gst_* call.
 int main(int argc, char** argv) {
     gst_init(&argc, &argv);
@@ -159,3 +168,86 @@ TEST(CameraSourceTest, TeePipelineSourceElement) {
     auto pm = PipelineManager::create(raw, &err);
     ASSERT_NE(pm, nullptr) << err;
 }
+
+// ============================================================
+// Task 2.3: select_best_format 单元测试
+// Requirements: 1.1, 1.2, 1.3, 1.4, 1.5
+// ============================================================
+
+TEST(SelectBestFormatTest, MjpgPlusYuyvReturnsMjpg) {
+    std::vector<CameraSource::V4L2Format> fmts = {
+        CameraSource::V4L2Format::MJPG,
+        CameraSource::V4L2Format::YUYV
+    };
+    EXPECT_EQ(CameraSource::select_best_format(fmts), CameraSource::V4L2Format::MJPG);
+}
+
+TEST(SelectBestFormatTest, MjpgPlusI420ReturnsMjpg) {
+    std::vector<CameraSource::V4L2Format> fmts = {
+        CameraSource::V4L2Format::MJPG,
+        CameraSource::V4L2Format::I420
+    };
+    EXPECT_EQ(CameraSource::select_best_format(fmts), CameraSource::V4L2Format::MJPG);
+}
+
+TEST(SelectBestFormatTest, OnlyYuyvReturnsYuyv) {
+    std::vector<CameraSource::V4L2Format> fmts = {
+        CameraSource::V4L2Format::YUYV
+    };
+    EXPECT_EQ(CameraSource::select_best_format(fmts), CameraSource::V4L2Format::YUYV);
+}
+
+TEST(SelectBestFormatTest, OnlyI420ReturnsI420) {
+    std::vector<CameraSource::V4L2Format> fmts = {
+        CameraSource::V4L2Format::I420
+    };
+    EXPECT_EQ(CameraSource::select_best_format(fmts), CameraSource::V4L2Format::I420);
+}
+
+TEST(SelectBestFormatTest, EmptyReturnsUnknown) {
+    std::vector<CameraSource::V4L2Format> fmts;
+    EXPECT_EQ(CameraSource::select_best_format(fmts), CameraSource::V4L2Format::UNKNOWN);
+}
+
+// ============================================================
+// Task 2.2: Property 1 — 格式选择优先级不变式（PBT）
+// Feature: pipeline-cpu-optimization, Property 1: 格式选择优先级不变式
+// **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5**
+// ============================================================
+
+#if HAS_RAPIDCHECK
+
+RC_GTEST_PROP(FormatPriority, InvariantMjpgOverI420OverYuyv, ()) {
+    // 生成器：随机生成 1-10 个 V4L2Format（从 MJPG, I420, YUYV 中选取，允许重复）
+    const auto count = *rc::gen::inRange(1, 11);
+    std::vector<CameraSource::V4L2Format> formats;
+    formats.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        formats.push_back(*rc::gen::element(
+            CameraSource::V4L2Format::MJPG,
+            CameraSource::V4L2Format::I420,
+            CameraSource::V4L2Format::YUYV
+        ));
+    }
+
+    auto result = CameraSource::select_best_format(formats);
+
+    // 检查是否包含各格式
+    bool has_mjpg = false, has_i420 = false, has_yuyv = false;
+    for (auto fmt : formats) {
+        if (fmt == CameraSource::V4L2Format::MJPG) has_mjpg = true;
+        if (fmt == CameraSource::V4L2Format::I420) has_i420 = true;
+        if (fmt == CameraSource::V4L2Format::YUYV) has_yuyv = true;
+    }
+
+    // 断言：MJPG > I420 > YUYV 优先级
+    if (has_mjpg) {
+        RC_ASSERT(result == CameraSource::V4L2Format::MJPG);
+    } else if (has_i420) {
+        RC_ASSERT(result == CameraSource::V4L2Format::I420);
+    } else if (has_yuyv) {
+        RC_ASSERT(result == CameraSource::V4L2Format::YUYV);
+    }
+}
+
+#endif // HAS_RAPIDCHECK

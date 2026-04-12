@@ -159,3 +159,27 @@ TEST(TeeTest, EncoderDetection) {
     auto pm = PipelineManager::create(raw, &err);
     ASSERT_NE(pm, nullptr) << err;
 }
+
+// --- Requirement 3.1, 3.4 (spec-16) ---
+// Default config (videotestsrc, SourceOutputFormat::UNKNOWN): pipeline SHALL contain
+// "convert" element (videoconvert preserved for backward compatibility).
+// Pipeline can reach PLAYING or PAUSED.
+TEST(TeeTest, DefaultConfigContainsVideoconvert) {
+    std::string err;
+    GstElement* raw = PipelineBuilder::build_tee_pipeline(&err);
+    ASSERT_NE(raw, nullptr) << "build_tee_pipeline failed: " << err;
+
+    // videotestsrc -> SourceOutputFormat::UNKNOWN -> videoconvert preserved
+    GstElement* convert = gst_bin_get_by_name(GST_BIN(raw), "convert");
+    EXPECT_NE(convert, nullptr) << "Expected 'convert' element in default (videotestsrc) pipeline";
+    if (convert) gst_object_unref(convert);
+
+    // Verify pipeline can reach PLAYING/PAUSED
+    auto pm = PipelineManager::create(raw, &err);
+    ASSERT_NE(pm, nullptr) << err;
+    ASSERT_TRUE(pm->start(&err)) << "start() failed: " << err;
+
+    GstState state = pm->current_state();
+    EXPECT_TRUE(state == GST_STATE_PLAYING || state == GST_STATE_PAUSED)
+        << "Expected PLAYING or PAUSED, got " << state;
+}

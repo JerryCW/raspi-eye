@@ -28,6 +28,7 @@ struct AppContext::Impl {
     CameraSource::CameraConfig cam_config;
     StreamingConfig streaming_config;
     LoggingConfig logging_config;
+    AiConfig ai_config;
 
     // Modules (declaration order determines destruction order)
     std::unique_ptr<WebRtcSignaling> signaling;
@@ -73,45 +74,53 @@ bool AppContext::init(const std::string& config_path,
     impl_->cam_config = config.camera_config();
     impl_->streaming_config = config.streaming_config();
     impl_->logging_config = config.logging_config();
+    impl_->ai_config = config.ai_config();
 
-    // --- Create Signaling ---
-    impl_->signaling = WebRtcSignaling::create(
-        impl_->webrtc_config, impl_->aws_config, error_msg);
-    if (!impl_->signaling) {
-        return false;
-    }
+    // --- Create Signaling & MediaManager (skip when WebRTC disabled) ---
+    if (impl_->webrtc_config.enabled) {
+        impl_->signaling = WebRtcSignaling::create(
+            impl_->webrtc_config, impl_->aws_config, error_msg);
+        if (!impl_->signaling) {
+            return false;
+        }
 
-    // --- Create MediaManager ---
-    impl_->media_manager = WebRtcMediaManager::create(
-        *impl_->signaling, impl_->webrtc_config.aws_region, error_msg);
-    if (!impl_->media_manager) {
-        return false;
-    }
+        impl_->media_manager = WebRtcMediaManager::create(
+            *impl_->signaling, impl_->webrtc_config.aws_region, error_msg);
+        if (!impl_->media_manager) {
+            return false;
+        }
 
-    // --- Register callbacks ---
-    impl_->signaling->set_offer_callback(
-        [this](const std::string& peer_id, const std::string& sdp) {
-            impl_->media_manager->on_viewer_offer(peer_id, sdp);
+        // --- Register callbacks ---
+        impl_->signaling->set_offer_callback(
+            [this](const std::string& peer_id, const std::string& sdp) {
+                impl_->media_manager->on_viewer_offer(peer_id, sdp);
+            });
+
+        impl_->signaling->set_ice_candidate_callback(
+            [this](const std::string& peer_id, const std::string& candidate) {
+                impl_->media_manager->on_viewer_ice_candidate(peer_id, candidate);
+            });
+
+        // --- Register shutdown steps (registered first = executed last) ---
+        impl_->shutdown_handler.register_step("media_manager", [this]() {
+            impl_->media_manager.reset();
         });
-
-    impl_->signaling->set_ice_candidate_callback(
-        [this](const std::string& peer_id, const std::string& candidate) {
-            impl_->media_manager->on_viewer_ice_candidate(peer_id, candidate);
+        impl_->shutdown_handler.register_step("signaling", [this]() {
+            impl_->signaling->disconnect();
         });
-
-    // --- Register shutdown steps (registered first = executed last) ---
-    impl_->shutdown_handler.register_step("media_manager", [this]() {
-        impl_->media_manager.reset();
-    });
-    impl_->shutdown_handler.register_step("signaling", [this]() {
-        impl_->signaling->disconnect();
-    });
+    } else {
+        if (logger) {
+            logger->info("WebRTC disabled, skipping signaling and media_manager");
+        }
+    }
 
     // --- Info log (only resource identifiers, no secrets) ---
     if (logger) {
-        logger->info("AppContext init ok: kvs_stream={}, webrtc_channel={}",
+        logger->info("AppContext init ok: kvs_stream={} (enabled={}), webrtc_channel={} (enabled={})",
                      impl_->kvs_config.stream_name,
-                     impl_->webrtc_config.channel_name);
+                     impl_->kvs_config.enabled,
+                     impl_->webrtc_config.channel_name,
+                     impl_->webrtc_config.enabled);
     }
 
     return true;
@@ -125,12 +134,20 @@ bool AppContext::start(std::string* error_msg) {
     auto logger = spdlog::get("app");
 
     // --- Build tee pipeline ---
+    // KVS: enabled=false 时传 nullptr（PipelineBuilder 用 fakesink）
+    const KvsSinkFactory::KvsConfig* kvs_ptr =
+        impl_->kvs_config.enabled ? &impl_->kvs_config : nullptr;
+    const AwsConfig* aws_ptr =
+        impl_->kvs_config.enabled ? &impl_->aws_config : nullptr;
+    // WebRTC: init 阶段已决定，直接用 media_manager 指针（可能为 nullptr）
+    WebRtcMediaManager* webrtc_ptr = impl_->media_manager.get();
+
     GstElement* pipeline = PipelineBuilder::build_tee_pipeline(
         error_msg,
         impl_->cam_config,
-        &impl_->kvs_config,
-        &impl_->aws_config,
-        impl_->media_manager.get());
+        kvs_ptr,
+        aws_ptr,
+        webrtc_ptr);
     if (!pipeline) {
         return false;
     }
@@ -170,12 +187,19 @@ bool AppContext::start(std::string* error_msg) {
     // --- Register rebuild callback ---
     impl_->health_monitor->set_rebuild_callback([this]() -> GstElement* {
         std::string err;
+        // rebuild 时同样根据 enabled 决定传递 nullptr
+        const KvsSinkFactory::KvsConfig* kvs_ptr =
+            impl_->kvs_config.enabled ? &impl_->kvs_config : nullptr;
+        const AwsConfig* aws_ptr =
+            impl_->kvs_config.enabled ? &impl_->aws_config : nullptr;
+        WebRtcMediaManager* webrtc_ptr = impl_->media_manager.get();
+
         GstElement* p = PipelineBuilder::build_tee_pipeline(
             &err,
             impl_->cam_config,
-            &impl_->kvs_config,
-            &impl_->aws_config,
-            impl_->media_manager.get());
+            kvs_ptr,
+            aws_ptr,
+            webrtc_ptr);
         if (!p) return nullptr;
 
         auto new_pm = PipelineManager::create(p, &err);
@@ -230,12 +254,14 @@ bool AppContext::start(std::string* error_msg) {
         impl_->pipeline_manager.reset();
     });
 
-    // --- Connect signaling (warn on failure, do not block startup) ---
-    std::string connect_err;
-    if (!impl_->signaling->connect(&connect_err)) {
-        if (logger) {
-            logger->warn("Signaling connect failed (will retry): {}",
-                         connect_err);
+    // --- Connect signaling (skip when WebRTC disabled, warn on failure) ---
+    if (impl_->signaling) {
+        std::string connect_err;
+        if (!impl_->signaling->connect(&connect_err)) {
+            if (logger) {
+                logger->warn("Signaling connect failed (will retry): {}",
+                             connect_err);
+            }
         }
     }
 

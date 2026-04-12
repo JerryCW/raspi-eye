@@ -13,6 +13,7 @@ namespace KvsSinkFactory {
 struct KvsConfig {
     std::string stream_name;   // KVS stream name
     std::string aws_region;    // AWS region
+    bool enabled = true;       // KVS 分支是否启用
 };
 
 // Build KvsConfig from TOML key-value map.

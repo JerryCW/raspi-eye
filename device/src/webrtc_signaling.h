@@ -13,6 +13,7 @@
 struct WebRtcConfig {
     std::string channel_name;
     std::string aws_region;
+    bool enabled = true;       // WebRTC 分支是否启用
 };
 
 // Build WebRtcConfig from TOML key-value map.

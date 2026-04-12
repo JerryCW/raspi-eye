@@ -1,6 +1,7 @@
 // kvs_sink_factory.cpp
 // KVS sink element factory implementation.
 #include "kvs_sink_factory.h"
+#include "config_util.h"  // parse_bool_field
 #include <spdlog/spdlog.h>
 #include <vector>
 
@@ -36,6 +37,12 @@ bool build_kvs_config(
         }
         return false;
     }
+
+    // enabled 字段（可选，默认 true）
+    if (!parse_bool_field(kv, "enabled", config.enabled, error_msg)) {
+        return false;
+    }
+
     return true;
 }
 

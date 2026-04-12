@@ -113,7 +113,7 @@ target_link_libraries(tee_test PRIVATE pipeline_manager GTest::gtest)
 add_test(NAME tee_test COMMAND tee_test)
 
 add_executable(camera_test tests/camera_test.cpp)
-target_link_libraries(camera_test PRIVATE pipeline_manager GTest::gtest)
+target_link_libraries(camera_test PRIVATE pipeline_manager GTest::gtest rapidcheck rapidcheck_gtest)
 add_test(NAME camera_test COMMAND camera_test)
 
 add_executable(health_test tests/health_test.cpp)
@@ -123,6 +123,10 @@ add_test(NAME health_test COMMAND health_test)
 add_executable(shutdown_test tests/shutdown_test.cpp)
 target_link_libraries(shutdown_test PRIVATE pipeline_manager GTest::gtest_main rapidcheck rapidcheck_gtest)
 add_test(NAME shutdown_test COMMAND shutdown_test)
+
+# 配置工具模块（parse_bool_field 等，无外部依赖，打破循环依赖）
+add_library(config_util_module STATIC src/config_util.cpp)
+target_include_directories(config_util_module PUBLIC src)
 
 # 凭证模块库
 add_library(credential_module STATIC src/credential_provider.cpp)
@@ -147,7 +151,7 @@ add_test(NAME credential_test COMMAND credential_test
 add_library(kvs_module STATIC src/kvs_sink_factory.cpp)
 target_include_directories(kvs_module PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(kvs_module PUBLIC ${GST_LIBRARY_DIRS})
-target_link_libraries(kvs_module PUBLIC ${GST_LIBRARIES} spdlog::spdlog credential_module)
+target_link_libraries(kvs_module PUBLIC ${GST_LIBRARIES} spdlog::spdlog credential_module config_util_module)
 
 # Link kvs_module to pipeline_manager
 target_link_libraries(pipeline_manager PUBLIC kvs_module)
@@ -202,7 +206,7 @@ endif()
 # WebRTC signaling module
 add_library(webrtc_module STATIC src/webrtc_signaling.cpp)
 target_include_directories(webrtc_module PUBLIC src)
-target_link_libraries(webrtc_module PUBLIC spdlog::spdlog credential_module)
+target_link_libraries(webrtc_module PUBLIC spdlog::spdlog credential_module config_util_module)
 
 # WebRTC media module
 add_library(webrtc_media_module STATIC src/webrtc_media.cpp)
@@ -215,7 +219,7 @@ target_link_libraries(pipeline_manager PUBLIC webrtc_media_module)
 # 配置管理模块
 add_library(config_module STATIC src/config_manager.cpp)
 target_include_directories(config_module PUBLIC src ${GST_INCLUDE_DIRS})
-target_link_libraries(config_module PUBLIC credential_module kvs_module webrtc_module log_module bitrate_module)
+target_link_libraries(config_module PUBLIC credential_module kvs_module webrtc_module log_module bitrate_module config_util_module)
 
 # Link config_module to pipeline_manager
 target_link_libraries(pipeline_manager PUBLIC config_module)

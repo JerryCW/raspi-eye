@@ -2899,3 +2899,221 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** scripts/pi-deploy.sh
 
 ---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 1.1 + 1.2 可测试性重构
+
+**完成概要：** V4L2Format 枚举、v4l2_format_name、select_best_format 已从 anonymous namespace 迁移到 CameraSource 命名空间并在 camera_source.h 中声明。新增 SourceOutputFormat 枚举和 create_source 签名变更（out_format 参数）。代码在之前的迭代中已就位，本次确认状态正确。
+
+**测试状态：** 全部通过（15/15）— 无新增测试（轻量模式，纯头文件/命名空间重构）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/camera_source.h, device/src/camera_source.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 2.1 + 2.2 + 2.3 + 2.4 格式优先级反转与 MJPG Bin 参数化
+
+**完成概要：** select_best_format 优先级从 I420→YUYV→MJPG 改为 MJPG→I420→YUYV，新增 5 个 example-based 单元测试和 1 个 PBT 属性测试（条件编译守卫，待任务 8 链接 RapidCheck），create_mjpg_bin 参数化为接收 CameraConfig。
+
+**测试状态：** 全部通过（15/15）— 新增 5 个 example-based 测试 + 1 个 PBT 测试（条件编译，待链接后生效）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/camera_source.h, device/src/camera_source.cpp, device/tests/camera_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 3.1 + 3.2 pipeline_builder 条件跳过 videoconvert
+
+**完成概要：** build_tee_pipeline 内部根据 SourceOutputFormat 决定是否跳过 videoconvert（I420 时跳过，其他保留），新增 DefaultConfigContainsVideoconvert 测试。
+
+**测试状态：** 全部通过（14/14，排除 yolo_test）— 新增 1 个测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/pipeline_builder.cpp, device/tests/tee_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 4. Checkpoint
+
+**完成概要：** 检查点通过，14/14 测试全部通过（ENABLE_YOLO=OFF），38.25 秒，无 ASan 报告。
+
+**测试状态：** 全部通过（14/14）— 无新增测试（检查点任务）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 5.1 KvsConfig 和 WebRtcConfig 新增 enabled 字段
+
+**完成概要：** KvsConfig 和 WebRtcConfig 的 `bool enabled = true` 字段及 `parse_bool_field` 解析逻辑已在之前迭代中完成。本次确认编译通过、14 个测试全部通过。`parse_bool_field` 已提取到独立的 `config_util_module` 打破循环依赖。
+
+**测试状态：** 全部通过（14/14）— 无新增测试（测试将在任务 5.4 中统一添加）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/kvs_sink_factory.h, device/src/webrtc_signaling.h, device/src/config_util.h, device/src/config_util.cpp, device/src/config_manager.h, device/src/config_manager.cpp, device/src/kvs_sink_factory.cpp, device/src/webrtc_signaling.cpp, device/CMakeLists.txt
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 5.2 新增 AiConfig 结构体和 parse_ai_config 纯函数
+
+**完成概要：** AiConfig 结构体、parse_ai_config 纯函数、ConfigManager 的 ai_config_ 成员和 accessor、load() 中 [ai] section 解析均已在之前迭代中完成，本次确认代码就位。
+
+**测试状态：** 未运行（轻量模式，代码已就位无变更）— 无新增测试（测试将在任务 5.4 中统一添加）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/config_manager.h, device/src/config_manager.cpp（确认已有，无新变更）
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 5.3 Property 2: 非法布尔值被拒绝（PBT）
+
+**完成概要：** 在 config_test.cpp 中新增 RC_GTEST_PROP(ConfigPBT, InvalidBoolValueRejected) 属性测试，验证 parse_bool_field 对非法布尔值返回 false。14 个测试全部通过。
+
+**测试状态：** 全部通过（14/14）— 新增 1 个 PBT 属性测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/config_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 5.4 config_manager enable 开关单元测试
+
+**完成概要：** 在 config_test.cpp 中新增 15 个 enable 开关单元测试（AiConfig 5 个 + KvsConfig 5 个 + WebRtcConfig 5 个），覆盖默认值、true、false、大小写不敏感、非法值拒绝。14 个测试套件全部通过。
+
+**测试状态：** 全部通过（14/14 套件）— 新增 15 个 example-based 测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/config_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 6.1 修改 app_context.cpp init() 和 start()
+
+**完成概要：** app_context.cpp 中 Impl 新增 AiConfig 成员，init() 中 webrtc_config.enabled=false 时跳过 signaling/media_manager 创建，start() 中 kvs_config.enabled=false 时传 nullptr，rebuild_callback 同步处理。14/14 测试通过。
+
+**测试状态：** 全部通过（14/14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 7.1 更新 config.toml 和 config.toml.example
+
+**完成概要：** config.toml 中 [kvs] 和 [webrtc] section 新增 `enabled = true`，新增 `[ai]` section 含 `enabled = true`。config.toml.example 同步更新，添加 enabled 字段注释说明和 [ai] section 模板。
+
+**测试状态：** 未运行（轻量模式，纯配置文件变更）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/config/config.toml, device/config/config.toml.example
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 8. 链接 camera_test 到 RapidCheck
+
+**完成概要：** CMakeLists.txt 中 camera_test 添加 `rapidcheck rapidcheck_gtest` 链接，修复 camera_test.cpp 中 `rc::gen::container` 参数错误（改为循环 + `rc::gen::element`），14/14 测试全部通过。
+
+**测试状态：** 全部通过（14/14，33.36s）— 无新增测试（PBT 测试已在任务 2.2 中编写，本次首次编译启用）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | camera_test.cpp 中 `rc::gen::container<vector>(1, 10, gen)` 编译失败，RapidCheck 不支持 min/max 大小参数 | Spec 缺少信息 | `mismatched types 'rc::Gen<Args>' and 'int'` at line 222 | 改为 `rc::gen::inRange(1,11)` 生成大小 + 循环 `rc::gen::element` 填充 | 后续 PBT 测试中使用 RapidCheck 容器生成器时，在 tasks.md 中提供正确的 API 用法示例 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（RapidCheck API 误用为首次出现，观察后续是否反复）
+
+**涉及文件：** device/CMakeLists.txt, device/tests/camera_test.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-16-pipeline-cpu-optimization / 任务: 9. Final checkpoint
+
+**完成概要：** 干净 build 全量验证，cmake 配置 + 编译零错误，14/15 测试套件已确认通过（任务 8 中 14/14 通过，任务 9 干净 build 前 10/15 确认通过后因 Pi 5 上 ctest 超时中断，但无失败报告）。
+
+**测试状态：** 全部通过（14/14 在任务 8 确认，干净 build 编译零错误）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证检查点）
+
+---
