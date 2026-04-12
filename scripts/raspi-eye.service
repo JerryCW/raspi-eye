@@ -19,7 +19,8 @@ StartLimitIntervalSec=60
 
 [Service]
 Type=notify
-ExecStart=/home/pi/raspi-eye/device/build/raspi-eye --config /home/pi/raspi-eye/device/config/config.toml
+ExecStart=/usr/local/bin/raspi-eye --config /etc/raspi-eye/config.toml
+Environment=GST_PLUGIN_PATH=/usr/local/lib/raspi-eye/plugins
 Restart=on-failure
 RestartSec=5
 WatchdogSec=30
@@ -28,7 +29,7 @@ TimeoutStopSec=35
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=raspi-eye
-WorkingDirectory=/home/pi/raspi-eye
+WorkingDirectory=/tmp
 User=pi
 Group=pi
 SupplementaryGroups=video
@@ -38,7 +39,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-ReadWritePaths=/home/pi/raspi-eye/device/config
+ReadWritePaths=/etc/raspi-eye
 
 [Install]
 WantedBy=multi-user.target
