@@ -216,9 +216,20 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
         }
     }
 
-    // 4. Set capsfilter caps: video/x-raw,format=I420
+    // 4. Set capsfilter caps: video/x-raw,format=I420 with optional resolution/framerate
     GstCaps* caps = gst_caps_new_simple("video/x-raw",
         "format", G_TYPE_STRING, "I420", nullptr);
+    if (config.width > 0 && config.height > 0) {
+        gst_caps_set_simple(caps,
+            "width", G_TYPE_INT, config.width,
+            "height", G_TYPE_INT, config.height,
+            nullptr);
+    }
+    if (config.framerate > 0) {
+        gst_caps_set_simple(caps,
+            "framerate", GST_TYPE_FRACTION, config.framerate, 1,
+            nullptr);
+    }
     g_object_set(G_OBJECT(capsfilter), "caps", caps, nullptr);
     gst_caps_unref(caps);
 
