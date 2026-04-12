@@ -2881,3 +2881,21 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-12 — Spec: spec-22-pi-deploy / 任务: 1-7. 完整 pi-deploy.sh 脚本实现
+
+**完成概要：** 创建 `scripts/pi-deploy.sh` 自动化部署脚本（301 行），实现 build + install + config deploy + certs deploy + plugins install + service restart + summary 完整流程，支持 macOS SSH 远程和 Pi 5 本地双模式。
+
+**测试状态：** shellcheck 零警告 + bash -n 语法正确 — 无新增测试（纯 bash 脚本 Spec，PBT 不适用）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。所有 7 个任务一次性通过，shellcheck 和 bash -n 均零错误。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/pi-deploy.sh
+
+---
