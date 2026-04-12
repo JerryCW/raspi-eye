@@ -21,7 +21,8 @@ spec-8 + spec-13 → spec-13.5（main.cpp KVS+WebRTC 集成）→ spec-14（WebR
 spec-15 → spec-16（零拷贝缓冲区）
 spec-11 → spec-17（SageMaker endpoint）→ spec-18（Lambda 触发）
 spec-6 → spec-19（配置文件加载）
-spec-16 + spec-19 → spec-20（systemd 看门狗）
+spec-19 → spec-20（systemd 看门狗，不再硬依赖 spec-16）
+spec-20 → spec-22（部署自动化）
 spec-18 + spec-13 → spec-21（前端 MVP，可选）
 ```
 
@@ -109,8 +110,9 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
-| 19 | config-file | INI/CONF 配置文件加载：摄像头类型/设备/分辨率、AWS 证书路径/endpoint、日志级别等，优先级：命令行 > 配置文件 > 平台默认值 | spec-7 | device | ⬜ |
-| 20 | systemd-watchdog | systemd 服务集成 + 进程级看门狗（7×24 无人值守），配置文件路径通过 systemd unit 指定 | spec-16, spec-19 | device | ⬜ |
+| 19 | config-file | ConfigManager 统一配置加载：TOML 解析 camera/streaming/logging section，命令行覆盖，三层优先级 | spec-7 | device | ✅ |
+| 20 | systemd-watchdog | systemd 服务集成 + 进程级看门狗（7×24 无人值守），配置文件路径通过 systemd unit 指定 | spec-19 | device + scripts | ⬜ |
+| 22 | pi-deploy | Pi 5 部署自动化：build + install + systemctl restart 一键脚本，config.toml 初始化部署 | spec-20 | scripts | ⬜ |
 
 ## 阶段七：前端（可选，优先级低）
 
@@ -123,23 +125,24 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 ## 推荐执行顺序（单人串行）
 
 ```
-0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 9.5 → 12 → 13 → 13.5 → 14 → 15 → 16 → 10 → 11 → 17 → 18 → 19 → 20 → 21
+0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 9.5 → 12 → 13 → 13.5 → 14 → 15 → 16 → 19 → 20 → 22 → 10 → 11 → 17 → 18 → 21
 ```
 
-其中 spec-5 和 spec-6 可并行，spec-9 可在等待 spec-7 时提前开发，spec-18 在 spec-7 之后即可开始。
+其中 spec-5 和 spec-6 可并行，spec-9 可在等待 spec-7 时提前开发，spec-16（零拷贝）为性能优化可后置。
 
 理由：
 - 0-2：从零到双平台可编译的基础设施（Pi 5 原生编译 + SSH 远程构建）
 - 3-4：H.264 + tee 分流 + 摄像头抽象，Pi 5 上第一时间验证 CPU 表现
 - 5-7：管道容错 + IoT provisioning + 设备端凭证模块
 - 8：KVS 录制（最核心数据通路）
-- 9-11：YOLO + ONNX 优化 + AI 管道 + 截图上传（核心功能）
-- 12-13：WebRTC 实时观看
-- 14：WebRTC SDP bugfix（已完成）
-- 15-16：自适应码率 + 零拷贝性能优化
+- 9-9.5：YOLO + ONNX 优化（独立模块，不阻塞主线）
+- 12-15：WebRTC + 端到端集成 + SDP bugfix + 自适应码率
+- 16：零拷贝性能优化（可后置，不影响功能完整性）
+- 19：配置文件统一加载
+- 20：systemd 看门狗（7×24 无人值守）
+- 22：Pi 5 部署自动化（一键部署脚本）
+- 10-11：AI 管道 + 截图上传（AI 工程阶段）
 - 17-18：云端推理
-- 19：配置文件加载（INI/CONF，统一管理所有运行时配置）
-- 20：systemd 看门狗（依赖配置文件）
 - 21：前端（可选）
 
 ---
@@ -167,4 +170,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅, spec-3 ✅, spec-4 ✅, spec-5 ✅, spec-6 ✅, spec-7 ✅, spec-8 ✅, spec-9 ✅, spec-9.5 ✅, spec-12 ✅, spec-13 ✅, spec-13.5 ✅, spec-14 ✅, spec-15 ✅ 已完成，下一个 spec-19（config-file）
+当前进度：spec-0 ~ spec-9.5 ✅, spec-12 ~ spec-15 ✅, spec-16 ✅（shutdown fix）, spec-19 ✅（config-file）已完成，下一个 spec-20（systemd-watchdog）→ spec-22（pi-deploy）
