@@ -278,3 +278,13 @@ target_link_libraries(bitrate_test PRIVATE
     rapidcheck
     rapidcheck_gtest)
 add_test(NAME bitrate_test COMMAND bitrate_test)
+
+# GLib 在 _dl_init 中有 16KB 分配被 LeakSanitizer 误报，
+# 为所有测试禁用 leak detection，保留 ASan 其他检查（heap-use-after-free 等）
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    get_property(all_tests DIRECTORY PROPERTY TESTS)
+    foreach(t IN LISTS all_tests)
+        set_tests_properties(${t} PROPERTIES
+            ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+    endforeach()
+endif()

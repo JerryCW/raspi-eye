@@ -3,15 +3,33 @@
 #include "app_context.h"
 #include "camera_source.h"
 #include "log_init.h"
+#include "shutdown_handler.h"
 #include <spdlog/spdlog.h>
 #include <gst/gst.h>
-#include <csignal>
+#include <signal.h>
+#include <unistd.h>
+#include <atomic>
 #include <string>
 
-static GMainLoop* loop = nullptr;
+// 全局 atomic（async-signal-safe）
+static std::atomic<int> g_signal_count{0};
+static std::atomic<bool> g_shutdown_requested{false};
 
-static void sigint_handler(int /*sig*/) {
-    if (loop) g_main_loop_quit(loop);
+static void signal_handler(int /*sig*/) {
+    if (g_signal_count.fetch_add(1, std::memory_order_relaxed) >= 1) {
+        _exit(EXIT_FAILURE);  // 第二次信号，强制退出
+    }
+    g_shutdown_requested.store(true, std::memory_order_relaxed);
+}
+
+// idle callback 轮询 shutdown flag
+static gboolean check_shutdown(gpointer data) {
+    auto* loop = static_cast<GMainLoop*>(data);
+    if (g_shutdown_requested.load(std::memory_order_relaxed)) {
+        g_main_loop_quit(loop);
+        return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
 }
 
 static int run_pipeline(int argc, char* argv[]) {
@@ -85,16 +103,24 @@ static int run_pipeline(int argc, char* argv[]) {
         return 1;
     }
 
-    // Create main loop and register signal handlers
-    loop = g_main_loop_new(nullptr, FALSE);
-    std::signal(SIGINT, sigint_handler);
-    std::signal(SIGTERM, sigint_handler);
+    // Create main loop (local variable, not global)
+    GMainLoop* loop = g_main_loop_new(nullptr, FALSE);
+
+    // Register signal handlers via sigaction (async-signal-safe)
+    struct sigaction sa{};
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+
+    // Register idle callback to poll shutdown flag
+    g_idle_add(check_shutdown, loop);
 
     // Phase 5: AppContext start
     if (!ctx.start(&err)) {
         if (logger) logger->error("AppContext start failed: {}", err);
         g_main_loop_unref(loop);
-        loop = nullptr;
         log_init::shutdown();
         return 1;
     }
@@ -103,9 +129,16 @@ static int run_pipeline(int argc, char* argv[]) {
     g_main_loop_run(loop);
 
     // Phase 7: Cleanup
-    ctx.stop();
+    auto summary = ctx.stop();
+    if (logger) {
+        logger->info("shutdown complete: {} step(s), {}ms total",
+                     summary.steps.size(), summary.total_duration_ms);
+        for (const auto& step : summary.steps) {
+            logger->info("  [{}]: {} ({}ms)", step.name,
+                         status_str(step.status), step.duration_ms);
+        }
+    }
     g_main_loop_unref(loop);
-    loop = nullptr;
     log_init::shutdown();
     return 0;
 }

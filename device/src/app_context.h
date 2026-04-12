@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include "camera_source.h"
+#include "shutdown_handler.h"
 
 class AppContext {
 public:
@@ -24,7 +25,7 @@ public:
     bool start(std::string* error_msg = nullptr);
 
     // Phase 3: delegate to ShutdownHandler::execute()
-    void stop();
+    ShutdownSummary stop();
 
 private:
     struct Impl;

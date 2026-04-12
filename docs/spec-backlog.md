@@ -93,7 +93,7 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
 | 14 | webrtc-sdp-fix | Bugfix: WebRTC SDP 协商 + ICE 连接 + NALU 格式修复（addSupportedCodec、ICE 缓存、byte-stream 格式） | spec-13.5 | device | ✅ |
-| 15 | adaptive-streaming | 自适应码率控制 + 流模式切换（FULL/KVS_ONLY/WEBRTC_ONLY/DEGRADED） | spec-8, spec-13 | device | ⬜ |
+| 15 | adaptive-streaming | 自适应码率控制 + 流模式切换（FULL/KVS_ONLY/WEBRTC_ONLY/DEGRADED） | spec-8, spec-13 | device | ✅ |
 | 16 | zero-copy-buffers | 缓冲区零拷贝重构与预分配池化，目标 CPU 负载 ~26% @ 720p15 | spec-15 | device | ⬜ |
 
 零拷贝在自适应码率之后：自适应码率会动态启停分支改变数据流路径，零拷贝需要在最终路径上优化。
@@ -167,4 +167,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅, spec-3 ✅, spec-4 ✅, spec-5 ✅, spec-6 ✅, spec-7 ✅, spec-8 ✅, spec-9 ✅, spec-9.5 ✅, spec-12 ✅, spec-13 ✅, spec-13.5 ✅, spec-14 ✅ 已完成，下一个 spec-15（adaptive-streaming）
+当前进度：spec-0 ✅, spec-1 ✅, spec-2 ✅, spec-3 ✅, spec-4 ✅, spec-5 ✅, spec-6 ✅, spec-7 ✅, spec-8 ✅, spec-9 ✅, spec-9.5 ✅, spec-12 ✅, spec-13 ✅, spec-13.5 ✅, spec-14 ✅, spec-15 ✅ 已完成，下一个 spec-19（config-file）

@@ -260,6 +260,6 @@ bool AppContext::start(std::string* error_msg) {
 // stop()
 // ============================================================
 
-void AppContext::stop() {
-    impl_->shutdown_handler.execute();
+ShutdownSummary AppContext::stop() {
+    return impl_->shutdown_handler.execute();
 }
