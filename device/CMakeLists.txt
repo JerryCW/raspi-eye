@@ -167,6 +167,7 @@ if(ENABLE_YOLO)
             YOLO_MODEL_PATH_SMALL_INT8="${YOLO_MODEL_PATH_SMALL_INT8}"
             YOLO_MODEL_PATH_NANO_INT8="${YOLO_MODEL_PATH_NANO_INT8}")
         add_test(NAME yolo_test COMMAND yolo_test)
+        set_tests_properties(yolo_test PROPERTIES LABELS "slow")
 
         message(STATUS "YOLO module: ENABLED (ONNX Runtime found)")
     else()

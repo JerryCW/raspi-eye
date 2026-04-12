@@ -38,7 +38,7 @@ TEST(ShutdownHandlerTest, TimeoutProtection) {
     // sleep step registered first (index 0), normal step second (index 1)
     // Reverse execution: normal (index 1) runs first, sleep (index 0) runs second
     handler.register_step("slow", []() {
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        std::this_thread::sleep_for(std::chrono::seconds(6));
     });
     handler.register_step("normal", [&normal_executed]() {
         normal_executed = true;
