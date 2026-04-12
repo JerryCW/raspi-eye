@@ -3,6 +3,7 @@
 #include "app_context.h"
 #include "config_manager.h"
 #include "log_init.h"
+#include "sd_notifier.h"
 #include "shutdown_handler.h"
 #include <spdlog/spdlog.h>
 #include <gst/gst.h>
@@ -108,8 +109,16 @@ static int run_pipeline(int argc, char* argv[]) {
         return 1;
     }
 
+    // Phase 5.5: 通知 systemd 启动完成 + 启动看门狗
+    SdNotifier::notify_ready();
+    SdNotifier::start_watchdog_thread();
+
     // Phase 6: Run main loop
     g_main_loop_run(loop);
+
+    // Phase 6.5: 通知 systemd 正在关闭 + 停止看门狗
+    SdNotifier::notify_stopping();
+    SdNotifier::stop_watchdog_thread();
 
     // Phase 7: Cleanup
     auto summary = ctx.stop();

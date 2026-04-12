@@ -72,9 +72,31 @@ target_include_directories(pipeline_manager PUBLIC ${GST_APP_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_APP_LIBRARY_DIRS})
 target_link_libraries(pipeline_manager PUBLIC ${GST_APP_LIBRARIES})
 
+# libsystemd（Linux only，可选依赖）
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    pkg_check_modules(SYSTEMD libsystemd)
+    if(SYSTEMD_FOUND)
+        message(STATUS "systemd module: ENABLED (libsystemd found)")
+    else()
+        message(WARNING "libsystemd not found, sd_notify will be no-op on Linux")
+    endif()
+else()
+    message(STATUS "systemd module: no-op (non-Linux platform)")
+endif()
+
+# SdNotifier 模块
+add_library(sd_notifier_module STATIC src/sd_notifier.cpp)
+target_include_directories(sd_notifier_module PUBLIC src)
+target_link_libraries(sd_notifier_module PUBLIC spdlog::spdlog)
+if(SYSTEMD_FOUND)
+    target_compile_definitions(sd_notifier_module PRIVATE HAVE_SYSTEMD=1)
+    target_include_directories(sd_notifier_module PRIVATE ${SYSTEMD_INCLUDE_DIRS})
+    target_link_libraries(sd_notifier_module PRIVATE ${SYSTEMD_LIBRARIES})
+endif()
+
 # 可执行文件
 add_executable(raspi-eye src/main.cpp)
-target_link_libraries(raspi-eye PRIVATE pipeline_manager)
+target_link_libraries(raspi-eye PRIVATE pipeline_manager sd_notifier_module)
 
 # 测试
 enable_testing()
@@ -286,6 +308,11 @@ target_link_libraries(bitrate_test PRIVATE
     rapidcheck
     rapidcheck_gtest)
 add_test(NAME bitrate_test COMMAND bitrate_test)
+
+# SdNotifier 测试
+add_executable(sd_notifier_test tests/sd_notifier_test.cpp)
+target_link_libraries(sd_notifier_test PRIVATE sd_notifier_module GTest::gtest_main rapidcheck rapidcheck_gtest)
+add_test(NAME sd_notifier_test COMMAND sd_notifier_test)
 
 # 配置管理测试
 add_executable(config_test tests/config_test.cpp)

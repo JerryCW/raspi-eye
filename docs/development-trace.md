@@ -2737,3 +2737,147 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 1.1 + 1.2 创建 SdNotifier 模块
+
+**完成概要：** 创建 sd_notifier.h（SdNotifier 静态方法类声明，6 个静态方法，构造函数 = delete）和 sd_notifier.cpp（条件编译实现：HAVE_SYSTEMD 调用 sd_notify，否则空实现；心跳线程使用 condition_variable::wait_for + notify_one 快速唤醒），getDiagnostics 零错误。
+
+**测试状态：** 未运行（轻量模式，文件尚未加入 CMake 编译，测试覆盖将在任务 5 sd_notifier_test 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/sd_notifier.h, device/src/sd_notifier.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 2.1 CMake 构建集成
+
+**完成概要：** 修改 CMakeLists.txt：Linux 上 pkg_check_modules 查找 libsystemd（可选），新增 sd_notifier_module 静态库目标链接 spdlog，SYSTEMD_FOUND 时定义 HAVE_SYSTEMD=1 并链接 libsystemd，sd_notifier_module 链接到 raspi-eye 主程序。macOS Debug cmake configure + build + 14/14 测试通过。
+
+**测试状态：** 全部通过（14/14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/CMakeLists.txt
+
+---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 3.1 集成 SdNotifier 到 main.cpp
+
+**完成概要：** main.cpp 添加 `#include "sd_notifier.h"`，Phase 5.5 插入 notify_ready + start_watchdog_thread，Phase 6.5 插入 notify_stopping + stop_watchdog_thread，启动失败路径不发送 READY=1。cmake configure + build + 14/14 测试通过。
+
+**测试状态：** 全部通过（14/14）— 无新增测试（SdNotifier 测试覆盖将在任务 5 中实现）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/main.cpp
+
+---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 4. 检查点 - 编译验证
+
+**完成概要：** macOS Debug cmake configure + build + ctest 全部通过，systemd module: no-op (non-Linux platform) 符合预期，14/14 测试通过，ASan 无报告。
+
+**测试状态：** 全部通过（14/14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 5.1-5.6 单元测试与属性测试
+
+**完成概要：** 创建 sd_notifier_test.cpp 包含 6 个 example-based 单元测试（NotifyReadyNoCrash、NotifyWatchdogNoCrash、NotifyStoppingNoCrash、InitialWatchdogNotRunning、StopIdleNoCrash、WatchdogThreadRuns）和 4 个 RapidCheck PBT 属性测试（StartStopRoundTrip、StopFastResponse、StartIdempotent、NotifyNoCrash）。CMakeLists.txt 添加 sd_notifier_test 目标。ctest 15/15 全部通过（sd_notifier_test 0.07s），ASan 无报告。
+
+**测试状态：** 全部通过（15/15）— 新增 10 个测试（6 example-based + 4 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/sd_notifier_test.cpp, device/CMakeLists.txt
+
+---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 6. 检查点 - 全量测试验证
+
+**完成概要：** ctest 15/15 测试全部通过（sd_notifier_test 0.07s），总耗时 40.15s，ASan 无报告。
+
+**测试状态：** 全部通过（15/15）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 7.1 创建 systemd service unit 文件
+
+**完成概要：** 创建 scripts/raspi-eye.service，包含完整的 [Unit]（After=network-online.target、StartLimitBurst=5/60s）、[Service]（Type=notify、WatchdogSec=30、Restart=on-failure、RestartSec=5、TimeoutStartSec=60、TimeoutStopSec=35、安全加固 5 项、journal 日志）、[Install]（WantedBy=multi-user.target）三个 section。
+
+**测试状态：** 未运行（轻量模式，纯配置文件创建，需在 Pi 5 上手动验证）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** scripts/raspi-eye.service
+
+---
+
+### 2026-04-12 — Spec: spec-20-systemd-watchdog / 任务: 8. 最终检查点
+
+**完成概要：** 最终全量验证通过。6 个文件全部确认存在且内容符合设计文档（sd_notifier.h、sd_notifier.cpp、sd_notifier_test.cpp、raspi-eye.service、CMakeLists.txt 改动、main.cpp 改动），ctest 15/15 全部通过，ASan 无报告。Pi 5 Release 验证标注 SKIPPED（不可达）。
+
+**测试状态：** 全部通过（15/15）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
