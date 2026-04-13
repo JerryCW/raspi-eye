@@ -3747,3 +3747,38 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-13 — Spec: spec-23-log-management / Pi 5 端到端验证 + 推理性能实测
+
+**完成概要：** Spec 23 Pi 5 端到端验证通过（per-component 级别、KVS WebRTC SDK 日志重定向、Producer SDK 日志抑制、AI 检测结果日志调整）。额外修复 3 个部署问题 + 1 个 Spec 19 遗漏。采集到满负载下 yolo11n 推理性能实测数据。
+
+**部署修复：**
+1. main.cpp 重复 create_logger 导致 Pi 5 崩溃（spdlog 重复注册 throw）
+2. HAVE_KVS_WEBRTC_SDK 未定义在 log_module，setup_kvs_log_redirect() 编译为空函数
+3. Include.h 需要 extern "C" 包裹 + 链接 KVS SDK 库
+4. kvssink log-config 需要绝对路径 /etc/raspi-eye/kvs_log_configuration
+5. parse_ai_config 未解析 num_threads/use_xnnpack（Spec 19 遗漏）
+
+**满负载推理性能实测（Pi 5, Release, yolo11n, KVS+WebRTC+x264enc 同时运行）：**
+
+| 配置 | EP | threads | 推理延迟 | 备注 |
+|------|-----|---------|---------|------|
+| cpu-2t | CPU | 2 | ~200ms | 基线 249ms，满负载下反而快（模型缓存） |
+| cpu-4t | CPU | 4 | ~200ms | 4 线程与其他任务争抢严重，无明显提升 |
+| xnnpack-4t | XNNPACK | 4 | 148-157ms | 满负载最优，XNNPACK 独立线程池减少争抢 |
+| xnnpack-2t | XNNPACK | 2 | 略慢于 4t | XNNPACK 线程数确实影响性能 |
+
+**关键发现：**
+1. 基线测试（单独推理）的最优配置 CPU 4t 在满负载下不再最优——4 线程与 KVS/WebRTC/x264enc 争抢 CPU，延迟从基线 143ms 退化到 200ms
+2. XNNPACK 4t 在满负载下反超 CPU 4t（150ms vs 200ms），因为 XNNPACK 使用独立线程池，与 ORT intra-op 线程池隔离，减少了跨模块 CPU 争抢
+3. 基线测试结论在满负载生产环境下不完全适用，推理优化需要在实际负载下验证
+
+**生产推荐配置（更新）：** `num_threads = 4, use_xnnpack = true`（覆盖 Spec 9.5 的 `use_xnnpack = false` 结论）
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 仅基于单独推理基线测试结论选择生产配置——满负载下 CPU 争抢会改变最优配置，必须在实际负载下验证推理性能
+
+**涉及文件：** device/src/main.cpp, device/src/log_init.cpp, device/src/log_init.h, device/CMakeLists.txt, device/src/kvs_sink_factory.cpp, device/config/kvs_log_configuration, scripts/pi-deploy.sh, device/src/ai_pipeline_handler.h, device/src/config_manager.cpp, device/src/app_context.cpp
+
+---
