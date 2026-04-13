@@ -132,7 +132,12 @@ bool AppContext::init(const std::string& config_path,
     const auto& ai_cfg = config.ai_config();
     if (ai_cfg.enabled && !ai_cfg.model_path.empty() && std::filesystem::exists(ai_cfg.model_path)) {
         std::string det_err;
-        auto detector = YoloDetector::create(ai_cfg.model_path, DetectorConfig{}, &det_err);
+        auto detector = YoloDetector::create(ai_cfg.model_path,
+            DetectorConfig{
+                .confidence_threshold = ai_cfg.confidence_threshold,
+                .num_threads = ai_cfg.num_threads,
+                .use_xnnpack = ai_cfg.use_xnnpack,
+            }, &det_err);
         if (detector) {
             std::string ai_err;
             impl_->ai_handler_ = AiPipelineHandler::create(std::move(detector), ai_cfg, &ai_err);

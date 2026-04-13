@@ -292,6 +292,21 @@ bool parse_ai_config(
         config.max_cache_mb = std::stoi(*val);
     }
 
+    // num_threads (1-8 range)
+    if (auto* val = find_value(kv, "num_threads")) {
+        int threads = std::stoi(*val);
+        if (threads < 1 || threads > 8) {
+            if (error_msg) *error_msg = "num_threads must be 1-8, got: " + *val;
+            return false;
+        }
+        config.num_threads = threads;
+    }
+
+    // use_xnnpack (bool field)
+    if (!parse_bool_field(kv, "use_xnnpack", config.use_xnnpack, error_msg)) {
+        return false;
+    }
+
     // target_classes: comma-separated "name[:confidence],..."
     if (auto* val = find_value(kv, "target_classes")) {
         config.target_classes.clear();
