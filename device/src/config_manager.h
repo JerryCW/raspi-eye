@@ -28,6 +28,7 @@ struct StreamingConfig {
 struct LoggingConfig {
     std::string level = "info";    // trace|debug|info|warn|error
     std::string format = "text";   // text|json
+    std::unordered_map<std::string, std::string> component_levels;  // component -> level
 };
 
 // --- Pure parse functions (testable / PBT-friendly) ---

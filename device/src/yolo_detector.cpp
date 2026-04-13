@@ -255,12 +255,15 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     const DetectorConfig& config,
     std::string* error_msg) {
 
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     const OrtApi* ort = get_ort_api();
 
     // 1. Check file existence
     if (!std::filesystem::exists(model_path)) {
         if (error_msg) *error_msg = "Model file not found: " + model_path;
-        spdlog::error("Model file not found: {}", model_path);
+        ai_log->error("Model file not found: {}", model_path);
         return nullptr;
     }
 
@@ -268,7 +271,7 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     OrtEnv* env_raw = nullptr;
     OrtStatus* status = ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "yolo", &env_raw);
     if (!check_ort_status(ort, status, error_msg)) {
-        spdlog::error("Failed to create ORT environment");
+        ai_log->error("Failed to create ORT environment");
         return nullptr;
     }
 
@@ -277,7 +280,7 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     status = ort->CreateSessionOptions(&opts);
     if (!check_ort_status(ort, status, error_msg)) {
         ort->ReleaseEnv(env_raw);
-        spdlog::error("Failed to create session options");
+        ai_log->error("Failed to create session options");
         return nullptr;
     }
 
@@ -285,7 +288,7 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     if (!check_ort_status(ort, status, error_msg)) {
         ort->ReleaseSessionOptions(opts);
         ort->ReleaseEnv(env_raw);
-        spdlog::error("Failed to set intra-op thread count");
+        ai_log->error("Failed to set intra-op thread count");
         return nullptr;
     }
 
@@ -293,10 +296,10 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     if (config.inter_op_num_threads > 0) {
         status = ort->SetInterOpNumThreads(opts, config.inter_op_num_threads);
         if (!check_ort_status(ort, status, error_msg)) {
-            spdlog::warn("Failed to set inter-op threads: {}", config.inter_op_num_threads);
+            ai_log->warn("Failed to set inter-op threads: {}", config.inter_op_num_threads);
         }
     }
-    spdlog::info("Threads: intra-op={}, inter-op={}", config.num_threads, config.inter_op_num_threads);
+    ai_log->info("Threads: intra-op={}, inter-op={}", config.num_threads, config.inter_op_num_threads);
 
     // 3c. Set graph optimization level (fatal on failure)
     auto opt_level = static_cast<GraphOptimizationLevel>(config.graph_optimization_level);
@@ -304,10 +307,10 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     if (!check_ort_status(ort, status, error_msg)) {
         ort->ReleaseSessionOptions(opts);
         ort->ReleaseEnv(env_raw);
-        spdlog::error("Failed to set graph optimization level: {}", config.graph_optimization_level);
+        ai_log->error("Failed to set graph optimization level: {}", config.graph_optimization_level);
         return nullptr;
     }
-    spdlog::info("Graph optimization level: {}", config.graph_optimization_level);
+    ai_log->info("Graph optimization level: {}", config.graph_optimization_level);
 
     // 3d. XNNPACK EP registration (non-fatal on failure)
     if (config.use_xnnpack) {
@@ -326,13 +329,13 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
             opts, "XNNPACK", ep_keys, ep_values, 1);
         if (status != nullptr) {
             const char* msg = ort->GetErrorMessage(status);
-            spdlog::warn("XNNPACK EP not available: {}, falling back to CPU EP", msg);
+            ai_log->warn("XNNPACK EP not available: {}, falling back to CPU EP", msg);
             ort->ReleaseStatus(status);
         } else {
-            spdlog::info("Execution Provider: XNNPACK (threads={})", config.num_threads);
+            ai_log->info("Execution Provider: XNNPACK (threads={})", config.num_threads);
         }
     } else {
-        spdlog::info("Execution Provider: CPU");
+        ai_log->info("Execution Provider: CPU");
     }
 
     // 3e. Disable intra-op spinning when not using XNNPACK (saves CPU cycles)
@@ -346,7 +349,7 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     std::string opt_model_path = model_path + ".optimized";
     status = ort->SetOptimizedModelFilePath(opts, opt_model_path.c_str());
     if (status) {
-        spdlog::warn("Failed to set optimized model path");
+        ai_log->warn("Failed to set optimized model path");
         ort->ReleaseStatus(status);
     }
 
@@ -356,7 +359,7 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     ort->ReleaseSessionOptions(opts);
     if (!check_ort_status(ort, status, error_msg)) {
         ort->ReleaseEnv(env_raw);
-        spdlog::error("Failed to create session from: {}", model_path);
+        ai_log->error("Failed to create session from: {}", model_path);
         return nullptr;
     }
 
@@ -366,7 +369,7 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
     if (!check_ort_status(ort, status, error_msg)) {
         ort->ReleaseSession(session_raw);
         ort->ReleaseEnv(env_raw);
-        spdlog::error("Failed to create CPU memory info");
+        ai_log->error("Failed to create CPU memory info");
         return nullptr;
     }
 
@@ -504,7 +507,7 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
         detector->num_proposals_ = output_dims[2];
     }
 
-    spdlog::info("YOLO model loaded: {} | input: [1,3,{},{}] | output: [1,{},{}]",
+    ai_log->info("YOLO model loaded: {} | input: [1,3,{},{}] | output: [1,{},{}]",
                  model_path, detector->input_h_, detector->input_w_,
                  detector->num_classes_ + 4, detector->num_proposals_);
 
@@ -517,16 +520,19 @@ std::unique_ptr<YoloDetector> YoloDetector::create(
 
 std::pair<std::vector<Detection>, InferenceStats>
 YoloDetector::detect_with_stats(const uint8_t* data, int width, int height) {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     InferenceStats stats;
     const OrtApi* ort = get_ort_api();
 
     // Validate input
     if (!data) {
-        spdlog::warn("Null input data, skipping inference");
+        ai_log->warn("Null input data, skipping inference");
         return {{}, stats};
     }
     if (width <= 0 || height <= 0) {
-        spdlog::warn("Invalid input dimensions: {}x{}", width, height);
+        ai_log->warn("Invalid input dimensions: {}x{}", width, height);
         return {{}, stats};
     }
 
@@ -551,7 +557,7 @@ YoloDetector::detect_with_stats(const uint8_t* data, int width, int height) {
         &input_tensor_raw);
     if (status) {
         const char* msg = ort->GetErrorMessage(status);
-        spdlog::error("Failed to create input tensor: {}", msg);
+        ai_log->error("Failed to create input tensor: {}", msg);
         ort->ReleaseStatus(status);
         return {{}, stats};
     }
@@ -568,7 +574,7 @@ YoloDetector::detect_with_stats(const uint8_t* data, int width, int height) {
                       output_names, 1, &output_tensor_raw);
     if (status) {
         const char* msg = ort->GetErrorMessage(status);
-        spdlog::error("Inference failed: {}", msg);
+        ai_log->error("Inference failed: {}", msg);
         ort->ReleaseStatus(status);
         return {{}, stats};
     }
@@ -584,7 +590,7 @@ YoloDetector::detect_with_stats(const uint8_t* data, int width, int height) {
                                        reinterpret_cast<void**>(&output_data));
     if (status) {
         const char* msg = ort->GetErrorMessage(status);
-        spdlog::error("Failed to get output tensor data: {}", msg);
+        ai_log->error("Failed to get output tensor data: {}", msg);
         ort->ReleaseStatus(status);
         return {{}, stats};
     }
@@ -628,7 +634,7 @@ YoloDetector::detect_with_stats(const uint8_t* data, int width, int height) {
     stats.postprocess_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
     stats.total_ms = std::chrono::duration<double, std::milli>(t3 - t0).count();
 
-    spdlog::debug("Inference: pre={:.1f}ms infer={:.1f}ms post={:.1f}ms total={:.1f}ms detections={}",
+    ai_log->debug("Inference: pre={:.1f}ms infer={:.1f}ms post={:.1f}ms total={:.1f}ms detections={}",
                   stats.preprocess_ms, stats.inference_ms,
                   stats.postprocess_ms, stats.total_ms, detections.size());
 

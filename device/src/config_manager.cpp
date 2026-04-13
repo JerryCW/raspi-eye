@@ -139,6 +139,60 @@ bool parse_logging_config(
         config.format = *val;
     }
 
+    // component_levels field: "ai:debug,kvs:warn,webrtc:info"
+    if (auto* val = find_value(kv, "component_levels")) {
+        // Empty string means no component-level overrides
+        std::string trimmed = *val;
+        {
+            size_t s = trimmed.find_first_not_of(" \t");
+            size_t e = trimmed.find_last_not_of(" \t");
+            trimmed = (s == std::string::npos) ? "" : trimmed.substr(s, e - s + 1);
+        }
+        if (!trimmed.empty()) {
+            std::istringstream stream(trimmed);
+            std::string token;
+            while (std::getline(stream, token, ',')) {
+                // Trim whitespace from token
+                size_t ts = token.find_first_not_of(" \t");
+                size_t te = token.find_last_not_of(" \t");
+                if (ts == std::string::npos) continue;  // skip empty tokens
+                token = token.substr(ts, te - ts + 1);
+                if (token.empty()) continue;
+
+                // Split by first colon
+                auto colon_pos = token.find(':');
+                if (colon_pos == std::string::npos) {
+                    if (error_msg) *error_msg = "Malformed component_levels entry (missing ':'): " + token;
+                    return false;
+                }
+
+                // Extract and trim component name
+                std::string name = token.substr(0, colon_pos);
+                {
+                    size_t ns = name.find_first_not_of(" \t");
+                    size_t ne = name.find_last_not_of(" \t");
+                    name = (ns == std::string::npos) ? "" : name.substr(ns, ne - ns + 1);
+                }
+
+                // Extract and trim level
+                std::string lvl = token.substr(colon_pos + 1);
+                {
+                    size_t ls = lvl.find_first_not_of(" \t");
+                    size_t le = lvl.find_last_not_of(" \t");
+                    lvl = (ls == std::string::npos) ? "" : lvl.substr(ls, le - ls + 1);
+                }
+
+                // Validate level
+                if (valid_levels.find(lvl) == valid_levels.end()) {
+                    if (error_msg) *error_msg = "Invalid level '" + lvl + "' for component '" + name + "'";
+                    return false;
+                }
+
+                config.component_levels[name] = lvl;
+            }
+        }
+    }
+
     return true;
 }
 

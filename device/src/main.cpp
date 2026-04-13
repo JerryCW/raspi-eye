@@ -74,6 +74,7 @@ static int run_pipeline(int argc, char* argv[]) {
 
     // Phase 3: Initialize logging with full config (level + format)
     log_init::init(config.logging_config());
+    log_init::setup_kvs_log_redirect();
     log_init::create_logger("app");
     log_init::create_logger("config");
     log_init::create_logger("stream");

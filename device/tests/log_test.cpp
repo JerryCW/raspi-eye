@@ -297,3 +297,200 @@ RC_GTEST_PROP(LoggerFactoryCorrectness, CreatesAndRegisters, ()) {
     log_init::shutdown();
     spdlog::drop_all();
 }
+
+// ===========================================================================
+// Task 5.2: log_init per-component level Example-based unit tests
+// Feature: log-management
+// ===========================================================================
+
+#include "config_manager.h"
+#include <spdlog/sinks/ostream_sink.h>
+
+class LogManagementTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        spdlog::shutdown();
+        spdlog::drop_all();
+        log_init::shutdown();
+    }
+
+    void TearDown() override {
+        log_init::shutdown();
+        spdlog::drop_all();
+    }
+};
+
+// InitCreatesAllLoggers: After init, all 9 named loggers exist
+TEST_F(LogManagementTest, InitCreatesAllLoggers) {
+    log_init::init();
+    static const std::vector<std::string> expected_loggers = {
+        "main", "pipeline", "app", "config", "stream",
+        "ai", "kvs", "webrtc", "s3"
+    };
+    for (const auto& name : expected_loggers) {
+        EXPECT_NE(spdlog::get(name), nullptr) << "Logger '" << name << "' not found";
+    }
+}
+
+// EmptyComponentLevels: Empty component_levels does not affect global level
+TEST_F(LogManagementTest, EmptyComponentLevels) {
+    LoggingConfig config;
+    config.level = "warn";
+    config.format = "text";
+    // component_levels is empty by default
+
+    log_init::init(config);
+
+    // All loggers should use the global level (warn)
+    auto main_logger = spdlog::get("main");
+    ASSERT_NE(main_logger, nullptr);
+    EXPECT_EQ(main_logger->level(), spdlog::level::warn);
+
+    auto ai_logger = spdlog::get("ai");
+    ASSERT_NE(ai_logger, nullptr);
+    EXPECT_EQ(ai_logger->level(), spdlog::level::warn);
+}
+
+// UnknownComponentIgnored: Unknown component name is ignored, no crash
+TEST_F(LogManagementTest, UnknownComponentIgnored) {
+    LoggingConfig config;
+    config.level = "info";
+    config.format = "text";
+    config.component_levels["nonexistent_module"] = "debug";
+
+    // Should not crash
+    log_init::init(config);
+
+    // Known loggers should still be at global level
+    auto main_logger = spdlog::get("main");
+    ASSERT_NE(main_logger, nullptr);
+    EXPECT_EQ(main_logger->level(), spdlog::level::info);
+}
+
+// ComponentLevelIsolation: Setting ai=debug makes ai output debug,
+// other loggers do not output debug
+TEST_F(LogManagementTest, ComponentLevelIsolation) {
+    LoggingConfig config;
+    config.level = "info";
+    config.format = "text";
+    config.component_levels["ai"] = "debug";
+
+    log_init::init(config);
+
+    // ai logger should be at debug level
+    auto ai_logger = spdlog::get("ai");
+    ASSERT_NE(ai_logger, nullptr);
+    EXPECT_EQ(ai_logger->level(), spdlog::level::debug);
+
+    // Other loggers should remain at info (global level)
+    auto main_logger = spdlog::get("main");
+    ASSERT_NE(main_logger, nullptr);
+    EXPECT_EQ(main_logger->level(), spdlog::level::info);
+
+    auto kvs_logger = spdlog::get("kvs");
+    ASSERT_NE(kvs_logger, nullptr);
+    EXPECT_EQ(kvs_logger->level(), spdlog::level::info);
+
+    auto webrtc_logger = spdlog::get("webrtc");
+    ASSERT_NE(webrtc_logger, nullptr);
+    EXPECT_EQ(webrtc_logger->level(), spdlog::level::info);
+}
+
+// MissingLoggingSection: Missing [logging] section uses defaults
+TEST_F(LogManagementTest, MissingLoggingSection) {
+    // Default LoggingConfig: level=info, format=text, component_levels empty
+    LoggingConfig config;
+
+    log_init::init(config);
+
+    // All loggers should exist and be at info level
+    auto main_logger = spdlog::get("main");
+    ASSERT_NE(main_logger, nullptr);
+    EXPECT_EQ(main_logger->level(), spdlog::level::info);
+
+    auto ai_logger = spdlog::get("ai");
+    ASSERT_NE(ai_logger, nullptr);
+    EXPECT_EQ(ai_logger->level(), spdlog::level::info);
+}
+
+// ===========================================================================
+// Task 5.4: Property 2 - Per-component level application
+// Feature: log-management, Property 2: per-component level application
+// **Validates: Requirements 1.2, 1.3, 3.4**
+// ===========================================================================
+
+RC_GTEST_PROP(PerComponentLevel, AppliesCorrectly, ()) {
+    // Clean state before each iteration
+    spdlog::shutdown();
+    spdlog::drop_all();
+    log_init::shutdown();
+
+    static const std::vector<std::string> valid_levels = {
+        "trace", "debug", "info", "warn", "error"
+    };
+    static const std::vector<std::string> logger_names = {
+        "main", "pipeline", "app", "config", "stream",
+        "ai", "kvs", "webrtc", "s3"
+    };
+
+    // Generate random global level
+    auto global_level_str = *rc::gen::elementOf(valid_levels);
+
+    // Generate random component_levels: pick a random subset of logger names
+    auto subset_size = *rc::gen::inRange(0, static_cast<int>(logger_names.size()) + 1);
+    std::unordered_map<std::string, std::string> component_levels;
+
+    // Shuffle by picking random indices
+    std::vector<int> indices;
+    for (int i = 0; i < static_cast<int>(logger_names.size()); ++i) {
+        indices.push_back(i);
+    }
+    // Pick first subset_size unique indices
+    for (int i = 0; i < subset_size; ++i) {
+        auto idx = *rc::gen::inRange(0, static_cast<int>(logger_names.size()));
+        auto name = logger_names[idx];
+        auto level = *rc::gen::elementOf(valid_levels);
+        component_levels[name] = level;
+    }
+
+    // Build config
+    LoggingConfig config;
+    config.level = global_level_str;
+    config.format = "text";
+    config.component_levels = component_levels;
+
+    // Initialize
+    log_init::init(config);
+
+    // Map level string to spdlog enum
+    auto to_spdlog_level = [](const std::string& s) -> spdlog::level::level_enum {
+        if (s == "trace") return spdlog::level::trace;
+        if (s == "debug") return spdlog::level::debug;
+        if (s == "info")  return spdlog::level::info;
+        if (s == "warn")  return spdlog::level::warn;
+        if (s == "error") return spdlog::level::err;
+        return spdlog::level::info;
+    };
+
+    auto expected_global = to_spdlog_level(global_level_str);
+
+    // Verify each logger's level
+    for (const auto& name : logger_names) {
+        auto logger = spdlog::get(name);
+        RC_ASSERT(logger != nullptr);
+
+        auto it = component_levels.find(name);
+        if (it != component_levels.end()) {
+            // Component level specified -> should match
+            auto expected = to_spdlog_level(it->second);
+            RC_ASSERT(logger->level() == expected);
+        } else {
+            // Not specified -> should match global level
+            RC_ASSERT(logger->level() == expected_global);
+        }
+    }
+
+    // Cleanup for next iteration
+    log_init::shutdown();
+    spdlog::drop_all();
+}

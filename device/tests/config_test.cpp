@@ -753,3 +753,190 @@ RC_GTEST_PROP(ConfigPBT, StreamingToBitrateConversionFidelity, ()) {
     RC_ASSERT(bc.eval_interval_sec == sc.bitrate_eval_interval_sec);
     RC_ASSERT(bc.rampup_interval_sec == sc.bitrate_rampup_interval_sec);
 }
+
+// ===========================================================================
+// Task 5.1: component_levels Example-based unit tests
+// Feature: log-management
+// ===========================================================================
+
+// ParseLoggingConfig_ComponentLevels_Valid:
+// Normal component_levels parsing
+TEST(ConfigExampleTest, ParseLoggingConfig_ComponentLevels_Valid) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"component_levels", "ai:debug,kvs:warn,webrtc:info"}
+    };
+    LoggingConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_logging_config(kv, config, &err));
+    ASSERT_EQ(config.component_levels.size(), 3u);
+    EXPECT_EQ(config.component_levels.at("ai"), "debug");
+    EXPECT_EQ(config.component_levels.at("kvs"), "warn");
+    EXPECT_EQ(config.component_levels.at("webrtc"), "info");
+}
+
+// ParseLoggingConfig_ComponentLevels_WithSpaces:
+// Spaces around names and levels are trimmed
+TEST(ConfigExampleTest, ParseLoggingConfig_ComponentLevels_WithSpaces) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"component_levels", " ai : debug , kvs : warn "}
+    };
+    LoggingConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_logging_config(kv, config, &err));
+    ASSERT_EQ(config.component_levels.size(), 2u);
+    EXPECT_EQ(config.component_levels.at("ai"), "debug");
+    EXPECT_EQ(config.component_levels.at("kvs"), "warn");
+}
+
+// ParseLoggingConfig_ComponentLevels_Empty:
+// Empty string means no component-level overrides
+TEST(ConfigExampleTest, ParseLoggingConfig_ComponentLevels_Empty) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"component_levels", ""}
+    };
+    LoggingConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_logging_config(kv, config, &err));
+    EXPECT_TRUE(config.component_levels.empty());
+}
+
+// ParseLoggingConfig_ComponentLevels_InvalidLevel:
+// Invalid level value returns false
+TEST(ConfigExampleTest, ParseLoggingConfig_ComponentLevels_InvalidLevel) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"component_levels", "ai:verbose"}
+    };
+    LoggingConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_logging_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+// ParseLoggingConfig_ComponentLevels_MalformedEntry:
+// Missing colon returns false
+TEST(ConfigExampleTest, ParseLoggingConfig_ComponentLevels_MalformedEntry) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"component_levels", "ai-debug"}
+    };
+    LoggingConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_logging_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+// ===========================================================================
+// Task 5.3: Property 1 - component_levels parsing round-trip
+// Feature: log-management, Property 1: component_levels parsing round-trip
+// **Validates: Requirements 1.1, 2.3, 6.1, 6.2**
+// ===========================================================================
+
+RC_GTEST_PROP(LogManagementPBT, ComponentLevelsParsingRoundTrip, ()) {
+    static const std::vector<std::string> valid_levels = {
+        "trace", "debug", "info", "warn", "error"
+    };
+
+    // Generate a random map of component names to levels
+    // Component names: non-empty lowercase alpha strings, 1-10 chars
+    auto name_gen = rc::gen::nonEmpty(
+        rc::gen::container<std::string>(
+            rc::gen::inRange('a', static_cast<char>('z' + 1))));
+    auto bounded_name_gen = rc::gen::suchThat(name_gen,
+        [](const std::string& s) { return s.size() >= 1 && s.size() <= 10; });
+
+    // Generate 1-5 entries
+    auto count = *rc::gen::inRange(1, 6);
+    std::unordered_map<std::string, std::string> expected;
+    for (int i = 0; i < count; ++i) {
+        auto name = *bounded_name_gen;
+        auto level = *rc::gen::elementOf(valid_levels);
+        expected[name] = level;
+    }
+
+    // Serialize to string with random whitespace
+    std::string serialized;
+    bool first = true;
+    for (const auto& [name, level] : expected) {
+        if (!first) {
+            // Random spaces around comma
+            auto spaces_before = *rc::gen::inRange(0, 4);
+            auto spaces_after = *rc::gen::inRange(0, 4);
+            serialized += std::string(spaces_before, ' ') + "," + std::string(spaces_after, ' ');
+        }
+        first = false;
+        // Random spaces around colon
+        auto spaces_before_colon = *rc::gen::inRange(0, 4);
+        auto spaces_after_colon = *rc::gen::inRange(0, 4);
+        serialized += name + std::string(spaces_before_colon, ' ') + ":" +
+                      std::string(spaces_after_colon, ' ') + level;
+    }
+
+    // Parse
+    std::unordered_map<std::string, std::string> kv = {
+        {"component_levels", serialized}
+    };
+    LoggingConfig config;
+    std::string err;
+    bool result = parse_logging_config(kv, config, &err);
+
+    RC_ASSERT(result == true);
+    RC_ASSERT(config.component_levels.size() == expected.size());
+    for (const auto& [name, level] : expected) {
+        auto it = config.component_levels.find(name);
+        RC_ASSERT(it != config.component_levels.end());
+        RC_ASSERT(it->second == level);
+    }
+}
+
+// ===========================================================================
+// Task 5.5: Property 3 - invalid level rejection
+// Feature: log-management, Property 3: invalid level rejection
+// **Validates: Requirements 1.5**
+// ===========================================================================
+
+RC_GTEST_PROP(LogManagementPBT, InvalidLevelRejection, ()) {
+    static const std::vector<std::string> valid_levels = {
+        "trace", "debug", "info", "warn", "error"
+    };
+
+    // Generate a component name (non-empty lowercase alpha, 1-10 chars)
+    auto name_gen = rc::gen::nonEmpty(
+        rc::gen::container<std::string>(
+            rc::gen::inRange('a', static_cast<char>('z' + 1))));
+    auto bounded_name_gen = rc::gen::suchThat(name_gen,
+        [](const std::string& s) { return s.size() >= 1 && s.size() <= 10; });
+
+    // Generate an invalid level: non-empty string not in valid_levels
+    auto invalid_level_gen = rc::gen::suchThat(
+        rc::gen::nonEmpty(rc::gen::container<std::string>(
+            rc::gen::inRange('a', static_cast<char>('z' + 1)))),
+        [](const std::string& s) {
+            static const std::vector<std::string> vl = {
+                "trace", "debug", "info", "warn", "error"
+            };
+            return std::find(vl.begin(), vl.end(), s) == vl.end();
+        });
+
+    // Optionally prepend some valid entries
+    auto valid_count = *rc::gen::inRange(0, 4);
+    std::string serialized;
+    for (int i = 0; i < valid_count; ++i) {
+        if (!serialized.empty()) serialized += ",";
+        auto vname = *bounded_name_gen;
+        auto vlevel = *rc::gen::elementOf(valid_levels);
+        serialized += vname + ":" + vlevel;
+    }
+
+    // Append the invalid entry
+    if (!serialized.empty()) serialized += ",";
+    auto bad_name = *bounded_name_gen;
+    auto bad_level = *invalid_level_gen;
+    serialized += bad_name + ":" + bad_level;
+
+    // Parse should fail
+    std::unordered_map<std::string, std::string> kv = {
+        {"component_levels", serialized}
+    };
+    LoggingConfig config;
+    std::string err;
+    RC_ASSERT(parse_logging_config(kv, config, &err) == false);
+}

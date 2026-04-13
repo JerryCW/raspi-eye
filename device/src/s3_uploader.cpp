@@ -198,6 +198,9 @@ std::string build_s3_key(
 // ============================================================
 
 std::vector<std::string> scan_closed_events(const std::string& snapshot_dir) {
+    auto s3_log = spdlog::get("s3");
+    if (!s3_log) s3_log = spdlog::default_logger();
+
     std::vector<std::string> result;
     if (!std::filesystem::exists(snapshot_dir)) return result;
 
@@ -209,7 +212,7 @@ std::vector<std::string> scan_closed_events(const std::string& snapshot_dir) {
             std::error_code ec;
             std::filesystem::remove_all(entry.path(), ec);
             if (ec) {
-                spdlog::warn("Failed to remove uploaded directory {}: {}",
+                s3_log->warn("Failed to remove uploaded directory {}: {}",
                              entry.path().string(), ec.message());
             }
             continue;
@@ -221,7 +224,7 @@ std::vector<std::string> scan_closed_events(const std::string& snapshot_dir) {
         try {
             std::ifstream ifs(event_json_path);
             if (!ifs.is_open()) {
-                spdlog::warn("Cannot open {}", event_json_path.string());
+                s3_log->warn("Cannot open {}", event_json_path.string());
                 continue;
             }
             auto j = nlohmann::json::parse(ifs);
@@ -229,7 +232,7 @@ std::vector<std::string> scan_closed_events(const std::string& snapshot_dir) {
                 result.push_back(entry.path().string());
             }
         } catch (const nlohmann::json::exception& e) {
-            spdlog::warn("Failed to parse {}: {}", event_json_path.string(), e.what());
+            s3_log->warn("Failed to parse {}: {}", event_json_path.string(), e.what());
         }
     }
     return result;
@@ -259,9 +262,12 @@ size_t curl_read_callback(char* buffer, size_t size, size_t nitems, void* userda
 bool default_put_fn(const std::string& url,
                     const std::vector<uint8_t>& data,
                     const std::vector<std::string>& headers) {
+    auto s3_log = spdlog::get("s3");
+    if (!s3_log) s3_log = spdlog::default_logger();
+
     CURL* curl = curl_easy_init();
     if (!curl) {
-        spdlog::error("curl_easy_init() failed");
+        s3_log->error("curl_easy_init() failed");
         return false;
     }
 
@@ -289,11 +295,11 @@ bool default_put_fn(const std::string& url,
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        spdlog::warn("curl PUT failed: {}", curl_easy_strerror(res));
+        s3_log->warn("curl PUT failed: {}", curl_easy_strerror(res));
         return false;
     }
     if (http_code != 200) {
-        spdlog::warn("S3 PUT returned HTTP {}", http_code);
+        s3_log->warn("S3 PUT returned HTTP {}", http_code);
         return false;
     }
     return true;
@@ -348,7 +354,9 @@ std::unique_ptr<S3Uploader> S3Uploader::create(
     auto uploader = std::unique_ptr<S3Uploader>(
         new S3Uploader(config, snapshot_dir, device_id, std::move(credential_provider)));
 
-    spdlog::info("S3Uploader created: bucket={}, region={}, scan_interval={}s",
+    auto s3_log = spdlog::get("s3");
+    if (!s3_log) s3_log = spdlog::default_logger();
+    s3_log->info("S3Uploader created: bucket={}, region={}, scan_interval={}s",
                  config.bucket, config.region, config.scan_interval_sec);
 
     return uploader;
@@ -373,7 +381,9 @@ bool S3Uploader::start(std::string* error_msg) {
     }
     stop_requested_ = false;
     scan_thread_ = std::thread(&S3Uploader::scan_loop, this);
-    spdlog::info("S3Uploader scan thread started");
+    auto s3_log = spdlog::get("s3");
+    if (!s3_log) s3_log = spdlog::default_logger();
+    s3_log->info("S3Uploader scan thread started");
     return true;
 }
 
@@ -389,7 +399,9 @@ void S3Uploader::stop() {
     cv_.notify_all();
     if (scan_thread_.joinable()) {
         scan_thread_.join();
-        spdlog::info("S3Uploader scan thread stopped");
+        auto s3_log = spdlog::get("s3");
+        if (!s3_log) s3_log = spdlog::default_logger();
+        s3_log->info("S3Uploader scan thread stopped");
     }
 }
 
@@ -406,6 +418,9 @@ S3Uploader::~S3Uploader() {
 // ============================================================
 
 void S3Uploader::scan_loop() {
+    auto s3_log = spdlog::get("s3");
+    if (!s3_log) s3_log = spdlog::default_logger();
+
     while (true) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -433,7 +448,7 @@ void S3Uploader::scan_loop() {
             }
         }
 
-        spdlog::info("S3 scan complete: found={}, uploaded={}, skipped={}",
+        s3_log->info("S3 scan complete: found={}, uploaded={}, skipped={}",
                      events.size(), uploaded_count, skipped_count);
     }
 }
@@ -443,11 +458,14 @@ void S3Uploader::scan_loop() {
 // ============================================================
 
 bool S3Uploader::upload_event(const std::string& event_dir) {
+    auto s3_log = spdlog::get("s3");
+    if (!s3_log) s3_log = spdlog::default_logger();
+
     namespace fs = std::filesystem;
 
     auto event_json_path = fs::path(event_dir) / "event.json";
     if (!fs::exists(event_json_path)) {
-        spdlog::warn("event.json not found in {}", event_dir);
+        s3_log->warn("event.json not found in {}", event_dir);
         return false;
     }
 
@@ -464,12 +482,12 @@ bool S3Uploader::upload_event(const std::string& event_dir) {
             date_str = start_time.substr(0, 10);
         }
     } catch (const nlohmann::json::exception& e) {
-        spdlog::error("Failed to parse event.json in {}: {}", event_dir, e.what());
+        s3_log->error("Failed to parse event.json in {}: {}", event_dir, e.what());
         return false;
     }
 
     if (event_id.empty() || date_str.empty()) {
-        spdlog::error("Missing event_id or start_time in {}", event_dir);
+        s3_log->error("Missing event_id or start_time in {}", event_dir);
         return false;
     }
 
@@ -481,13 +499,13 @@ bool S3Uploader::upload_event(const std::string& event_dir) {
 
         auto s3_key = build_s3_key(device_id_, date_str, event_id, filename);
         if (s3_key.empty()) {
-            spdlog::error("Invalid S3 key for file {} in {}", filename, event_dir);
+            s3_log->error("Invalid S3 key for file {} in {}", filename, event_dir);
             return false;
         }
 
         auto ctype = content_type_for(filename);
         if (!upload_file(file_entry.path().string(), s3_key, ctype)) {
-            spdlog::error("Failed to upload {} after retries", filename);
+            s3_log->error("Failed to upload {} after retries", filename);
             return false;
         }
     }
@@ -497,7 +515,7 @@ bool S3Uploader::upload_event(const std::string& event_dir) {
     {
         std::ofstream marker(marker_path);
         if (!marker.is_open()) {
-            spdlog::error("Failed to write .uploaded marker in {}", event_dir);
+            s3_log->error("Failed to write .uploaded marker in {}", event_dir);
             return false;
         }
     }
@@ -505,10 +523,10 @@ bool S3Uploader::upload_event(const std::string& event_dir) {
     std::error_code ec;
     fs::remove_all(event_dir, ec);
     if (ec) {
-        spdlog::warn("Failed to remove event directory {}: {}", event_dir, ec.message());
+        s3_log->warn("Failed to remove event directory {}: {}", event_dir, ec.message());
     }
 
-    spdlog::info("Event {} uploaded and cleaned up", event_id);
+    s3_log->info("Event {} uploaded and cleaned up", event_id);
     return true;
 }
 
@@ -519,10 +537,13 @@ bool S3Uploader::upload_event(const std::string& event_dir) {
 bool S3Uploader::upload_file(const std::string& local_path,
                              const std::string& s3_key,
                              const std::string& content_type) {
+    auto s3_log = spdlog::get("s3");
+    if (!s3_log) s3_log = spdlog::default_logger();
+
     // Read file content
     std::ifstream ifs(local_path, std::ios::binary);
     if (!ifs.is_open()) {
-        spdlog::error("Cannot open file: {}", local_path);
+        s3_log->error("Cannot open file: {}", local_path);
         return false;
     }
     std::vector<uint8_t> file_data(
@@ -545,7 +566,7 @@ bool S3Uploader::upload_file(const std::string& local_path,
         // Get STS credentials
         auto creds = credential_provider_->get_credentials();
         if (!creds || credential_provider_->is_expired()) {
-            spdlog::warn("Credentials expired, skipping upload of {}", s3_key);
+            s3_log->warn("Credentials expired, skipping upload of {}", s3_key);
             return false;
         }
 
@@ -624,7 +645,7 @@ bool S3Uploader::upload_file(const std::string& local_path,
 
         // Don't wait after last retry
         if (retry < config_.max_retries) {
-            spdlog::warn("Upload attempt {} failed for {}, retrying in {}s",
+            s3_log->warn("Upload attempt {} failed for {}, retrying in {}s",
                          retry + 1, s3_key, delay_sec);
             std::unique_lock<std::mutex> lock(mutex_);
             if (cv_.wait_for(lock, std::chrono::seconds(delay_sec),

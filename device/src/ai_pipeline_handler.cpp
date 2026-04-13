@@ -121,11 +121,14 @@ std::unique_ptr<AiPipelineHandler> AiPipelineHandler::create(
     std::unique_ptr<YoloDetector> detector,
     const AiConfig& config,
     std::string* error_msg) {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     if (!detector) {
         if (error_msg) {
             *error_msg = "YoloDetector is nullptr";
         }
-        spdlog::error("AiPipelineHandler::create() failed: YoloDetector is nullptr");
+        ai_log->error("AiPipelineHandler::create() failed: YoloDetector is nullptr");
         return nullptr;
     }
 
@@ -133,15 +136,18 @@ std::unique_ptr<AiPipelineHandler> AiPipelineHandler::create(
     std::unique_ptr<AiPipelineHandler> handler(
         new AiPipelineHandler(std::move(detector), config));
 
-    spdlog::info("AiPipelineHandler created: inference_fps={}, frame_interval_ms={}, "
-                 "confidence_threshold={:.2f}, snapshot_dir={}",
-                 config.inference_fps, handler->frame_interval_ms_,
-                 config.confidence_threshold, config.snapshot_dir);
+    ai_log->info("AiPipelineHandler created: model={}, inference_fps={}, "
+                 "confidence_threshold={:.2f}",
+                 config.model_path, config.inference_fps,
+                 config.confidence_threshold);
 
     return handler;
 }
 
 bool AiPipelineHandler::install_probe(GstElement* pipeline, std::string* error_msg) {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     // Remove old probe if one exists
     if (probe_pad_ != nullptr) {
         remove_probe();
@@ -152,7 +158,7 @@ bool AiPipelineHandler::install_probe(GstElement* pipeline, std::string* error_m
         if (error_msg) {
             *error_msg = "Element 'q-ai' not found in pipeline";
         }
-        spdlog::error("install_probe failed: element 'q-ai' not found in pipeline");
+        ai_log->error("install_probe failed: element 'q-ai' not found in pipeline");
         return false;
     }
 
@@ -162,7 +168,7 @@ bool AiPipelineHandler::install_probe(GstElement* pipeline, std::string* error_m
         if (error_msg) {
             *error_msg = "Failed to get src pad from 'q-ai'";
         }
-        spdlog::error("install_probe failed: cannot get src pad from 'q-ai'");
+        ai_log->error("install_probe failed: cannot get src pad from 'q-ai'");
         return false;
     }
 
@@ -172,7 +178,7 @@ bool AiPipelineHandler::install_probe(GstElement* pipeline, std::string* error_m
 
     gst_object_unref(q_ai);
 
-    spdlog::info("Buffer probe installed on q-ai src pad, probe_id={}", probe_id_);
+    ai_log->info("Buffer probe installed on q-ai src pad, probe_id={}", probe_id_);
     return true;
 }
 
@@ -205,10 +211,13 @@ GstPadProbeReturn AiPipelineHandler::buffer_probe_cb(
         return GST_PAD_PROBE_OK;
     }
 
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     // Get frame dimensions from pad caps (not GstVideoMeta)
     GstCaps* caps = gst_pad_get_current_caps(pad);
     if (!caps) {
-        spdlog::warn("buffer_probe_cb: failed to get current caps, skipping frame");
+        ai_log->warn("buffer_probe_cb: failed to get current caps, skipping frame");
         return GST_PAD_PROBE_OK;
     }
     GstStructure* s = gst_caps_get_structure(caps, 0);
@@ -218,7 +227,7 @@ GstPadProbeReturn AiPipelineHandler::buffer_probe_cb(
     gst_caps_unref(caps);
 
     if (w <= 0 || h <= 0) {
-        spdlog::warn("buffer_probe_cb: invalid frame dimensions {}x{}", w, h);
+        ai_log->warn("buffer_probe_cb: invalid frame dimensions {}x{}", w, h);
         return GST_PAD_PROBE_OK;
     }
 
@@ -226,7 +235,7 @@ GstPadProbeReturn AiPipelineHandler::buffer_probe_cb(
     GstBuffer* buffer = GST_PAD_PROBE_INFO_BUFFER(info);
     GstMapInfo map;
     if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
-        spdlog::warn("buffer_probe_cb: failed to map buffer");
+        ai_log->warn("buffer_probe_cb: failed to map buffer");
         return GST_PAD_PROBE_OK;
     }
 
@@ -263,9 +272,12 @@ GstPadProbeReturn AiPipelineHandler::buffer_probe_cb(
 }
 
 bool AiPipelineHandler::start(std::string* error_msg) {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     stop_flag_ = false;
     inference_thread_ = std::thread(&AiPipelineHandler::inference_loop, this);
-    spdlog::info("Inference thread started");
+    ai_log->info("Inference thread started");
     return true;
 }
 
@@ -283,6 +295,9 @@ void AiPipelineHandler::stop() {
 }
 
 void AiPipelineHandler::inference_loop() {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     while (!stop_flag_) {
         std::unique_lock<std::mutex> lock(mutex_);
         cv_.wait(lock, [this] { return frame_ready_ || stop_flag_.load(); });
@@ -331,11 +346,25 @@ void AiPipelineHandler::inference_loop() {
             auto end_time = std::chrono::steady_clock::now();
             auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 end_time - start_time).count();
-            spdlog::debug("Inference completed: {}ms, {} detections ({} after filter)",
-                          duration_ms, detections.size(), filtered.size());
+
+            if (!filtered.empty()) {
+                // Detected targets -> info level summary
+                std::ostringstream summary;
+                for (size_t i = 0; i < filtered.size(); ++i) {
+                    if (i > 0) summary << ", ";
+                    summary << coco_class_name(filtered[i].class_id)
+                            << "(" << std::fixed << std::setprecision(2)
+                            << filtered[i].confidence << ")";
+                }
+                ai_log->info("Inference: {}ms, detected: {}", duration_ms, summary.str());
+            } else {
+                // No targets -> debug level
+                ai_log->debug("Inference: {}ms, {} raw detections, 0 after filter",
+                              duration_ms, detections.size());
+            }
 
         } catch (const std::exception& e) {
-            spdlog::error("Inference exception: {}", e.what());
+            ai_log->error("Inference exception: {}", e.what());
         }
 
         // Restore rgb_buffer_ for next frame
@@ -380,6 +409,9 @@ static void stbi_write_callback(void* context, void* data, int size) {
 // --- Event management implementation ---
 
 void AiPipelineHandler::open_event(const std::vector<Detection>& detections) {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     auto now_sys = std::chrono::system_clock::now();
     event_id_ = "evt_" + format_timestamp(now_sys);
     event_start_time_ = now_sys;
@@ -394,20 +426,23 @@ void AiPipelineHandler::open_event(const std::vector<Detection>& detections) {
     // Log trigger info: first detection's class + confidence
     if (!detections.empty()) {
         const char* trigger_class = coco_class_name(detections[0].class_id);
-        spdlog::info("Event opened: event_id={}, trigger_class={}, confidence={:.2f}",
+        ai_log->info("Event opened: event_id={}, trigger_class={}, confidence={:.2f}",
                      event_id_, trigger_class, detections[0].confidence);
     } else {
-        spdlog::info("Event opened: event_id={}", event_id_);
+        ai_log->info("Event opened: event_id={}", event_id_);
     }
 }
 
 void AiPipelineHandler::close_event() {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     auto end_time = std::chrono::system_clock::now();
 
     // Skip disk write for empty events
     if (cached_frames_.empty() && frame_count_ == 0) {
         event_active_ = false;
-        spdlog::info("Event closed (empty, no disk write): event_id={}", event_id_);
+        ai_log->info("Event closed (empty, no disk write): event_id={}", event_id_);
         return;
     }
 
@@ -429,7 +464,7 @@ void AiPipelineHandler::close_event() {
                 ofs.write(reinterpret_cast<const char*>(frame.jpeg_data.data()),
                           static_cast<std::streamsize>(frame.jpeg_data.size()));
             } else {
-                spdlog::warn("Failed to write snapshot: {}", filepath);
+                ai_log->warn("Failed to write snapshot: {}", filepath);
             }
         }
 
@@ -457,11 +492,11 @@ void AiPipelineHandler::close_event() {
         if (json_ofs) {
             json_ofs << event_json.dump(4);
         } else {
-            spdlog::warn("Failed to write event.json: {}", json_path);
+            ai_log->warn("Failed to write event.json: {}", json_path);
         }
 
     } catch (const std::exception& e) {
-        spdlog::warn("Error during event close disk write: {}", e.what());
+        ai_log->warn("Error during event close disk write: {}", e.what());
     }
 
     // Calculate duration
@@ -469,7 +504,7 @@ void AiPipelineHandler::close_event() {
         end_time - event_start_time_).count();
 
     std::string event_dir = config_.snapshot_dir + event_id_;
-    spdlog::info("Event closed: event_id={}, duration={}s, snapshots={}, dir={}",
+    ai_log->info("Event closed: event_id={}, duration={}s, snapshots={}, dir={}",
                  event_id_, duration, frame_count_, event_dir);
 
     // Clear cache
@@ -479,6 +514,9 @@ void AiPipelineHandler::close_event() {
 }
 
 void AiPipelineHandler::encode_snapshot(const uint8_t* rgb_data, int width, int height) {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     // Generate filename: YYYYMMDD_HHMMSS_NNN.jpg
     auto now_sys = std::chrono::system_clock::now();
     std::string ts = format_timestamp(now_sys);
@@ -492,7 +530,7 @@ void AiPipelineHandler::encode_snapshot(const uint8_t* rgb_data, int width, int 
     int result = stbi_write_jpg_to_func(stbi_write_callback, &jpeg_data,
                                          width, height, 3, rgb_data, 85);
     if (result == 0 || jpeg_data.empty()) {
-        spdlog::warn("JPEG encoding failed for frame {}", seq);
+        ai_log->warn("JPEG encoding failed for frame {}", seq);
         return;
     }
 
@@ -531,6 +569,9 @@ void AiPipelineHandler::check_event_timeout() {
 }
 
 void AiPipelineHandler::flush_cache() {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
     try {
         std::string event_dir = config_.snapshot_dir + event_id_;
 
@@ -548,11 +589,11 @@ void AiPipelineHandler::flush_cache() {
                 ofs.write(reinterpret_cast<const char*>(frame.jpeg_data.data()),
                           static_cast<std::streamsize>(frame.jpeg_data.size()));
             } else {
-                spdlog::warn("Flush: failed to write snapshot: {}", filepath);
+                ai_log->warn("Flush: failed to write snapshot: {}", filepath);
             }
         }
     } catch (const std::exception& e) {
-        spdlog::warn("Error during intermediate flush: {}", e.what());
+        ai_log->warn("Error during intermediate flush: {}", e.what());
     }
 
     // Clear cache, event continues

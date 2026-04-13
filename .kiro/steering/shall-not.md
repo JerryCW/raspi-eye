@@ -57,6 +57,10 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
   - 原因：SDK 期望 Annex B（byte-stream）格式，AVC 格式报 `STATUS_RTP_INVALID_NALU (0x5c000003)`
   - 建议：在 `h264parse` 后加 capsfilter 强制 `stream-format=byte-stream,alignment=au`；kvssink 分支单独做 AVC 转换
 
+- SHALL NOT 对含 `std::atomic` 成员的结构体使用 `unordered_map::emplace` 或 `insert`（来源：spec-13.6 Pi 5 GCC 12 编译失败）
+  - 原因：`std::atomic` 不可拷贝/移动，GCC 12 严格检查类型约束，Apple Clang 宽松放过，导致 macOS 编译通过但 Pi 5 失败
+  - 建议：改用 `try_emplace` + 就地构造后逐字段赋值
+
 - SHALL NOT 在 GStreamer tee 后的单个分支上设置与其他分支冲突的 H.264 stream-format caps（来源：spec-14 Pi 5 端到端调试）
   - 原因：tee 无法同时输出两种格式，caps 协商冲突导致 pipeline 崩溃重建
   - 建议：tee 前统一为一种格式（byte-stream），各分支按需转换

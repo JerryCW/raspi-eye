@@ -69,3 +69,8 @@ aws_region = "<your-aws-region>"
 [logging]
 # level = "info"
 # format = "text"
+# Per-component log level overrides (optional)
+# Format: "component:level,component:level"
+# Valid components: main, pipeline, app, config, stream, ai, kvs, webrtc, s3
+# Valid levels: trace, debug, info, warn, error
+# component_levels = "ai:debug,kvs:warn,webrtc:info"

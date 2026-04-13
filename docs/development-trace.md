@@ -3599,3 +3599,151 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（仅运行测试）
 
 ---
+
+### 2026-04-13 — Spec: spec-13.6-webrtc-peer-lifecycle-fix / Pi 5 编译修复
+
+**完成概要：** Pi 5 GCC 12 编译失败，`PeerInfo` 含 `std::atomic<PeerState>` 不可拷贝，`emplace` 改 `try_emplace` 就地构造修复。
+
+**测试状态：** Pi 5 编译通过 — 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | Pi 5 GCC 12 编译失败 `no matching function for call to pair<string, PeerInfo>::pair(const string&, PeerInfo)` | Spec 缺少信息 | `webrtc_media.cpp:764` `emplace(peer_id, std::move(info))` 失败。`PeerInfo` 含 `std::atomic<PeerState>` 不可拷贝/移动，GCC 12 对 `emplace` 类型约束比 Apple Clang 严格 | `emplace` 改 `try_emplace` + 就地构造后逐字段赋值 | 加禁止项：含 std::atomic 成员的结构体不可用 emplace/insert |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 对含 `std::atomic` 成员的结构体使用 `unordered_map::emplace` 或 `insert`（GCC 12 严格检查拷贝/移动语义，Apple Clang 宽松放过）。改用 `try_emplace` + 就地构造后逐字段赋值。
+
+**涉及文件：** `device/src/webrtc_media.cpp`
+
+---
+
+### 2026-04-13 — Spec: spec-23-log-management / 任务: 1.1 + 1.2 扩展 LoggingConfig 和 parse_logging_config
+
+**完成概要：** LoggingConfig 新增 `component_levels` 字段（`unordered_map<string,string>`），parse_logging_config 新增 component_levels 解析（逗号分隔 name:level，含 trim、空值处理、无效级别校验、缺少冒号校验）。
+
+**测试状态：** 未运行（轻量模式，测试覆盖将在任务 5 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/config_manager.h, device/src/config_manager.cpp
+
+---
+
+### 2026-04-13 — Spec: spec-23-log-management / 任务: 2.1 + 2.2 + 2.3 扩展 log_init
+
+**完成概要：** init(bool) 创建全部 9 个命名 logger，init(const LoggingConfig&) 应用 per-component 级别，新增 parse_level 辅助函数，新增 setup_kvs_log_redirect()（条件编译，macOS 为空函数）。
+
+**测试状态：** 未运行（轻量模式，测试覆盖将在任务 5 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/log_init.h, device/src/log_init.cpp
+
+---
+
+### 2026-04-13 — Spec: spec-23-log-management / 任务: 3. 检查点 - 编译验证
+
+**完成概要：** cmake configure + build 通过，编译无错误，无 ASan 报告。唯一 warning 是 shutdown_handler.cpp 的既有 C++20 扩展警告，与 spec-23 无关。
+
+**测试状态：** 未运行（检查点任务，仅验证编译）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯编译验证）
+
+---
+
+### 2026-04-13 — Spec: spec-23-log-management / 任务: 4.1 + 4.2 + 4.3 迁移模块 Logger
+
+**完成概要：** ai_pipeline_handler.cpp 和 yolo_detector.cpp 迁移到 "ai" logger，s3_uploader.cpp 迁移到 "s3" logger，检测到目标时 info 级别输出摘要，未检测到时 debug 级别，所有函数使用回退模式。
+
+**测试状态：** 未运行（测试覆盖将在任务 5 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.cpp, device/src/yolo_detector.cpp, device/src/s3_uploader.cpp
+
+---
+
+### 2026-04-13 — Spec: spec-23-log-management / 任务: 5.1 ~ 5.5 编写测试
+
+**完成概要：** config_test.cpp 新增 5 个 example-based 测试 + 2 个 PBT（解析往返、无效级别拒绝），log_test.cpp 新增 5 个 example-based 测试 + 1 个 PBT（per-component 级别应用），修复 log_init.cpp 中 spdlog::warn 在 shutdown 后调用的 SEGV 问题。
+
+**测试状态：** 全部通过（16 个测试套件）— 新增 13 个测试（10 example-based + 3 PBT）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | `spdlog::warn()` 在 shutdown 后调用导致 SEGV（默认 logger 为 null） | 模型能力边界 | PBT 迭代中 shutdown+reinit 后 `spdlog::warn("Unknown component...")` 调用默认 logger 为 null | 改为使用 `spdlog::get("config")` 命名 logger 输出警告 | Design 文档中应注明 shutdown 后不可使用 `spdlog::warn()` 等全局函数 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（spdlog::warn SEGV 为单次问题，已修复）
+
+**涉及文件：** device/tests/config_test.cpp, device/tests/log_test.cpp, device/src/log_init.cpp
+
+---
+
+### 2026-04-13 — Spec: spec-23-log-management / 任务: 7.1 + 7.2 更新配置文件示例和集成
+
+**完成概要：** config.toml.example 新增 component_levels 字段注释说明，main.cpp 在 log_init::init() 后调用 setup_kvs_log_redirect()。
+
+**测试状态：** 未运行（轻量模式，纯配置/集成变更）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/config/config.toml.example, device/src/main.cpp
+
+---
+
+### 2026-04-13 — Spec: spec-23-log-management / 任务: 8. 最终检查点 - 全量编译与测试
+
+**完成概要：** 全量 cmake configure + build + ctest 通过，16/17 测试通过（1 个失败为 Spec 13.6 的预存 bug condition 探测测试，与 Spec 23 无关），ASan 无报告，git status 确认无敏感文件。
+
+**测试状态：** 16/17 通过（1 个预存失败与 Spec 23 无关）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。唯一失败的 `WebRtcMediaBugCondition.ReadReadConcurrencyWithSharedLock` 是 Spec 13.6 的 bug condition 探测测试，预期在未修复代码上失败。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
