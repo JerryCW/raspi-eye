@@ -756,12 +756,13 @@ bool WebRtcMediaManager::on_viewer_offer(
     }
 
     // 15. Store in peers map (state = CONNECTING, 等待 on_connection_state_change 设为 CONNECTED)
-    PeerInfo info;
+    // 注意：PeerInfo 含 std::atomic（不可拷贝/移动），用 try_emplace 就地构造后逐字段赋值
+    auto [it_peer, inserted] = impl_->peers.try_emplace(peer_id);
+    auto& info = it_peer->second;
     info.peer_connection = peer_connection;
     info.video_transceiver = video_transceiver;
     info.consecutive_write_failures = 0;
-    // state 默认 CONNECTING，connected 由 on_connection_state_change 回调设置
-    impl_->peers.emplace(peer_id, std::move(info));
+    info.state.store(PeerState::CONNECTING);
     impl_->callback_contexts[peer_id] = cb_ctx;
 
     if (logger) logger->info("Created PeerConnection for peer {}, count={}",
