@@ -73,11 +73,9 @@ static int run_pipeline(int argc, char* argv[]) {
     }
 
     // Phase 3: Initialize logging with full config (level + format)
+    // init() creates all 9 named loggers: main, pipeline, app, config, stream, ai, kvs, webrtc, s3
     log_init::init(config.logging_config());
     log_init::setup_kvs_log_redirect();
-    log_init::create_logger("app");
-    log_init::create_logger("config");
-    log_init::create_logger("stream");
     auto logger = spdlog::get("main");
 
     // Phase 4: AppContext init (will re-load config internally)
