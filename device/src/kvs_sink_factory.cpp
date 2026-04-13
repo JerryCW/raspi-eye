@@ -86,6 +86,7 @@ GstElement* create_kvs_sink(
         "stream-name", kvs_config.stream_name.c_str(),
         "aws-region",  kvs_config.aws_region.c_str(),
         "restart-on-error", FALSE,
+        "log-config",  "log4cplus:ERROR",
         nullptr);
     std::string iot_cert = build_iot_certificate_string(aws_config);
     gst_util_set_object_arg(G_OBJECT(sink), "iot-certificate",
