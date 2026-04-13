@@ -1,0 +1,112 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** — freePeerConnection 在持有锁时调用导致死锁
+  - **CRITICAL**: 此测试必须在修复代码之前编写和运行
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: 此测试编码了期望行为 — 修复后它将通过，验证 bug 已解决
+  - **GOAL**: 证明 bug 存在：在 stub 实现中，`remove_peer` 在持有 `peers_mutex` 时同步执行清理（模拟 `freePeerConnection` 在锁内调用）
+  - **Scoped PBT Approach**: 针对确定性死锁场景，将 property 限定到具体失败用例
+  - **测试文件**: `device/tests/webrtc_media_test.cpp`
+  - **测试设计**:
+    - 创建 WebRtcMediaManager stub 实例，添加若干 peer
+    - 模拟并发场景：线程 A 调用 `remove_peer(peer_id)` 触发清理，线程 B 同时调用 `on_viewer_offer(new_peer_id)` 尝试获取锁
+    - 在未修复代码中，`remove_peer` 持有 `peers_mutex` 执行同步清理（模拟 `freePeerConnection` 阻塞），线程 B 被阻塞
+    - 使用超时检测：如果 `on_viewer_offer` 在合理时间内（如 100ms）无法完成，说明存在锁竞争/死锁风险
+    - Property 断言：对于任意 peer_id 组合，`remove_peer` 后 `on_viewer_offer` 应在 100ms 内完成（未修复代码中可能超时）
+  - **Bug Condition 形式化**: `isBugCondition(call_context)` 当 `holds_peers_mutex == true AND function_called IN ['freePeerConnection'] AND calling_thread IN ['sdk_connection_state_thread', 'gstreamer_streaming_thread']`
+  - **Expected Behavior**: 修复后，`remove_peer` 仅标记 DISCONNECTING 状态（非阻塞），`on_viewer_offer` 不被阻塞
+  - 运行测试 — **预期结果**: 测试 FAIL（证明 bug 存在：当前 stub 中 `remove_peer` 持有锁执行同步清理）
+  - 记录反例和失败模式
+  - 任务完成条件：测试已编写、运行、失败已记录
+  - _Requirements: 1.1, 1.2, 1.3_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** — Peer 管理不变量（状态机 + 计数）
+  - **IMPORTANT**: 遵循 observation-first 方法论
+  - **测试文件**: `device/tests/webrtc_media_test.cpp`
+  - **观察未修复代码行为**:
+    - 观察: `on_viewer_offer("p1", "sdp")` 成功后 `peer_count() == 1`
+    - 观察: `on_viewer_offer("p1", "sdp")` 再次调用（同 peer_id）后 `peer_count() == 1`（替换）
+    - 观察: 添加 10 个不同 peer 后 `peer_count() == 10`，第 11 个被拒绝
+    - 观察: `remove_peer("p1")` 后 `peer_count()` 减 1
+    - 观察: `on_viewer_ice_candidate` 对不存在的 peer 返回 true（缓存）
+    - 观察: `broadcast_frame` 对无 peer 时不崩溃
+  - **Property-Based Test 设计**:
+    - 随机生成操作序列（`on_viewer_offer(random_peer_id)`, `remove_peer(random_peer_id)`, `on_viewer_ice_candidate(random_peer_id)`）
+    - 维护引用模型（`std::unordered_map<string, PeerState>` 跟踪每个 peer 的状态）
+    - 修复后新增 DISCONNECTING 状态：`peer_count()` 仅计 CONNECTED 状态的 peer
+    - 不变量断言:
+      - `peer_count()` 始终等于 CONNECTED 状态 peer 数量
+      - `peer_count() <= 10`
+      - 同一 peer_id 重复 offer 后 `peer_count()` 不增加（替换语义）
+      - `remove_peer` 后该 peer 不再计入 `peer_count()`
+      - `on_viewer_ice_candidate` 对不存在的 peer 返回 true
+  - 运行测试 — **预期结果**: 测试 PASS（确认基线行为）
+  - 任务完成条件：测试已编写、运行、在未修复代码上通过
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [x] 3. Fix: WebRTC peer 生命周期死锁修复
+
+  - [x] 3.1 Implement stub 实现变更（`#ifndef HAVE_KVS_WEBRTC_SDK` 部分）
+    - 修改 `device/src/webrtc_media.cpp` 的 stub 实现
+    - 新增 `PeerState` 枚举: `CONNECTING`, `CONNECTED`, `DISCONNECTING`
+    - 将 `std::unordered_set<std::string> peers` 替换为 `std::unordered_map<std::string, PeerState> peers`
+    - 将 `std::mutex peers_mutex` 替换为 `std::shared_mutex peers_mutex`
+    - 新增 `std::atomic<bool> running{true}` 和 `std::thread cleanup_thread`
+    - 实现 `cleanup_loop()`: 每 1 秒扫描 DISCONNECTING 超过 10 秒的 peer，收集到本地 vector 后释放锁，在锁外清理
+    - `on_viewer_offer`: 第一阶段（unique_lock）收集 DISCONNECTING peers + 旧同 peer_id peer 到 `to_free`，释放锁；第二阶段（无锁）清理；第三阶段（unique_lock）创建新 peer
+    - `remove_peer`: unique_lock 内标记 DISCONNECTING 或从 map 移除，锁外清理
+    - `broadcast_frame`: 使用 `shared_lock`（读锁），跳过非 CONNECTED peer
+    - `peer_count`: 使用 `shared_lock`，仅计 CONNECTED 状态 peer
+    - `~Impl`: 设置 `running = false`，join cleanup_thread，安全清理所有 peer
+    - SHALL NOT 在持有 `peers_mutex` 的情况下调用模拟的 `freePeerConnection` 等效操作
+    - SHALL NOT 在 SDK 回调线程上直接调用 `freePeerConnection`
+    - _Bug_Condition: isBugCondition(call_context) where holds_peers_mutex == true AND function_called IN ['freePeerConnection']_
+    - _Expected_Behavior: freePeerConnection 始终在不持有 peers_mutex 的情况下调用_
+    - _Preservation: peer 管理逻辑（创建、替换、移除、最大连接数限制、ICE candidate 缓存）保持不变_
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.4.1, 2.5, 2.6, 2.7, 2.8, 3.1_
+
+  - [x] 3.2 Implement real SDK 实现变更（`#ifdef HAVE_KVS_WEBRTC_SDK` 部分）
+    - 修改 `device/src/webrtc_media.cpp` 的 real 实现
+    - `PeerInfo` 新增字段: `std::atomic<PeerState> state{PeerState::CONNECTING}`, `std::chrono::steady_clock::time_point disconnected_at`
+    - 将 `bool connected` 替换为 `PeerState state`
+    - 将 `std::mutex peers_mutex` 替换为 `std::shared_mutex peers_mutex`
+    - 新增 `std::atomic<bool> running{true}`, `std::thread cleanup_thread`
+    - 实现 `cleanup_loop()`: 每 1 秒扫描，收集 DISCONNECTING 超过 10 秒的 peer 到 `PeerToFree` vector，从 map 移除，失效 callback context，释放锁后调用 `closePeerConnection` + `freePeerConnection`
+    - `on_connection_state_change` 重构: CONNECTED 设置 `state = CONNECTED`；CLOSED/FAILED 仅设置 `state = DISCONNECTING` + 记录 `disconnected_at`，不调用 `freePeerConnection`
+    - `on_viewer_offer` 重构: 三阶段模式（收集+释放锁+清理+重新获取锁+创建）
+    - `broadcast_frame` 重构: `shared_lock`，跳过非 CONNECTED，写入失败超阈值原子设置 DISCONNECTING
+    - `remove_peer` 重构: unique_lock 内从 map 移除收集到 `to_free`，释放锁后 `closePeerConnection` + `freePeerConnection`
+    - `peer_count` 重构: `shared_lock`，仅计 CONNECTED 状态
+    - `~Impl` 重构: `running = false` → join cleanup_thread → unique_lock 内 `closePeerConnection` 所有 peer + 收集 → 释放锁 → sleep 1s → 锁外 `freePeerConnection` → 清理 callback context
+    - 删除 `remove_peer_locked()` 函数（不再需要）
+    - 新增常量: `kCleanupIntervalMs = 1000`, `kDisconnectGracePeriodSec = 10`, `kShutdownDrainSec = 1`
+    - SHALL NOT 在持有 `peers_mutex` 的情况下调用 `freePeerConnection`
+    - SHALL NOT 在 SDK 回调线程上直接调用 `freePeerConnection`
+    - _Bug_Condition: isBugCondition(call_context) where holds_peers_mutex == true AND function_called IN ['freePeerConnection', 'closePeerConnection']_
+    - _Expected_Behavior: freePeerConnection/closePeerConnection 始终在不持有 peers_mutex 的情况下调用_
+    - _Preservation: SDP offer/answer 协商、ICE candidate 交换、帧数据 writeFrame、最大连接数限制、peer_id 长度校验保持不变_
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.4.1, 2.5, 2.6, 2.7, 2.8_
+
+  - [x] 3.3 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** — freePeerConnection 不在持有锁时调用
+    - **IMPORTANT**: 重新运行 task 1 中的同一测试 — 不要编写新测试
+    - task 1 的测试编码了期望行为：`remove_peer` 后 `on_viewer_offer` 应在 100ms 内完成
+    - 修复后 `remove_peer` 仅标记 DISCONNECTING（非阻塞），`on_viewer_offer` 不被阻塞
+    - 运行 bug condition exploration test
+    - **预期结果**: 测试 PASS（确认 bug 已修复）
+    - _Requirements: 2.1, 2.2, 2.3, 2.7, 2.8_
+
+  - [x] 3.4 Verify preservation tests still pass
+    - **Property 2: Preservation** — Peer 管理不变量
+    - **IMPORTANT**: 重新运行 task 2 中的同一测试 — 不要编写新测试
+    - 运行 preservation property tests
+    - **预期结果**: 测试 PASS（确认无回归）
+    - 确认所有测试在修复后仍然通过（无回归）
+
+- [x] 4. Checkpoint — 确保所有测试通过
+  - 运行完整测试套件: `cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device/build && ctest --test-dir device/build --output-on-failure`
+  - 确认所有现有测试通过（包括 webrtc_media_test、webrtc_test 等）
+  - 确认无编译警告（-Wall -Wextra）
+  - 如有问题，询问用户
