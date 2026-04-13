@@ -120,6 +120,14 @@ deploy_config() {
     sudo mkdir -p "${CONFIG_DIR}"
     sudo chown pi:pi "${CONFIG_DIR}"
 
+    # Deploy KVS Producer SDK log configuration (always overwrite)
+    if [[ -f "device/config/kvs_log_configuration" ]]; then
+        sudo cp "device/config/kvs_log_configuration" "${CONFIG_DIR}/kvs_log_configuration"
+        sudo chmod 644 "${CONFIG_DIR}/kvs_log_configuration"
+        sudo chown pi:pi "${CONFIG_DIR}/kvs_log_configuration"
+        log "KVS log config deployed: ${CONFIG_DIR}/kvs_log_configuration"
+    fi
+
     if [[ -f "${CONFIG_DIR}/config.toml" ]]; then
         log "Config already exists at ${CONFIG_DIR}/config.toml, keeping existing (user modifications preserved)"
         SUMMARY_CONFIG="kept"
