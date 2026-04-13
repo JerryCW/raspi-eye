@@ -91,7 +91,9 @@ void shutdown() {
 // --- KVS SDK log redirect ---
 
 #ifdef HAVE_KVS_WEBRTC_SDK
-#include <com/amazonaws/kinesis/video/common/PlatformUtils.h>
+extern "C" {
+#include <com/amazonaws/kinesis/video/webrtcclient/Include.h>
+}
 
 namespace {
 void kvs_log_callback(UINT32 level, PCHAR tag, PCHAR fmt, ...) {
