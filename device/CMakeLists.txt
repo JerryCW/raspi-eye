@@ -239,7 +239,7 @@ else()
 endif()
 
 # WebRTC signaling module
-add_library(webrtc_module STATIC src/webrtc_signaling.cpp)
+add_library(webrtc_module STATIC src/webrtc_signaling.cpp src/sdp_util.cpp)
 target_include_directories(webrtc_module PUBLIC src)
 target_link_libraries(webrtc_module PUBLIC spdlog::spdlog credential_module config_util_module)
 
