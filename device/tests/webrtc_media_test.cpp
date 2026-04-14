@@ -572,6 +572,106 @@ RC_GTEST_PROP(WebRtcMediaBugConditionPBT, LockInsideBlockingCausesTimeout, ()) {
 }
 
 // ============================================================
+// extract_sdp_summary Property-Based Tests (spec-25)
+// ============================================================
+
+// Feature: webrtc-log-observability, Property 1: SDP summary extraction round-trip
+// **Validates: Requirements 3.5, 7.3**
+RC_GTEST_PROP(ExtractSdpSummaryPBT, RoundTrip, ()) {
+    // Generate 1-10 unique alphanumeric codec names
+    auto num_codecs = *rc::gen::inRange(1, 11);
+    std::unordered_set<std::string> expected_codecs;
+
+    std::string sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
+
+    for (int i = 0; i < num_codecs; ++i) {
+        // Generate alphanumeric codec name (1-20 chars)
+        auto len = *rc::gen::inRange(1, 21);
+        std::string codec;
+        for (int j = 0; j < len; ++j) {
+            auto c = *rc::gen::oneOf(
+                rc::gen::inRange('a', static_cast<char>('z' + 1)),
+                rc::gen::inRange('A', static_cast<char>('Z' + 1)),
+                rc::gen::inRange('0', static_cast<char>('9' + 1))
+            );
+            codec += c;
+        }
+        if (codec.empty()) continue;
+        expected_codecs.insert(codec);
+
+        // Random payload type 0-127, random clock rate
+        auto pt = *rc::gen::inRange(0, 128);
+        auto rate = *rc::gen::element(8000, 16000, 48000, 90000);
+        sdp += "a=rtpmap:" + std::to_string(pt) + " " + codec + "/" + std::to_string(rate) + "\r\n";
+    }
+
+    std::string result = extract_sdp_summary(sdp);
+
+    // All expected codecs should appear in the result (after dedup)
+    for (const auto& codec : expected_codecs) {
+        RC_ASSERT(result.find(codec) != std::string::npos);
+    }
+}
+
+// Feature: webrtc-log-observability, Property 2: extract_sdp_summary robustness
+// **Validates: Requirements 3.3, 7.3**
+RC_GTEST_PROP(ExtractSdpSummaryPBT, Robustness, ()) {
+    // Generate arbitrary string (including empty, random bytes, no rtpmap lines)
+    auto input = *rc::gen::arbitrary<std::string>();
+
+    // Must not crash, must return valid std::string
+    std::string result = extract_sdp_summary(input);
+
+    // Result is a valid string (implicit - if we get here, no crash)
+    // Result should not contain newlines
+    RC_ASSERT(result.find('\n') == std::string::npos);
+    RC_ASSERT(result.find('\r') == std::string::npos);
+}
+
+// ============================================================
+// extract_sdp_summary Example-Based Tests (spec-25)
+// ============================================================
+
+// ExtractSdpSummary_EmptyString: empty input -> empty output
+TEST(ExtractSdpSummaryTest, EmptyString) {
+    EXPECT_EQ(extract_sdp_summary(""), "");
+}
+
+// ExtractSdpSummary_NoRtpmap: no a=rtpmap: lines -> empty output
+TEST(ExtractSdpSummaryTest, NoRtpmap) {
+    std::string sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+                      "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+                      "a=sendrecv\r\n";
+    EXPECT_EQ(extract_sdp_summary(sdp), "");
+}
+
+// ExtractSdpSummary_RealSdp: real SDP with H264 + opus -> "H264, opus"
+TEST(ExtractSdpSummaryTest, RealSdp) {
+    std::string sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+                      "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+                      "a=rtpmap:96 H264/90000\r\n"
+                      "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"
+                      "a=rtpmap:111 opus/48000/2\r\n";
+    std::string result = extract_sdp_summary(sdp);
+    EXPECT_NE(result.find("H264"), std::string::npos);
+    EXPECT_NE(result.find("opus"), std::string::npos);
+}
+
+// ExtractSdpSummary_DuplicateCodecs: duplicate codec names -> deduplicated
+TEST(ExtractSdpSummaryTest, DuplicateCodecs) {
+    std::string sdp = "v=0\r\n"
+                      "a=rtpmap:96 H264/90000\r\n"
+                      "a=rtpmap:97 H264/90000\r\n"
+                      "a=rtpmap:111 opus/48000\r\n";
+    std::string result = extract_sdp_summary(sdp);
+    // H264 should appear exactly once
+    auto first = result.find("H264");
+    ASSERT_NE(first, std::string::npos);
+    EXPECT_EQ(result.find("H264", first + 1), std::string::npos) << "H264 appears more than once in: " << result;
+    EXPECT_NE(result.find("opus"), std::string::npos);
+}
+
+// ============================================================
 // Custom main: gst_init required for pipeline tests
 // ============================================================
 

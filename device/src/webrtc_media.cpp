@@ -2,9 +2,57 @@
 // WebRTC media manager: PeerConnection lifecycle + H.264 frame broadcast (pImpl).
 // Conditional compilation: stub (no SDK) / real (KVS WebRTC C SDK).
 
-#ifndef HAVE_KVS_WEBRTC_SDK
+// --- Common code (shared by stub and real) ---
 
 #include "webrtc_media.h"
+#include <sstream>
+#include <unordered_set>
+#include <vector>
+
+std::string extract_sdp_summary(const std::string& sdp) {
+    if (sdp.empty()) return {};
+
+    std::vector<std::string> codecs;
+    std::unordered_set<std::string> seen;
+
+    std::istringstream stream(sdp);
+    std::string line;
+    while (std::getline(stream, line)) {
+        // Strip trailing \r if present (handles \r\n line endings)
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        // Match lines starting with "a=rtpmap:"
+        const std::string prefix = "a=rtpmap:";
+        if (line.compare(0, prefix.size(), prefix) != 0) continue;
+
+        // Format: a=rtpmap:<pt> <codec>/<rate>[/<params>]
+        auto space_pos = line.find(' ', prefix.size());
+        if (space_pos == std::string::npos) continue;
+
+        auto slash_pos = line.find('/', space_pos + 1);
+        if (slash_pos == std::string::npos) continue;
+
+        std::string codec = line.substr(space_pos + 1, slash_pos - space_pos - 1);
+        if (!codec.empty() && seen.insert(codec).second) {
+            codecs.push_back(codec);
+        }
+    }
+
+    if (codecs.empty()) return {};
+
+    std::string result;
+    for (size_t i = 0; i < codecs.size(); ++i) {
+        if (i > 0) result += ", ";
+        result += codecs[i];
+    }
+    return result;
+}
+
+// --- End common code ---
+
+#ifndef HAVE_KVS_WEBRTC_SDK
+
 #include "webrtc_signaling.h"
 #include <spdlog/spdlog.h>
 #include <atomic>
@@ -22,15 +70,30 @@ static constexpr int kDisconnectGracePeriodSec = 10;
 
 enum class PeerState { CONNECTING, CONNECTED, DISCONNECTING };
 
+struct PeerInfo {
+    PeerState state = PeerState::CONNECTING;
+    std::chrono::steady_clock::time_point created_at;
+    std::chrono::steady_clock::time_point disconnected_at;
+    bool first_frame_sent = false;
+    std::string disconnect_reason;
+    uint32_t sent_candidates = 0;
+    uint32_t received_candidates = 0;
+};
+
+// 待释放 peer 的信息（在锁外输出日志）
+struct StubPeerToFree {
+    std::string peer_id;
+    double alive_sec = 0.0;
+    std::string disconnect_reason;
+};
+
 struct WebRtcMediaManager::Impl {
     WebRtcSignaling& signaling;
-    std::unordered_map<std::string, PeerState> peers;
+    std::unordered_map<std::string, PeerInfo> peers;
     mutable std::shared_mutex peers_mutex;
     std::atomic<bool> running{true};
     std::thread cleanup_thread;
     std::condition_variable_any cv;
-    // DISCONNECTING peer 的时间戳
-    std::unordered_map<std::string, std::chrono::steady_clock::time_point> disconnect_times;
 
     explicit Impl(WebRtcSignaling& sig) : signaling(sig) {
         cleanup_thread = std::thread([this]() { cleanup_loop(); });
@@ -38,7 +101,7 @@ struct WebRtcMediaManager::Impl {
 
     void cleanup_loop() {
         while (running.load()) {
-            std::vector<std::string> to_free;
+            std::vector<StubPeerToFree> to_free;
             {
                 std::unique_lock<std::shared_mutex> lock(peers_mutex);
                 cv.wait_for(lock, std::chrono::milliseconds(kCleanupIntervalMs),
@@ -47,13 +110,16 @@ struct WebRtcMediaManager::Impl {
 
                 auto now = std::chrono::steady_clock::now();
                 for (auto it = peers.begin(); it != peers.end(); ) {
-                    if (it->second == PeerState::DISCONNECTING) {
-                        auto dt_it = disconnect_times.find(it->first);
-                        if (dt_it != disconnect_times.end() &&
-                            std::chrono::duration_cast<std::chrono::seconds>(
-                                now - dt_it->second).count() >= kDisconnectGracePeriodSec) {
-                            to_free.push_back(it->first);
-                            disconnect_times.erase(dt_it);
+                    if (it->second.state == PeerState::DISCONNECTING) {
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                            now - it->second.disconnected_at).count();
+                        if (elapsed >= kDisconnectGracePeriodSec) {
+                            StubPeerToFree ptf;
+                            ptf.peer_id = it->first;
+                            ptf.alive_sec = std::chrono::duration<double>(
+                                now - it->second.created_at).count();
+                            ptf.disconnect_reason = it->second.disconnect_reason;
+                            to_free.push_back(std::move(ptf));
                             it = peers.erase(it);
                             continue;
                         }
@@ -64,8 +130,9 @@ struct WebRtcMediaManager::Impl {
             // 锁外清理（stub 中只是日志）
             if (!to_free.empty()) {
                 auto logger = spdlog::get("webrtc");
-                for (const auto& id : to_free) {
-                    if (logger) logger->info("Stub cleanup: freed expired DISCONNECTING peer {}", id);
+                for (const auto& ptf : to_free) {
+                    if (logger) logger->info("Cleanup: freed peer {} (alive={:.1f}s, reason={})",
+                                             ptf.peer_id, ptf.alive_sec, ptf.disconnect_reason);
                 }
             }
         }
@@ -77,20 +144,34 @@ struct WebRtcMediaManager::Impl {
         if (cleanup_thread.joinable()) cleanup_thread.join();
 
         // 安全清理所有 peer
-        std::vector<std::string> remaining;
+        struct ShutdownPeerInfo {
+            std::string peer_id;
+            double alive_sec = 0.0;
+            std::string state_str;
+        };
+        std::vector<ShutdownPeerInfo> remaining;
         {
             std::unique_lock<std::shared_mutex> lock(peers_mutex);
-            for (const auto& [id, state] : peers) {
-                remaining.push_back(id);
+            auto now = std::chrono::steady_clock::now();
+            for (const auto& [id, info] : peers) {
+                ShutdownPeerInfo spi;
+                spi.peer_id = id;
+                spi.alive_sec = std::chrono::duration<double>(now - info.created_at).count();
+                switch (info.state) {
+                    case PeerState::CONNECTING:    spi.state_str = "CONNECTING"; break;
+                    case PeerState::CONNECTED:     spi.state_str = "CONNECTED"; break;
+                    case PeerState::DISCONNECTING: spi.state_str = "DISCONNECTING"; break;
+                }
+                remaining.push_back(std::move(spi));
             }
             peers.clear();
-            disconnect_times.clear();
         }
         // 锁外清理（stub 中只是日志）
         if (!remaining.empty()) {
             auto logger = spdlog::get("webrtc");
-            for (const auto& id : remaining) {
-                if (logger) logger->info("Stub ~Impl: freed peer {}", id);
+            for (const auto& spi : remaining) {
+                if (logger) logger->info("Shutdown: freed peer {} (alive={:.1f}s, state={})",
+                                         spi.peer_id, spi.alive_sec, spi.state_str);
             }
         }
     }
@@ -120,14 +201,19 @@ bool WebRtcMediaManager::on_viewer_offer(
     }
 
     // 第一阶段（unique_lock）：收集 DISCONNECTING peers + 旧同 peer_id peer 到 to_free
-    std::vector<std::string> to_free;
+    std::vector<StubPeerToFree> to_free;
     {
         std::unique_lock<std::shared_mutex> lock(impl_->peers_mutex);
+        auto now = std::chrono::steady_clock::now();
         // 收集所有 DISCONNECTING peers
         for (auto it = impl_->peers.begin(); it != impl_->peers.end(); ) {
-            if (it->second == PeerState::DISCONNECTING) {
-                to_free.push_back(it->first);
-                impl_->disconnect_times.erase(it->first);
+            if (it->second.state == PeerState::DISCONNECTING) {
+                StubPeerToFree ptf;
+                ptf.peer_id = it->first;
+                ptf.alive_sec = std::chrono::duration<double>(
+                    now - it->second.created_at).count();
+                ptf.disconnect_reason = it->second.disconnect_reason;
+                to_free.push_back(std::move(ptf));
                 it = impl_->peers.erase(it);
             } else {
                 ++it;
@@ -136,15 +222,20 @@ bool WebRtcMediaManager::on_viewer_offer(
         // 收集旧同 peer_id peer（如果存在且非 DISCONNECTING）
         auto existing = impl_->peers.find(peer_id);
         if (existing != impl_->peers.end()) {
-            to_free.push_back(existing->first);
-            impl_->disconnect_times.erase(existing->first);
+            StubPeerToFree ptf;
+            ptf.peer_id = existing->first;
+            ptf.alive_sec = std::chrono::duration<double>(
+                now - existing->second.created_at).count();
+            ptf.disconnect_reason = "replaced";
+            to_free.push_back(std::move(ptf));
             impl_->peers.erase(existing);
         }
     }
 
     // 第二阶段（无锁）：清理（stub 中只是日志）
-    for (const auto& id : to_free) {
-        if (logger) logger->info("Stub on_viewer_offer: freed peer {}", id);
+    for (const auto& ptf : to_free) {
+        if (logger) logger->info("Freed stale peer {} (alive={:.1f}s, reason={})",
+                                 ptf.peer_id, ptf.alive_sec, ptf.disconnect_reason);
     }
 
     // 第三阶段（unique_lock）：检查 max peers，创建新 peer
@@ -157,44 +248,66 @@ bool WebRtcMediaManager::on_viewer_offer(
             return false;
         }
         // stub 中 peer 创建后立即设为 CONNECTED（无 ICE 协商过程）
-        impl_->peers[peer_id] = PeerState::CONNECTED;
+        auto& info = impl_->peers[peer_id];
+        info.state = PeerState::CONNECTED;
+        info.created_at = std::chrono::steady_clock::now();
         if (logger) logger->info("Stub: added peer {}, count={}", peer_id, impl_->peers.size());
     }
     return true;
 }
 
 bool WebRtcMediaManager::on_viewer_ice_candidate(
-    const std::string& /*peer_id*/, const std::string& /*candidate*/,
+    const std::string& peer_id, const std::string& /*candidate*/,
     std::string* /*error_msg*/) {
+    auto logger = spdlog::get("webrtc");
+    {
+        std::unique_lock<std::shared_mutex> lock(impl_->peers_mutex);
+        auto it = impl_->peers.find(peer_id);
+        if (it != impl_->peers.end()) {
+            it->second.received_candidates++;
+        }
+    }
+    if (logger) logger->debug("Stub: received ICE candidate for peer {}", peer_id);
     return true;
 }
 
 void WebRtcMediaManager::remove_peer(const std::string& peer_id) {
     auto logger = spdlog::get("webrtc");
-    std::vector<std::string> to_free;
+    std::vector<StubPeerToFree> to_free;
     {
         std::unique_lock<std::shared_mutex> lock(impl_->peers_mutex);
         auto it = impl_->peers.find(peer_id);
         if (it != impl_->peers.end()) {
-            to_free.push_back(it->first);
-            impl_->disconnect_times.erase(it->first);
+            StubPeerToFree ptf;
+            ptf.peer_id = it->first;
+            ptf.alive_sec = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - it->second.created_at).count();
+            ptf.disconnect_reason = "manual_remove";
+            to_free.push_back(std::move(ptf));
             impl_->peers.erase(it);
         }
     }
     // 锁外清理（stub 中只是日志）
-    for (const auto& id : to_free) {
-        if (logger) logger->info("Stub: removed peer {}", id);
+    for (const auto& ptf : to_free) {
+        if (logger) logger->info("Removed peer {} (alive={:.1f}s, reason=manual_remove)",
+                                 ptf.peer_id, ptf.alive_sec);
     }
 }
 
 void WebRtcMediaManager::broadcast_frame(
-    const uint8_t* /*data*/, size_t /*size*/,
-    uint64_t /*timestamp_100ns*/, bool /*is_keyframe*/) {
+    const uint8_t* /*data*/, size_t size,
+    uint64_t /*timestamp_100ns*/, bool is_keyframe) {
     // stub: no-op，但仍需使用 shared_lock 保持与 real 实现一致的锁策略
     std::shared_lock<std::shared_mutex> lock(impl_->peers_mutex);
+    auto logger = spdlog::get("webrtc");
     // 遍历 peers，跳过非 CONNECTED peer（stub 中无实际操作）
-    for (const auto& [id, state] : impl_->peers) {
-        if (state != PeerState::CONNECTED) continue;
+    for (auto& [id, info] : impl_->peers) {
+        if (info.state != PeerState::CONNECTED) continue;
+        if (!info.first_frame_sent) {
+            if (logger) logger->info("First frame sent to peer {} (size={}, keyframe={})",
+                                     id, size, is_keyframe);
+            info.first_frame_sent = true;
+        }
         // stub: no-op
     }
 }
@@ -202,8 +315,8 @@ void WebRtcMediaManager::broadcast_frame(
 size_t WebRtcMediaManager::peer_count() const {
     std::shared_lock<std::shared_mutex> lock(impl_->peers_mutex);
     size_t count = 0;
-    for (const auto& [id, state] : impl_->peers) {
-        if (state == PeerState::CONNECTED) ++count;
+    for (const auto& [id, info] : impl_->peers) {
+        if (info.state == PeerState::CONNECTED) ++count;
     }
     return count;
 }
@@ -220,7 +333,6 @@ WebRtcMediaManager::~WebRtcMediaManager() = default;
 
 #ifdef HAVE_KVS_WEBRTC_SDK
 
-#include "webrtc_media.h"
 #include "webrtc_signaling.h"
 #include <spdlog/spdlog.h>
 #include <atomic>
@@ -251,6 +363,12 @@ struct PeerInfo {
     uint32_t consecutive_write_failures = 0;
     std::atomic<PeerState> state{PeerState::CONNECTING};
     std::chrono::steady_clock::time_point disconnected_at;
+    // Spec 25: observability fields
+    std::chrono::steady_clock::time_point created_at;
+    bool first_frame_sent = false;
+    std::string disconnect_reason;
+    uint32_t sent_candidates = 0;
+    uint32_t received_candidates = 0;
 };
 
 // 待释放 peer 的信息（在锁外执行 close + free）
@@ -259,6 +377,8 @@ struct PeerToFree {
     struct CallbackContextFwd;  // forward — 实际用 Impl::CallbackContext*
     void* callback_context;     // 存储 CallbackContext* 以便锁外 delete
     std::string peer_id;
+    double alive_sec = 0.0;
+    std::string disconnect_reason;
 };
 
 // CallbackContext and SDK callbacks are inside Impl to access private scope.
@@ -313,6 +433,9 @@ struct WebRtcMediaManager::Impl {
                             PeerToFree ptf;
                             ptf.peer_connection = it->second.peer_connection;
                             ptf.peer_id = it->first;
+                            ptf.alive_sec = std::chrono::duration<double>(
+                                now - it->second.created_at).count();
+                            ptf.disconnect_reason = it->second.disconnect_reason;
                             // 失效 callback context
                             auto ctx_it = callback_contexts.find(it->first);
                             if (ctx_it != callback_contexts.end()) {
@@ -342,7 +465,8 @@ struct WebRtcMediaManager::Impl {
                     if (ptf.callback_context) {
                         delete static_cast<CallbackContext*>(ptf.callback_context);
                     }
-                    if (logger) logger->info("Cleanup thread: freed expired peer {}", ptf.peer_id);
+                    if (logger) logger->info("Cleanup: freed peer {} (alive={:.1f}s, reason={})",
+                                             ptf.peer_id, ptf.alive_sec, ptf.disconnect_reason);
                 }
             }
         }
@@ -356,6 +480,13 @@ struct WebRtcMediaManager::Impl {
 
         auto logger = spdlog::get("webrtc");
         if (logger) logger->debug("Sending ICE candidate to peer: {}", ctx->peer_id);
+        {
+            std::unique_lock<std::shared_mutex> lock(ctx->impl->peers_mutex);
+            auto it = ctx->impl->peers.find(ctx->peer_id);
+            if (it != ctx->impl->peers.end()) {
+                it->second.sent_candidates++;
+            }
+        }
         ctx->impl->signaling.send_ice_candidate(ctx->peer_id,
                                                  std::string(candidate_json));
     }
@@ -370,9 +501,13 @@ struct WebRtcMediaManager::Impl {
         auto logger = spdlog::get("webrtc");
         if (new_state == RTC_PEER_CONNECTION_STATE_CONNECTED) {
             std::unique_lock<std::shared_mutex> lock(ctx->impl->peers_mutex);
-            if (logger) logger->info("Peer {} connected", ctx->peer_id);
             auto it = ctx->impl->peers.find(ctx->peer_id);
             if (it != ctx->impl->peers.end()) {
+                auto elapsed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - it->second.created_at).count();
+                if (logger) logger->info("Peer {} connected (elapsed={:.1f}s, ice_sent={}, ice_recv={})",
+                                         ctx->peer_id, elapsed,
+                                         it->second.sent_candidates, it->second.received_candidates);
                 auto prev = it->second.state.exchange(PeerState::CONNECTED);
                 if (prev != PeerState::CONNECTED) {
                     ctx->impl->viewer_count.fetch_add(1);
@@ -382,11 +517,13 @@ struct WebRtcMediaManager::Impl {
         }
         if (new_state == RTC_PEER_CONNECTION_STATE_FAILED ||
             new_state == RTC_PEER_CONNECTION_STATE_CLOSED) {
-            const char* reason = (new_state == RTC_PEER_CONNECTION_STATE_FAILED)
-                                     ? "connection_failed"
-                                     : "connection_closed";
-            if (logger) logger->info("Peer {} state changed to DISCONNECTING: {}",
-                                     ctx->peer_id, reason);
+            const bool is_failed = (new_state == RTC_PEER_CONNECTION_STATE_FAILED);
+            const char* reason = is_failed ? "connection_failed" : "connection_closed";
+            if (is_failed) {
+                if (logger) logger->warn("Peer {} connection FAILED, marking DISCONNECTING", ctx->peer_id);
+            } else {
+                if (logger) logger->info("Peer {} connection closed, marking DISCONNECTING", ctx->peer_id);
+            }
             std::unique_lock<std::shared_mutex> lock(ctx->impl->peers_mutex);
             auto it = ctx->impl->peers.find(ctx->peer_id);
             if (it != ctx->impl->peers.end()) {
@@ -395,6 +532,7 @@ struct WebRtcMediaManager::Impl {
                     ctx->impl->viewer_count.fetch_sub(1);
                 }
                 it->second.disconnected_at = std::chrono::steady_clock::now();
+                it->second.disconnect_reason = reason;
             }
             // 不调用 freePeerConnection！由清理线程或 on_viewer_offer 入口处理。
         }
@@ -410,8 +548,11 @@ struct WebRtcMediaManager::Impl {
 
         // unique_lock 内：closePeerConnection 所有 peer，收集到 to_free
         std::vector<PeerToFree> to_free;
+        // 收集每个 peer 的状态字符串用于 shutdown 日志
+        std::vector<std::string> peer_state_strs;
         {
             std::unique_lock<std::shared_mutex> lock(peers_mutex);
+            auto now = std::chrono::steady_clock::now();
             for (auto& [id, info] : peers) {
                 if (info.peer_connection) {
                     closePeerConnection(info.peer_connection);
@@ -419,6 +560,7 @@ struct WebRtcMediaManager::Impl {
                 PeerToFree ptf;
                 ptf.peer_connection = info.peer_connection;
                 ptf.peer_id = id;
+                ptf.alive_sec = std::chrono::duration<double>(now - info.created_at).count();
                 auto ctx_it = callback_contexts.find(id);
                 if (ctx_it != callback_contexts.end()) {
                     ctx_it->second->impl = nullptr;
@@ -427,6 +569,12 @@ struct WebRtcMediaManager::Impl {
                     ptf.callback_context = nullptr;
                 }
                 to_free.push_back(std::move(ptf));
+                // 记录状态字符串
+                switch (info.state.load()) {
+                    case PeerState::CONNECTING:    peer_state_strs.push_back("CONNECTING"); break;
+                    case PeerState::CONNECTED:     peer_state_strs.push_back("CONNECTED"); break;
+                    case PeerState::DISCONNECTING: peer_state_strs.push_back("DISCONNECTING"); break;
+                }
             }
             peers.clear();
             callback_contexts.clear();
@@ -437,13 +585,16 @@ struct WebRtcMediaManager::Impl {
         std::this_thread::sleep_for(std::chrono::seconds(kShutdownDrainSec));
 
         // 锁外：freePeerConnection + 清理 callback context
-        for (auto& ptf : to_free) {
+        for (size_t i = 0; i < to_free.size(); ++i) {
+            auto& ptf = to_free[i];
             if (ptf.peer_connection) {
                 freePeerConnection(&ptf.peer_connection);
             }
             if (ptf.callback_context) {
                 delete static_cast<CallbackContext*>(ptf.callback_context);
             }
+            if (logger) logger->info("Shutdown: freed peer {} (alive={:.1f}s, state={})",
+                                     ptf.peer_id, ptf.alive_sec, peer_state_strs[i]);
         }
 
         if (logger) logger->info("WebRtcMediaManager destroyed, all peers released");
@@ -488,12 +639,15 @@ bool WebRtcMediaManager::on_viewer_offer(
     std::vector<PeerToFree> to_free;
     {
         std::unique_lock<std::shared_mutex> lock(impl_->peers_mutex);
+        auto now = std::chrono::steady_clock::now();
         // 收集所有 DISCONNECTING peers
         for (auto it = impl_->peers.begin(); it != impl_->peers.end(); ) {
             if (it->second.state.load() == PeerState::DISCONNECTING) {
                 PeerToFree ptf;
                 ptf.peer_connection = it->second.peer_connection;
                 ptf.peer_id = it->first;
+                ptf.alive_sec = std::chrono::duration<double>(now - it->second.created_at).count();
+                ptf.disconnect_reason = it->second.disconnect_reason;
                 auto ctx_it = impl_->callback_contexts.find(it->first);
                 if (ctx_it != impl_->callback_contexts.end()) {
                     ctx_it->second->impl = nullptr;
@@ -516,6 +670,8 @@ bool WebRtcMediaManager::on_viewer_offer(
             PeerToFree ptf;
             ptf.peer_connection = existing->second.peer_connection;
             ptf.peer_id = existing->first;
+            ptf.alive_sec = std::chrono::duration<double>(now - existing->second.created_at).count();
+            ptf.disconnect_reason = "replaced";
             auto prev_state = existing->second.state.load();
             if (prev_state == PeerState::CONNECTED) {
                 impl_->viewer_count.fetch_sub(1);
@@ -543,7 +699,8 @@ bool WebRtcMediaManager::on_viewer_offer(
         if (ptf.callback_context) {
             delete static_cast<Impl::CallbackContext*>(ptf.callback_context);
         }
-        if (logger) logger->info("on_viewer_offer: freed stale peer {}", ptf.peer_id);
+        if (logger) logger->info("Freed stale peer {} (alive={:.1f}s, reason={})",
+                                 ptf.peer_id, ptf.alive_sec, ptf.disconnect_reason);
     }
 
     // 第三阶段（unique_lock）：检查 max peers，创建新 PeerConnection
@@ -710,6 +867,8 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
+    if (logger) logger->debug("Offer SDP summary for peer {}: {}", peer_id, extract_sdp_summary(sdp_offer));
+
     // 12. Set local description (empty answer_sdp — SDK populates it)
     RtcSessionDescriptionInit answer_sdp;
     MEMSET(&answer_sdp, 0x00, SIZEOF(RtcSessionDescriptionInit));
@@ -755,6 +914,9 @@ bool WebRtcMediaManager::on_viewer_offer(
         return false;
     }
 
+    if (logger) logger->debug("Answer SDP summary for peer {}: {}", peer_id,
+                              extract_sdp_summary(std::string(serialized_answer, serialized_len)));
+
     // 15. Store in peers map (state = CONNECTING, 等待 on_connection_state_change 设为 CONNECTED)
     // 注意：PeerInfo 含 std::atomic（不可拷贝/移动），用 try_emplace 就地构造后逐字段赋值
     auto [it_peer, inserted] = impl_->peers.try_emplace(peer_id);
@@ -763,6 +925,7 @@ bool WebRtcMediaManager::on_viewer_offer(
     info.video_transceiver = video_transceiver;
     info.consecutive_write_failures = 0;
     info.state.store(PeerState::CONNECTING);
+    info.created_at = std::chrono::steady_clock::now();
     impl_->callback_contexts[peer_id] = cb_ctx;
 
     if (logger) logger->info("Created PeerConnection for peer {}, count={}",
@@ -812,7 +975,7 @@ bool WebRtcMediaManager::on_viewer_ice_candidate(
         auto& pending = impl_->pending_candidates[peer_id];
         if (pending.size() < Impl::kMaxPendingCandidates) {
             pending.push_back(candidate);
-            if (logger) logger->info("Buffered early ICE candidate for peer: {} (buffered={})",
+            if (logger) logger->debug("Buffered early ICE candidate for peer: {} (buffered={})",
                                      peer_id, pending.size());
         } else {
             if (logger) logger->warn("Pending ICE candidate buffer full for peer: {}, dropping",
@@ -823,6 +986,7 @@ bool WebRtcMediaManager::on_viewer_ice_candidate(
 
     RtcIceCandidateInit candidate_init;
     MEMSET(&candidate_init, 0, SIZEOF(RtcIceCandidateInit));
+    it->second.received_candidates++;
     STATUS ret = deserializeRtcIceCandidateInit(
         const_cast<PCHAR>(candidate.c_str()),
         static_cast<UINT32>(candidate.size()),
@@ -856,9 +1020,13 @@ void WebRtcMediaManager::remove_peer(const std::string& peer_id) {
         auto it = impl_->peers.find(peer_id);
         if (it == impl_->peers.end()) return;
 
+        it->second.disconnect_reason = "manual_remove";
         PeerToFree ptf;
         ptf.peer_connection = it->second.peer_connection;
         ptf.peer_id = it->first;
+        ptf.alive_sec = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - it->second.created_at).count();
+        ptf.disconnect_reason = it->second.disconnect_reason;
         auto prev_state = it->second.state.load();
         if (prev_state == PeerState::CONNECTED) {
             impl_->viewer_count.fetch_sub(1);
@@ -885,7 +1053,8 @@ void WebRtcMediaManager::remove_peer(const std::string& peer_id) {
         if (ptf.callback_context) {
             delete static_cast<Impl::CallbackContext*>(ptf.callback_context);
         }
-        if (logger) logger->info("Removed peer {}, reason=manual_remove", ptf.peer_id);
+        if (logger) logger->info("Removed peer {} (alive={:.1f}s, reason=manual_remove)",
+                                 ptf.peer_id, ptf.alive_sec);
     }
 }
 
@@ -917,17 +1086,28 @@ void WebRtcMediaManager::broadcast_frame(
         STATUS ret = writeFrame(info.video_transceiver, &frame);
         if (STATUS_SUCCEEDED(ret)) {
             info.consecutive_write_failures = 0;
+            if (!info.first_frame_sent) {
+                info.first_frame_sent = true;
+                if (logger) logger->info("First frame sent to peer {} (size={}, keyframe={})",
+                                         id, size, is_keyframe);
+            }
         } else if (ret == 0x5c000003) {
             // STATUS_SRTP_NOT_READY_YET — DTLS handshake still in progress,
-            // skip silently without counting as failure.
+            // skip without counting as failure.
+            if (logger) logger->debug("writeFrame skipped for peer {}: SRTP not ready", id);
             continue;
         } else {
             info.consecutive_write_failures++;
+            if (info.consecutive_write_failures == kMaxWriteFailures / 2) {
+                if (logger) logger->warn("writeFrame failing for peer {}: {}/{} consecutive failures",
+                                         id, info.consecutive_write_failures, kMaxWriteFailures);
+            }
             if (logger) logger->warn("writeFrame failed for peer {}, status: {}, failures: {}",
                                      id, status_to_hex(ret), info.consecutive_write_failures);
             if (info.consecutive_write_failures > kMaxWriteFailures) {
                 if (logger) logger->warn("Peer {} exceeded max write failures ({}), marking DISCONNECTING",
                                          id, kMaxWriteFailures);
+                info.disconnect_reason = "max_write_failures";
                 // 原子设置 DISCONNECTING（std::atomic 无需升级锁）
                 auto prev = info.state.exchange(PeerState::DISCONNECTING);
                 if (prev == PeerState::CONNECTED) {

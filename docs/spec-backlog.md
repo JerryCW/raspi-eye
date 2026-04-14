@@ -163,7 +163,7 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 
 - **broadcast_frame 异步帧分发**：当前 broadcast_frame 在 GStreamer streaming 线程中同步调用 writeFrame，持锁遍历所有 peer。如果 Pi 5 端到端验证发现 writeFrame 有阻塞行为（网络拥塞时），需要改为异步队列分发。等 spec-14 或 spec-15 根据实际性能数据决定。（来源：spec-13 review）
 
-- **WebRTC 日志可观测性优化**：当前 ICE candidate 收发每条都打 info 级别（一次连接 20+ 条），缺少 ICE 状态转换、DTLS 握手、SDP 摘要、media flow 统计等关键诊断信息。需要：(1) ICE candidate 单条降为 debug，连接建立后打汇总 info；(2) 增加 ICE/DTLS 状态转换里程碑日志；(3) SDP offer/answer 打印 codec/分辨率摘要；(4) peer 连接期间增加 media flow 状态日志；(5) cleanup 日志加上 peer 存活时长。（来源：spec-24 Pi 5 生产日志审查）
+- **WebRTC 日志可观测性优化**：当前 ICE candidate 收发每条都打 info 级别（一次连接 20+ 条），缺少 ICE 状态转换、DTLS 握手、SDP 摘要、media flow 统计等关键诊断信息。需要：(1) ICE candidate 单条降为 debug，连接建立后打汇总 info；(2) 增加 ICE/DTLS 状态转换里程碑日志；(3) SDP offer/answer 打印 codec/分辨率摘要；(4) peer 连接期间增加 media flow 状态日志；(5) cleanup 日志加上 peer 存活时长。（来源：spec-24 Pi 5 生产日志审查）→ **已纳入 Spec 25（webrtc-log-observability）**
 
 - **main.cpp 三路集成**：KVS（spec-8）、WebRTC（spec-12+13）、AI（spec-10）三路分支的模块都已就绪，但 main.cpp 仍使用 fakesink 占位。需要一个独立 Spec 统一修改 main.cpp：读取 config.toml → 构建各模块配置 → 创建 WebRtcSignaling/WebRtcMediaManager → 注册回调 → 传入 build_tee_pipeline。依赖 spec-8 + spec-13 + spec-10 全部完成。（来源：spec-13 review）→ **已纳入 Spec 13.5（main-integration），先集成 KVS + WebRTC 两路，AI 分支后续 spec-10 完成后再接入**
 

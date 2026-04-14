@@ -314,6 +314,7 @@ endif()
 add_executable(webrtc_test tests/webrtc_test.cpp)
 target_link_libraries(webrtc_test PRIVATE
     webrtc_module
+    webrtc_media_module
     GTest::gtest_main
     rapidcheck
     rapidcheck_gtest)

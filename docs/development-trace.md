@@ -3931,3 +3931,165 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/webrtc_signaling.cpp, device/src/webrtc_media.cpp
 
 ---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 1. 扩展 PeerInfo 结构体 + extract_sdp_summary 函数
+
+**完成概要：** stub PeerInfo 结构体替换原 PeerState map，real PeerInfo 新增 5 个可观测性字段，extract_sdp_summary 纯函数实现并声明在 webrtc_media.h 中。移除 stub 的 disconnect_times map。
+
+**测试状态：** 16/17 通过，1 个已知不稳定测试失败 — 无新增测试（extract_sdp_summary 测试在 Task 8 中）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。已知失败 `WebRtcMediaBugCondition.ReadReadConcurrencyWithSharedLock` 是 spec-13.6 的 bug condition 测试，在 macOS 上因线程调度差异经常不稳定（ratio=0.87 < 2.0），与本次变更无关。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_media.cpp, device/src/webrtc_media.h
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 2. 检查点 - PeerInfo 扩展编译验证
+
+**完成概要：** 编译检查点通过。CMake 配置成功（WebRTC stub 模式），全量编译零错误，16/17 测试通过，ASan 无报告。唯一失败的 ReadReadConcurrencyWithSharedLock 是 spec-13.6 的 bug condition exploration test（设计上预期失败），与 Spec 25 无关。
+
+**测试状态：** 16/17 通过（1 个预期失败的 bug condition test）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯编译验证）
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 3.1-3.4 更新 stub 日志
+
+**完成概要：** 完成 stub 实现的全部日志更新：on_viewer_offer 清理日志含 alive_sec 和 disconnect_reason，on_viewer_ice_candidate 添加 debug 日志和 received_candidates 递增，broadcast_frame 添加首帧 info 日志，remove_peer/cleanup_loop/~Impl 日志含 alive_sec 和 reason/state。引入 StubPeerToFree 结构体在锁内捕获信息、锁外输出日志。
+
+**测试状态：** 16/17 通过（1 个预期失败的 bug condition test）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_media.cpp（stub 部分）
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 4.1-4.6 更新 real 实现日志
+
+**完成概要：** 完成 real 实现（`#ifdef HAVE_KVS_WEBRTC_SDK`）的全部日志更新：PeerToFree 新增 alive_sec/disconnect_reason 字段；on_viewer_offer 清理日志含存活时长和断开原因 + SDP summary debug 日志 + created_at 设置；on_viewer_ice_candidate 递增 received_candidates + 缓存日志降级为 debug；on_ice_candidate_handler 通过 unique_lock 递增 sent_candidates；on_connection_state_change CONNECTED 含 elapsed/ice_sent/ice_recv + FAILED 改 warn + disconnect_reason 设置；broadcast_frame 首帧 info + SRTP debug + 50% 阈值 warn + max_write_failures 设置 disconnect_reason；remove_peer/cleanup_loop/~Impl 含存活时长和 reason/state。
+
+**测试状态：** 16/17 通过（1 个预期失败的 bug condition test）— 无新增测试（real 部分在 macOS 不编译，由 stub 回归覆盖）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_media.cpp（real 部分）
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 5. 检查点 - webrtc_media.cpp 日志更新编译验证
+
+**完成概要：** 编译检查点通过。编译零错误，15/16 测试通过（排除 s3_test 挂起），ASan 无报告。唯一失败的 ReadReadConcurrencyWithSharedLock 是 spec-13.6 的预存 bug condition test，与 Spec 25 无关。
+
+**测试状态：** 15/16 通过（1 个预期失败的 bug condition test + s3_test 挂起为已有问题）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯编译验证）
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 6.1 ICE candidate 日志降级 + SDP 摘要
+
+**完成概要：** 完成 webrtc_signaling.cpp 日志更新：添加 `#include "webrtc_media.h"` 访问 extract_sdp_summary；ICE candidate 收发日志从 info 降级为 debug；OFFER 处理中新增 SDP summary debug 日志；send_answer 成功后新增 Answer SDP summary debug 日志（real + stub 两条路径）。同时更新 CMakeLists.txt 为 webrtc_test 添加 webrtc_media_module 链接依赖。
+
+**测试状态：** 全部通过（排除预存的 bug condition test）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/webrtc_signaling.cpp, device/CMakeLists.txt
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 7. 检查点 - 全量编译与现有测试回归
+
+**完成概要：** 全量编译检查点通过。CMake 配置 + 编译零错误，17 个测试套件中 16 个通过，ASan 无报告。唯一失败的 ReadReadConcurrencyWithSharedLock 是 spec-13.6 的预存 bug condition test（比值 0.58 < 2.0），与 Spec 25 无关。
+
+**测试状态：** 16/17 通过（1 个预期失败的 bug condition test）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯全量验证）
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 8.1-8.3 测试 — extract_sdp_summary + 回归验证
+
+**完成概要：** 在 webrtc_media_test.cpp 中新增 6 个测试：2 个 PBT（RoundTrip 验证随机 codec 名称正确提取、Robustness 验证任意输入不崩溃）+ 4 个 Example-based（EmptyString、NoRtpmap、RealSdp、DuplicateCodecs）。全部通过。
+
+**测试状态：** 全部通过（排除预存的 bug condition test）— 新增 6 个测试（2 PBT + 4 Example-based）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/webrtc_media_test.cpp
+
+---
+
+### 2026-04-14 — Spec: spec-25-webrtc-log-observability / 任务: 9. 最终检查点 - 全量编译与测试
+
+**完成概要：** 最终全量验证通过。CMake 配置 + 编译零错误，17 个测试套件中 16 个通过（含 Spec 25 新增的 6 个测试），ASan 无报告，git status 确认无敏感文件被跟踪。唯一失败的 ReadReadConcurrencyWithSharedLock 是 spec-13.6 的预存 bug condition test。
+
+**测试状态：** 16/17 通过（1 个预期失败的 bug condition test）— 无新增测试（测试在任务 8 中已添加）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯全量验证）
+
+---

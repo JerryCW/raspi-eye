@@ -4,6 +4,7 @@
 // HAVE_KVS_WEBRTC_SDK not defined: stub implementation (macOS / Linux without SDK)
 
 #include "webrtc_signaling.h"
+#include "webrtc_media.h"  // extract_sdp_summary
 #include "config_util.h"  // parse_bool_field
 
 #include <spdlog/spdlog.h>
@@ -106,6 +107,7 @@ struct WebRtcSignaling::Impl {
                 if (self->offer_cb) {
                     std::string sdp(pMsg->signalingMessage.payload,
                                     pMsg->signalingMessage.payloadLen);
+                    if (logger) logger->debug("SDP summary for peer {}: {}", peer_id, extract_sdp_summary(sdp));
                     self->offer_cb(peer_id, sdp);
                 } else {
                     if (logger) logger->warn(
@@ -114,7 +116,7 @@ struct WebRtcSignaling::Impl {
                 }
                 break;
             case SIGNALING_MESSAGE_TYPE_ICE_CANDIDATE:
-                if (logger) logger->info("Received ICE candidate from peer: {}", peer_id);
+                if (logger) logger->debug("Received ICE candidate from peer: {}", peer_id);
                 if (self->ice_cb) {
                     std::string candidate(pMsg->signalingMessage.payload,
                                           pMsg->signalingMessage.payloadLen);
@@ -413,8 +415,10 @@ bool WebRtcSignaling::send_answer(const std::string& peer_id,
         return false;
     }
     if (logger) logger->info("Sent SDP answer to peer: {}", peer_id);
+    if (logger) logger->debug("Answer SDP summary for peer {}: {}", peer_id, extract_sdp_summary(sdp_answer));
 #else
     if (logger) logger->info("Stub: sent SDP answer to peer: {}", peer_id);
+    if (logger) logger->debug("Answer SDP summary for peer {}: {}", peer_id, extract_sdp_summary(sdp_answer));
 #endif
     return true;
 }
@@ -447,9 +451,9 @@ bool WebRtcSignaling::send_ice_candidate(const std::string& peer_id,
                                   peer_id, status);
         return false;
     }
-    if (logger) logger->info("Sent ICE candidate to peer: {}", peer_id);
+    if (logger) logger->debug("Sent ICE candidate to peer: {}", peer_id);
 #else
-    if (logger) logger->info("Stub: sent ICE candidate to peer: {}", peer_id);
+    if (logger) logger->debug("Stub: sent ICE candidate to peer: {}", peer_id);
 #endif
     return true;
 }

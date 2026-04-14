@@ -7,6 +7,11 @@
 #include <memory>
 #include <string>
 
+// Extract codec names from SDP text (a=rtpmap: lines).
+// Returns comma-separated codec list, e.g. "H264, opus".
+// Returns empty string if input is empty or contains no rtpmap lines.
+std::string extract_sdp_summary(const std::string& sdp);
+
 class WebRtcSignaling;  // Forward declaration to avoid header dependency
 
 class WebRtcMediaManager {
