@@ -63,7 +63,7 @@ struct WebRtcMediaManager::Impl {
             }
             // 锁外清理（stub 中只是日志）
             if (!to_free.empty()) {
-                auto logger = spdlog::get("pipeline");
+                auto logger = spdlog::get("webrtc");
                 for (const auto& id : to_free) {
                     if (logger) logger->info("Stub cleanup: freed expired DISCONNECTING peer {}", id);
                 }
@@ -88,7 +88,7 @@ struct WebRtcMediaManager::Impl {
         }
         // 锁外清理（stub 中只是日志）
         if (!remaining.empty()) {
-            auto logger = spdlog::get("pipeline");
+            auto logger = spdlog::get("webrtc");
             for (const auto& id : remaining) {
                 if (logger) logger->info("Stub ~Impl: freed peer {}", id);
             }
@@ -101,7 +101,7 @@ std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
     std::string* /*error_msg*/) {
     auto obj = std::unique_ptr<WebRtcMediaManager>(new WebRtcMediaManager());
     obj->impl_ = std::make_unique<Impl>(signaling);
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
     if (logger) logger->info("Created WebRtcMediaManager stub");
     return obj;
 }
@@ -109,7 +109,7 @@ std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
 bool WebRtcMediaManager::on_viewer_offer(
     const std::string& peer_id, const std::string& /*sdp_offer*/,
     std::string* error_msg) {
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
 
     // peer_id 长度检查（不需要锁）
     if (peer_id.size() > kMaxPeerIdLen) {
@@ -170,7 +170,7 @@ bool WebRtcMediaManager::on_viewer_ice_candidate(
 }
 
 void WebRtcMediaManager::remove_peer(const std::string& peer_id) {
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
     std::vector<std::string> to_free;
     {
         std::unique_lock<std::shared_mutex> lock(impl_->peers_mutex);
@@ -333,7 +333,7 @@ struct WebRtcMediaManager::Impl {
             }
             // 锁外：close + free
             if (!to_free.empty()) {
-                auto logger = spdlog::get("pipeline");
+                auto logger = spdlog::get("webrtc");
                 for (auto& ptf : to_free) {
                     if (ptf.peer_connection) {
                         closePeerConnection(ptf.peer_connection);
@@ -354,7 +354,7 @@ struct WebRtcMediaManager::Impl {
         if (!ctx || !ctx->impl) return;
         if (candidate_json == NULL) return;
 
-        auto logger = spdlog::get("pipeline");
+        auto logger = spdlog::get("webrtc");
         if (logger) logger->debug("Sending ICE candidate to peer: {}", ctx->peer_id);
         ctx->impl->signaling.send_ice_candidate(ctx->peer_id,
                                                  std::string(candidate_json));
@@ -367,7 +367,7 @@ struct WebRtcMediaManager::Impl {
         auto* ctx = reinterpret_cast<CallbackContext*>(custom_data);
         if (!ctx || !ctx->impl) return;
 
-        auto logger = spdlog::get("pipeline");
+        auto logger = spdlog::get("webrtc");
         if (new_state == RTC_PEER_CONNECTION_STATE_CONNECTED) {
             std::unique_lock<std::shared_mutex> lock(ctx->impl->peers_mutex);
             if (logger) logger->info("Peer {} connected", ctx->peer_id);
@@ -406,7 +406,7 @@ struct WebRtcMediaManager::Impl {
         cv.notify_all();
         if (cleanup_thread.joinable()) cleanup_thread.join();
 
-        auto logger = spdlog::get("pipeline");
+        auto logger = spdlog::get("webrtc");
 
         // unique_lock 内：closePeerConnection 所有 peer，收集到 to_free
         std::vector<PeerToFree> to_free;
@@ -464,7 +464,7 @@ std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
     auto obj = std::unique_ptr<WebRtcMediaManager>(new WebRtcMediaManager());
     obj->impl_ = std::make_unique<Impl>(signaling);
     obj->impl_->region = aws_region;
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
     if (logger) logger->info("Created WebRtcMediaManager (KVS WebRTC SDK)");
     return obj;
 }
@@ -474,7 +474,7 @@ std::unique_ptr<WebRtcMediaManager> WebRtcMediaManager::create(
 bool WebRtcMediaManager::on_viewer_offer(
     const std::string& peer_id, const std::string& sdp_offer,
     std::string* error_msg) {
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
 
     // peer_id 长度检查（不需要锁）
     if (peer_id.size() > kMaxPeerIdLen) {
@@ -804,7 +804,7 @@ bool WebRtcMediaManager::on_viewer_ice_candidate(
     const std::string& peer_id, const std::string& candidate,
     std::string* error_msg) {
     std::unique_lock<std::shared_mutex> lock(impl_->peers_mutex);
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
 
     auto it = impl_->peers.find(peer_id);
     if (it == impl_->peers.end()) {
@@ -849,7 +849,7 @@ bool WebRtcMediaManager::on_viewer_ice_candidate(
 // ---- remove_peer ----
 
 void WebRtcMediaManager::remove_peer(const std::string& peer_id) {
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
     std::vector<PeerToFree> to_free;
     {
         std::unique_lock<std::shared_mutex> lock(impl_->peers_mutex);
@@ -897,7 +897,7 @@ void WebRtcMediaManager::broadcast_frame(
     std::shared_lock<std::shared_mutex> lock(impl_->peers_mutex);
     if (impl_->peers.empty()) return;
 
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
 
     for (auto& [id, info] : impl_->peers) {
         if (!info.video_transceiver) continue;

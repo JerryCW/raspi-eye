@@ -79,7 +79,7 @@ struct WebRtcSignaling::Impl {
     static STATUS on_signaling_state_changed(UINT64 custom_data,
                                              SIGNALING_CLIENT_STATE state) {
         auto* self = reinterpret_cast<Impl*>(custom_data);
-        auto logger = spdlog::get("pipeline");
+        auto logger = spdlog::get("webrtc");
         if (state == SIGNALING_CLIENT_STATE_CONNECTED) {
             self->connected = true;
             if (logger) logger->info("Signaling client connected to channel: {}",
@@ -97,7 +97,7 @@ struct WebRtcSignaling::Impl {
     static STATUS on_signaling_message_received(UINT64 custom_data,
                                                 PReceivedSignalingMessage pMsg) {
         auto* self = reinterpret_cast<Impl*>(custom_data);
-        auto logger = spdlog::get("pipeline");
+        auto logger = spdlog::get("webrtc");
         std::string peer_id(pMsg->signalingMessage.peerClientId);
 
         switch (pMsg->signalingMessage.messageType) {
@@ -161,7 +161,7 @@ struct WebRtcSignaling::Impl {
             }
             return false;
         }
-        auto logger = spdlog::get("pipeline");
+        auto logger = spdlog::get("webrtc");
         if (logger) logger->info("IoT credential provider initialized for thing: {}",
                                  aws_config.thing_name);
         return true;
@@ -307,7 +307,7 @@ struct WebRtcSignaling::Impl {
 
     bool create_and_connect(std::string* /*error_msg*/) {
         connected = true;
-        auto logger = spdlog::get("pipeline");
+        auto logger = spdlog::get("webrtc");
         if (logger) logger->info("WebRTC stub connected to channel: {}",
                                  config.channel_name);
         return true;
@@ -345,7 +345,7 @@ std::unique_ptr<WebRtcSignaling> WebRtcSignaling::create(
         return nullptr;
     }
 
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
 #ifdef HAVE_KVS_WEBRTC_SDK
     if (logger) logger->info("Created KVS WebRTC SignalingClient for channel: {}",
                              config.channel_name);
@@ -363,7 +363,7 @@ bool WebRtcSignaling::connect(std::string* error_msg) {
 
 void WebRtcSignaling::disconnect() {
     impl_->release_signaling_client();
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
     if (logger) logger->info("Signaling client disconnected");
 }
 
@@ -386,7 +386,7 @@ void WebRtcSignaling::set_ice_candidate_callback(IceCandidateCallback cb) {
 
 bool WebRtcSignaling::send_answer(const std::string& peer_id,
                                   const std::string& sdp_answer) {
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
     if (!impl_->connected) {
         if (logger) logger->warn("Cannot send answer: signaling client not connected");
         return false;
@@ -421,7 +421,7 @@ bool WebRtcSignaling::send_answer(const std::string& peer_id,
 
 bool WebRtcSignaling::send_ice_candidate(const std::string& peer_id,
                                          const std::string& candidate) {
-    auto logger = spdlog::get("pipeline");
+    auto logger = spdlog::get("webrtc");
     if (!impl_->connected) {
         if (logger) logger->warn("Cannot send ICE candidate: signaling client not connected");
         return false;

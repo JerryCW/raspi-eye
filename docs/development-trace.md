@@ -3911,3 +3911,23 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+### 2026-04-14 — 热修复：WebRTC 模块日志类别修正
+
+**完成概要：** webrtc_signaling.cpp（8 处）和 webrtc_media.cpp（14 处）中 `spdlog::get("pipeline")` 全部替换为 `spdlog::get("webrtc")`，使 WebRTC 相关日志正确显示 `[webrtc]` 类别。
+
+**测试状态：** 编译通过 — 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | WebRTC signaling/media 日志显示 `[pipeline]` 而非 `[webrtc]`，Pi 5 生产日志中无法区分管道日志和 WebRTC 日志 | Spec 缺少信息 | spec-12/13 实现时未指定 logger 名称，子代理沿用了 pipeline logger | sed 全局替换 `spdlog::get("pipeline")` → `spdlog::get("webrtc")` | 后续 Spec 中新增模块时，tasks.md 必须明确指定该模块使用的 spdlog logger 名称 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在非 pipeline 模块中使用 `spdlog::get("pipeline")` logger — 每个模块必须使用与其功能对应的 logger 名称（如 webrtc、ai、s3、kvs），确保日志可按模块过滤
+
+**涉及文件：** device/src/webrtc_signaling.cpp, device/src/webrtc_media.cpp
+
+---

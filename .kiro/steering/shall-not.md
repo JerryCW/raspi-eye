@@ -28,6 +28,10 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
   - 建议：通过环境变量、配置文件（已加入 .gitignore）或 AWS IoT 证书机制获取
 
 - SHALL NOT 在日志或错误输出中打印密钥、证书内容、token 等敏感信息（来源：安全基线）
+
+- SHALL NOT 在非 pipeline 模块中使用 `spdlog::get("pipeline")` logger（来源：spec-12/13 Pi 5 生产日志审查）
+  - 原因：所有模块共用 pipeline logger 导致日志无法按模块过滤，生产环境排查困难
+  - 建议：每个模块使用与其功能对应的 logger 名称（webrtc、ai、s3、kvs 等），在 Spec tasks.md 中明确指定
   - 原因：日志可能被收集到云端或共享给他人
   - 建议：日志中只输出资源标识（如 thing-name），不输出凭证内容
 
