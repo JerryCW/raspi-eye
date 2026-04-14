@@ -7,6 +7,8 @@
 #include <memory>
 #include <string>
 
+#include <gst/gst.h>
+
 // Extract codec names from SDP text (a=rtpmap: lines).
 // Returns comma-separated codec list, e.g. "H264, opus".
 // Returns empty string if input is empty or contains no rtpmap lines.
@@ -35,6 +37,12 @@ public:
                          uint64_t timestamp_100ns, bool is_keyframe);
 
     size_t peer_count() const;
+
+    // 设置 GStreamer pipeline 引用（用于 force-keyunit 事件，不拥有，不 unref）
+    void set_pipeline(GstElement* pipeline);
+
+    // 配置仅关键帧模式的 writeFrame 连续失败阈值
+    void set_writeframe_fail_threshold(int threshold);
 
     ~WebRtcMediaManager();
     WebRtcMediaManager(const WebRtcMediaManager&) = delete;

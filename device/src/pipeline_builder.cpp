@@ -2,6 +2,7 @@
 // Dual-tee pipeline construction using GStreamer C API.
 #include "pipeline_builder.h"
 #include "camera_source.h"
+#include "config_manager.h"  // KvsSinkConfig
 #include "kvs_sink_factory.h"
 #include "webrtc_media.h"
 #ifdef ENABLE_YOLO
@@ -138,7 +139,8 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
                                                 const KvsSinkFactory::KvsConfig* kvs_config,
                                                 const AwsConfig* aws_config,
                                                 WebRtcMediaManager* webrtc_media,
-                                                AiPipelineHandler* ai_handler) {
+                                                AiPipelineHandler* ai_handler,
+                                                const KvsSinkConfig* kvs_sink_config) {
     // 1. Pipeline container
     GstElement* pipeline = gst_pipeline_new("tee-pipeline");
     if (!pipeline) {
@@ -177,7 +179,7 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     GstElement* avc_caps  = gst_element_factory_make("capsfilter",    "avc-caps");
     GstElement* kvs_sink  = nullptr;
     if (kvs_config && aws_config) {
-        kvs_sink = KvsSinkFactory::create_kvs_sink(*kvs_config, *aws_config, error_msg);
+        kvs_sink = KvsSinkFactory::create_kvs_sink(*kvs_config, *aws_config, kvs_sink_config, error_msg);
     } else {
         kvs_sink = gst_element_factory_make("fakesink", "kvs-sink");
     }

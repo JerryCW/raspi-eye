@@ -70,6 +70,12 @@ aws_region = "<your-aws-region>"
 # bitrate_eval_interval_sec: evaluation interval in seconds (default: 5)
 # bitrate_rampup_interval_sec: ramp-up interval in seconds (default: 30)
 # debounce_sec: stream mode switch debounce in seconds (default: 3)
+# buffer_duration_sec: kvssink buffer-duration in seconds (default: 180)
+# latency_pressure_threshold: pressure events in 10s window to trigger UNHEALTHY (default: 5)
+# latency_pressure_cooldown_sec: seconds after last pressure before recovery (default: 30)
+# bandwidth_probe_enabled: enable startup bandwidth estimation (default: true)
+# bandwidth_probe_duration_sec: probe measurement duration in seconds (default: 10)
+# writeframe_fail_threshold: consecutive writeFrame failures for UNHEALTHY (default: 10)
 [streaming]
 # bitrate_min_kbps = 1000
 # bitrate_max_kbps = 4000
@@ -78,6 +84,12 @@ aws_region = "<your-aws-region>"
 # bitrate_eval_interval_sec = 5
 # bitrate_rampup_interval_sec = 30
 # debounce_sec = 3
+# buffer_duration_sec = 180
+# latency_pressure_threshold = 5
+# latency_pressure_cooldown_sec = 30
+# bandwidth_probe_enabled = true
+# bandwidth_probe_duration_sec = 10
+# writeframe_fail_threshold = 10
 
 # Logging configuration (optional, defaults: level=info, format=text)
 # level: trace | debug | info | warn | error

@@ -17,6 +17,7 @@
 #include "camera_source.h"
 #include "kvs_sink_factory.h"
 
+struct KvsSinkConfig;       // Forward declaration
 class WebRtcMediaManager;  // Forward declaration
 class AiPipelineHandler;   // Forward declaration
 
@@ -29,12 +30,14 @@ namespace PipelineBuilder {
 // When kvs_config and aws_config are non-null, KvsSinkFactory creates the KVS sink.
 // When nullptr (default), a fakesink is used (backward compatible).
 // When webrtc_media is non-null, an appsink replaces the webrtc fakesink.
+// When kvs_sink_config is non-null, avg-bandwidth-bps and buffer-duration are set on kvssink.
 GstElement* build_tee_pipeline(
     std::string* error_msg = nullptr,
     CameraSource::CameraConfig config = CameraSource::CameraConfig{},
     const KvsSinkFactory::KvsConfig* kvs_config = nullptr,
     const AwsConfig* aws_config = nullptr,
     WebRtcMediaManager* webrtc_media = nullptr,
-    AiPipelineHandler* ai_handler = nullptr);
+    AiPipelineHandler* ai_handler = nullptr,
+    const KvsSinkConfig* kvs_sink_config = nullptr);
 
 } // namespace PipelineBuilder

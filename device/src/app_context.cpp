@@ -5,9 +5,11 @@
 #include <spdlog/spdlog.h>
 
 #include "bitrate_adapter.h"
+#include "bandwidth_probe.h"
 #include "config_manager.h"
 #include "credential_provider.h"
 #include "kvs_sink_factory.h"
+#include "network_monitor.h"
 #include "pipeline_builder.h"
 #include "pipeline_health.h"
 #include "pipeline_manager.h"
@@ -44,6 +46,8 @@ struct AppContext::Impl {
     std::unique_ptr<PipelineHealthMonitor> health_monitor;
     std::unique_ptr<StreamModeController> stream_controller;
     std::unique_ptr<BitrateAdapter> bitrate_adapter;
+    std::unique_ptr<NetworkMonitor> network_monitor;
+    std::unique_ptr<BandwidthProbe> bandwidth_probe;
 
 #ifdef ENABLE_YOLO
     std::unique_ptr<AiPipelineHandler> ai_handler_;
@@ -219,6 +223,12 @@ bool AppContext::start(std::string* error_msg) {
     // WebRTC: init 阶段已决定，直接用 media_manager 指针（可能为 nullptr）
     WebRtcMediaManager* webrtc_ptr = impl_->media_manager.get();
 
+    // 计算 KvsSinkConfig（在 pipeline 构建前准备好）
+    auto bitrate_config = to_bitrate_config(impl_->streaming_config);
+    auto kvs_sink_config = to_kvssink_config(impl_->streaming_config, bitrate_config);
+    const KvsSinkConfig* kvs_sink_config_ptr =
+        impl_->kvs_config.enabled ? &kvs_sink_config : nullptr;
+
     AiPipelineHandler* ai_ptr = nullptr;
 #ifdef ENABLE_YOLO
     ai_ptr = impl_->ai_handler_.get();
@@ -229,7 +239,8 @@ bool AppContext::start(std::string* error_msg) {
         kvs_ptr,
         aws_ptr,
         webrtc_ptr,
-        ai_ptr);
+        ai_ptr,
+        kvs_sink_config_ptr);
     if (!pipeline) {
         return false;
     }
@@ -267,7 +278,7 @@ bool AppContext::start(std::string* error_msg) {
     // --- Create BitrateAdapter ---
     impl_->bitrate_adapter = std::make_unique<BitrateAdapter>(
         impl_->pipeline_manager->pipeline(),
-        to_bitrate_config(impl_->streaming_config));
+        bitrate_config);
 
     // --- Register mode change callback: notify BitrateAdapter ---
     impl_->stream_controller->set_mode_change_callback(
@@ -275,6 +286,33 @@ bool AppContext::start(std::string* error_msg) {
                const std::string& /*reason*/) {
             impl_->bitrate_adapter->on_mode_changed(old_mode, new_mode);
         });
+
+    // --- Create NetworkMonitor ---
+    NetworkConfig net_config;
+    net_config.latency_pressure_threshold = impl_->streaming_config.latency_pressure_threshold;
+    net_config.latency_pressure_cooldown_sec = impl_->streaming_config.latency_pressure_cooldown_sec;
+    net_config.writeframe_fail_threshold = impl_->streaming_config.writeframe_fail_threshold;
+    net_config.writeframe_recovery_count = 50;  // 固定值
+    impl_->network_monitor = std::make_unique<NetworkMonitor>(net_config);
+    impl_->network_monitor->set_bitrate_adapter(impl_->bitrate_adapter.get());
+    impl_->network_monitor->set_stream_mode_controller(impl_->stream_controller.get());
+
+    // --- Create BandwidthProbe ---
+    BandwidthProbe::ProbeConfig probe_config;
+    probe_config.enabled = impl_->streaming_config.bandwidth_probe_enabled;
+    probe_config.duration_sec = impl_->streaming_config.bandwidth_probe_duration_sec;
+    impl_->bandwidth_probe = std::make_unique<BandwidthProbe>(probe_config);
+    impl_->bandwidth_probe->start_probe(
+        impl_->pipeline_manager->pipeline(),
+        impl_->bitrate_adapter.get(),
+        bitrate_config);
+
+    // --- Set pipeline reference and writeframe threshold on WebRtcMediaManager ---
+    if (impl_->media_manager) {
+        impl_->media_manager->set_pipeline(impl_->pipeline_manager->pipeline());
+        impl_->media_manager->set_writeframe_fail_threshold(
+            impl_->streaming_config.writeframe_fail_threshold);
+    }
 
     // --- Register rebuild callback ---
     impl_->health_monitor->set_rebuild_callback([this]() -> GstElement* {
@@ -291,6 +329,12 @@ bool AppContext::start(std::string* error_msg) {
             impl_->kvs_config.enabled ? &impl_->aws_config : nullptr;
         WebRtcMediaManager* webrtc_ptr = impl_->media_manager.get();
 
+        // rebuild 时重新计算 KvsSinkConfig
+        auto rebuild_bitrate_config = to_bitrate_config(impl_->streaming_config);
+        auto rebuild_kvs_sink_config = to_kvssink_config(impl_->streaming_config, rebuild_bitrate_config);
+        const KvsSinkConfig* rebuild_kvs_sink_config_ptr =
+            impl_->kvs_config.enabled ? &rebuild_kvs_sink_config : nullptr;
+
         AiPipelineHandler* ai_rebuild_ptr = nullptr;
 #ifdef ENABLE_YOLO
         ai_rebuild_ptr = impl_->ai_handler_.get();
@@ -301,7 +345,8 @@ bool AppContext::start(std::string* error_msg) {
             kvs_ptr,
             aws_ptr,
             webrtc_ptr,
-            ai_rebuild_ptr);
+            ai_rebuild_ptr,
+            rebuild_kvs_sink_config_ptr);
         if (!p) return nullptr;
 
         auto new_pm = PipelineManager::create(p, &err);
@@ -317,6 +362,11 @@ bool AppContext::start(std::string* error_msg) {
             impl_->pipeline_manager->pipeline());
         impl_->bitrate_adapter->set_pipeline(
             impl_->pipeline_manager->pipeline());
+        // 更新 WebRtcMediaManager 的 pipeline 引用
+        if (impl_->media_manager) {
+            impl_->media_manager->set_pipeline(
+                impl_->pipeline_manager->pipeline());
+        }
 #ifdef ENABLE_YOLO
         if (impl_->ai_handler_) {
             impl_->ai_handler_->start();
@@ -340,6 +390,9 @@ bool AppContext::start(std::string* error_msg) {
     impl_->stream_controller->start();
     impl_->bitrate_adapter->start();
 
+    // --- Start network monitor ---
+    impl_->network_monitor->start();
+
     // --- Start health monitoring ---
     impl_->health_monitor->start("src");
 
@@ -349,6 +402,9 @@ bool AppContext::start(std::string* error_msg) {
     // they stop before health_monitor.
     impl_->shutdown_handler.register_step("health_monitor", [this]() {
         impl_->health_monitor->stop();
+    });
+    impl_->shutdown_handler.register_step("network_monitor", [this]() {
+        impl_->network_monitor->stop();
     });
     impl_->shutdown_handler.register_step("stream_controller", [this]() {
         impl_->stream_controller->stop();

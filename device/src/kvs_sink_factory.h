@@ -7,6 +7,9 @@
 #include <unordered_map>
 #include "credential_provider.h"  // AwsConfig, parse_toml_section
 
+// Forward declaration (defined in config_manager.h)
+struct KvsSinkConfig;
+
 namespace KvsSinkFactory {
 
 // KVS stream configuration (parsed from TOML [kvs] section)
@@ -31,10 +34,12 @@ std::string build_iot_certificate_string(const AwsConfig& aws_config);
 // - Linux: try kvssink, fall back to fakesink if unavailable
 // - macOS: create fakesink stub
 // Sets stream-name, aws-region, iot-certificate properties (kvssink only).
+// If sink_config is non-null, also sets avg-bandwidth-bps and buffer-duration.
 // Returns nullptr and fills error_msg on failure.
 GstElement* create_kvs_sink(
     const KvsConfig& kvs_config,
     const AwsConfig& aws_config,
+    const KvsSinkConfig* sink_config = nullptr,
     std::string* error_msg = nullptr);
 
 }  // namespace KvsSinkFactory

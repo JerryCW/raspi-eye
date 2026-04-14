@@ -1,6 +1,7 @@
 // kvs_test.cpp
 // KVS sink factory tests: 6 example-based + 3 PBT properties.
 #include "kvs_sink_factory.h"
+#include "config_manager.h"  // KvsSinkConfig
 #include "pipeline_builder.h"
 
 #include <cstdio>
@@ -93,7 +94,7 @@ TEST(KvsSinkFactory, MacOsCreatesFakesink) {
     aws_cfg.role_alias = "TestAlias";
 
     std::string err;
-    GstElement* sink = KvsSinkFactory::create_kvs_sink(kvs_cfg, aws_cfg, &err);
+    GstElement* sink = KvsSinkFactory::create_kvs_sink(kvs_cfg, aws_cfg, nullptr, &err);
     ASSERT_NE(sink, nullptr) << "create_kvs_sink failed: " << err;
 
     // On macOS (or Linux without kvssink), should be fakesink
@@ -176,7 +177,7 @@ TEST(KvsSinkFactory, FakesinkSkipsIotCertificate) {
     aws_cfg.role_alias = "TestAlias";
 
     std::string err;
-    GstElement* sink = KvsSinkFactory::create_kvs_sink(kvs_cfg, aws_cfg, &err);
+    GstElement* sink = KvsSinkFactory::create_kvs_sink(kvs_cfg, aws_cfg, nullptr, &err);
     ASSERT_NE(sink, nullptr) << "create_kvs_sink failed: " << err;
 
     // On macOS, this is a fakesink. Verify it does NOT have iot-certificate property.
@@ -222,6 +223,69 @@ TEST(KvsSinkFactory, PipelineTopologyUnchanged) {
     }
 
     gst_object_unref(pipeline);
+}
+
+// 7. KvsSinkConfigDoesNotCrash: create_kvs_sink with KvsSinkConfig on fakesink
+//    does not crash (fakesink ignores unknown properties gracefully).
+//    On Linux with real kvssink, skip (fake credentials crash kvssink).
+// **Validates: Requirements 2.1, 2.2**
+TEST(KvsSinkFactory, KvsSinkConfigDoesNotCrash) {
+    if (kvssink_available()) {
+        GTEST_SKIP() << "Real kvssink available; skipping fakesink KvsSinkConfig test";
+    }
+
+    KvsSinkFactory::KvsConfig kvs_cfg;
+    kvs_cfg.stream_name = "TestStream";
+    kvs_cfg.aws_region = "us-east-1";
+
+    AwsConfig aws_cfg;
+    aws_cfg.credential_endpoint = "endpoint.example.com";
+    aws_cfg.cert_path = "/tmp/cert.pem";
+    aws_cfg.key_path = "/tmp/key.pem";
+    aws_cfg.ca_path = "/tmp/ca.pem";
+    aws_cfg.role_alias = "TestAlias";
+
+    KvsSinkConfig sink_config;
+    sink_config.avg_bandwidth_bps = 2000000;
+    sink_config.buffer_duration_sec = 120;
+
+    std::string err;
+    GstElement* sink = KvsSinkFactory::create_kvs_sink(kvs_cfg, aws_cfg, &sink_config, &err);
+    ASSERT_NE(sink, nullptr) << "create_kvs_sink with KvsSinkConfig failed: " << err;
+
+    // fakesink does not have avg-bandwidth-bps or buffer-duration properties,
+    // but create_kvs_sink should handle this gracefully (property check before set).
+    GObjectClass* klass = G_OBJECT_GET_CLASS(sink);
+    EXPECT_EQ(g_object_class_find_property(klass, "avg-bandwidth-bps"), nullptr)
+        << "fakesink should not have avg-bandwidth-bps property";
+    EXPECT_EQ(g_object_class_find_property(klass, "buffer-duration"), nullptr)
+        << "fakesink should not have buffer-duration property";
+
+    gst_object_unref(sink);
+}
+
+// 8. KvsSinkConfigNullptr: create_kvs_sink with nullptr sink_config still works
+// **Validates: Requirements 2.1, 2.2**
+TEST(KvsSinkFactory, KvsSinkConfigNullptr) {
+    if (kvssink_available()) {
+        GTEST_SKIP() << "Real kvssink available; skipping fakesink nullptr test";
+    }
+
+    KvsSinkFactory::KvsConfig kvs_cfg;
+    kvs_cfg.stream_name = "TestStream";
+    kvs_cfg.aws_region = "us-east-1";
+
+    AwsConfig aws_cfg;
+    aws_cfg.credential_endpoint = "endpoint.example.com";
+    aws_cfg.cert_path = "/tmp/cert.pem";
+    aws_cfg.key_path = "/tmp/key.pem";
+    aws_cfg.ca_path = "/tmp/ca.pem";
+    aws_cfg.role_alias = "TestAlias";
+
+    std::string err;
+    GstElement* sink = KvsSinkFactory::create_kvs_sink(kvs_cfg, aws_cfg, nullptr, &err);
+    ASSERT_NE(sink, nullptr) << "create_kvs_sink with nullptr sink_config failed: " << err;
+    gst_object_unref(sink);
 }
 
 // ============================================================

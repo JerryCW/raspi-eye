@@ -2,6 +2,7 @@
 // BitrateAdapter example-based tests + PBT properties.
 // Custom main(): gst_init required before any GStreamer API calls.
 #include "bitrate_adapter.h"
+#include "bandwidth_probe.h"
 #include "stream_mode_controller.h"
 
 #include <gst/gst.h>
@@ -118,6 +119,44 @@ RC_GTEST_PROP(BitratePBT, BitrateRangeInvariant, ()) {
             RC_ASSERT(bitrate >= prev);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Feature: network-adaptive-bitrate, Property 3: Bandwidth probe bitrate calculation
+// **Validates: Requirements 4.2, 4.3, 4.4**
+// ---------------------------------------------------------------------------
+
+RC_GTEST_PROP(BandwidthProbePBT, BandwidthProbeBitrateCalculation, ()) {
+    // 生成随机估算带宽（0~100000 kbps）
+    auto estimated_bw = *rc::gen::inRange(0, 100001);
+
+    // 生成有效 BitrateConfig：min < max, step > 0, step 能整除 (max - min)
+    auto min_kbps = *rc::gen::inRange(100, 5000);
+    auto step_kbps = *rc::gen::inRange(100, 1000);
+    // max 必须 > min，且 (max - min) >= step
+    auto num_steps = *rc::gen::inRange(1, 20);
+    int max_kbps = min_kbps + step_kbps * num_steps;
+
+    BitrateConfig config;
+    config.min_kbps = min_kbps;
+    config.max_kbps = max_kbps;
+    config.step_kbps = step_kbps;
+    config.default_kbps = min_kbps + step_kbps;  // 合法默认值
+
+    int result = compute_initial_bitrate(estimated_bw, config);
+
+    // 属性 1：结果 ∈ [min, max]
+    RC_ASSERT(result >= config.min_kbps);
+    RC_ASSERT(result <= config.max_kbps);
+
+    // 属性 2：结果 ≤ estimated × 0.8（除非 estimated × 0.8 < min）
+    int target = estimated_bw * 4 / 5;
+    if (target >= config.min_kbps) {
+        RC_ASSERT(result <= target);
+    }
+
+    // 属性 3：(结果 - min) % step == 0（对齐到 step 档位）
+    RC_ASSERT((result - config.min_kbps) % config.step_kbps == 0);
 }
 
 // ---------------------------------------------------------------------------

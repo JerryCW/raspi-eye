@@ -1171,3 +1171,191 @@ RC_GTEST_PROP(EventPipelinePBT, IdleFpsLessThanActiveFpsCrossValidation, ()) {
     RC_ASSERT(err.find("idle_fps") != std::string::npos);
     RC_ASSERT(err.find("active_fps") != std::string::npos);
 }
+
+// ===========================================================================
+// Task 1.3: 网络自适应配置 Example-based 单元测试
+// Feature: network-adaptive-bitrate
+// ===========================================================================
+
+// 空 map 默认值验证（6 个新字段都取默认值）
+TEST(ConfigExampleTest, ParseStreamingConfig_EmptyMap_NetworkDefaults) {
+    std::unordered_map<std::string, std::string> kv;
+    StreamingConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_streaming_config(kv, config, &err));
+    EXPECT_EQ(config.buffer_duration_sec, 180);
+    EXPECT_EQ(config.latency_pressure_threshold, 5);
+    EXPECT_EQ(config.latency_pressure_cooldown_sec, 30);
+    EXPECT_TRUE(config.bandwidth_probe_enabled);
+    EXPECT_EQ(config.bandwidth_probe_duration_sec, 10);
+    EXPECT_EQ(config.writeframe_fail_threshold, 10);
+}
+
+// 完整 kv map 解析验证（6 个新字段全部指定非默认值）
+TEST(ConfigExampleTest, ParseStreamingConfig_ValidComplete_NetworkFields) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"buffer_duration_sec", "240"},
+        {"latency_pressure_threshold", "8"},
+        {"latency_pressure_cooldown_sec", "60"},
+        {"bandwidth_probe_enabled", "false"},
+        {"bandwidth_probe_duration_sec", "15"},
+        {"writeframe_fail_threshold", "20"},
+    };
+    StreamingConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_streaming_config(kv, config, &err));
+    EXPECT_EQ(config.buffer_duration_sec, 240);
+    EXPECT_EQ(config.latency_pressure_threshold, 8);
+    EXPECT_EQ(config.latency_pressure_cooldown_sec, 60);
+    EXPECT_FALSE(config.bandwidth_probe_enabled);
+    EXPECT_EQ(config.bandwidth_probe_duration_sec, 15);
+    EXPECT_EQ(config.writeframe_fail_threshold, 20);
+}
+
+// 无效值拒绝验证（负数）
+TEST(ConfigExampleTest, ParseStreamingConfig_NegativeValue_Rejected) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"buffer_duration_sec", "-1"},
+    };
+    StreamingConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_streaming_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+// 无效值拒绝验证（零）
+TEST(ConfigExampleTest, ParseStreamingConfig_ZeroValue_Rejected) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"writeframe_fail_threshold", "0"},
+    };
+    StreamingConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_streaming_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+// ===========================================================================
+// Task 1.4: PBT — 属性 4：配置解析 round-trip
+// Feature: network-adaptive-bitrate, Property 4: Config parse round-trip
+// **Validates: Requirements 5.1, 5.2**
+// ===========================================================================
+
+RC_GTEST_PROP(NetworkAdaptivePBT, ConfigParseRoundTrip, ()) {
+    // 生成随机有效 StreamingConfig（所有字段在合法范围内）
+    // 原有 7 个字段允许任意非负值
+    int bitrate_min_kbps = *rc::gen::inRange(0, 10001);
+    int bitrate_max_kbps = *rc::gen::inRange(0, 10001);
+    int bitrate_step_kbps = *rc::gen::inRange(0, 10001);
+    int bitrate_default_kbps = *rc::gen::inRange(0, 10001);
+    int bitrate_eval_interval_sec = *rc::gen::inRange(0, 10001);
+    int bitrate_rampup_interval_sec = *rc::gen::inRange(0, 10001);
+    int debounce_sec = *rc::gen::inRange(0, 10001);
+
+    // 新增 5 个正整数字段（必须 > 0）
+    int buffer_duration_sec = *rc::gen::inRange(1, 10001);
+    int latency_pressure_threshold = *rc::gen::inRange(1, 10001);
+    int latency_pressure_cooldown_sec = *rc::gen::inRange(1, 10001);
+    int bandwidth_probe_duration_sec = *rc::gen::inRange(1, 10001);
+    int writeframe_fail_threshold = *rc::gen::inRange(1, 10001);
+    bool bandwidth_probe_enabled = *rc::gen::arbitrary<bool>();
+
+    // 序列化为 kv map
+    std::unordered_map<std::string, std::string> kv = {
+        {"bitrate_min_kbps", std::to_string(bitrate_min_kbps)},
+        {"bitrate_max_kbps", std::to_string(bitrate_max_kbps)},
+        {"bitrate_step_kbps", std::to_string(bitrate_step_kbps)},
+        {"bitrate_default_kbps", std::to_string(bitrate_default_kbps)},
+        {"bitrate_eval_interval_sec", std::to_string(bitrate_eval_interval_sec)},
+        {"bitrate_rampup_interval_sec", std::to_string(bitrate_rampup_interval_sec)},
+        {"debounce_sec", std::to_string(debounce_sec)},
+        {"buffer_duration_sec", std::to_string(buffer_duration_sec)},
+        {"latency_pressure_threshold", std::to_string(latency_pressure_threshold)},
+        {"latency_pressure_cooldown_sec", std::to_string(latency_pressure_cooldown_sec)},
+        {"bandwidth_probe_enabled", bandwidth_probe_enabled ? "true" : "false"},
+        {"bandwidth_probe_duration_sec", std::to_string(bandwidth_probe_duration_sec)},
+        {"writeframe_fail_threshold", std::to_string(writeframe_fail_threshold)},
+    };
+
+    // 解析
+    StreamingConfig config;
+    std::string err;
+    bool result = parse_streaming_config(kv, config, &err);
+    RC_ASSERT(result == true);
+
+    // 验证等价
+    RC_ASSERT(config.bitrate_min_kbps == bitrate_min_kbps);
+    RC_ASSERT(config.bitrate_max_kbps == bitrate_max_kbps);
+    RC_ASSERT(config.bitrate_step_kbps == bitrate_step_kbps);
+    RC_ASSERT(config.bitrate_default_kbps == bitrate_default_kbps);
+    RC_ASSERT(config.bitrate_eval_interval_sec == bitrate_eval_interval_sec);
+    RC_ASSERT(config.bitrate_rampup_interval_sec == bitrate_rampup_interval_sec);
+    RC_ASSERT(config.debounce_sec == debounce_sec);
+    RC_ASSERT(config.buffer_duration_sec == buffer_duration_sec);
+    RC_ASSERT(config.latency_pressure_threshold == latency_pressure_threshold);
+    RC_ASSERT(config.latency_pressure_cooldown_sec == latency_pressure_cooldown_sec);
+    RC_ASSERT(config.bandwidth_probe_enabled == bandwidth_probe_enabled);
+    RC_ASSERT(config.bandwidth_probe_duration_sec == bandwidth_probe_duration_sec);
+    RC_ASSERT(config.writeframe_fail_threshold == writeframe_fail_threshold);
+}
+
+// ===========================================================================
+// Task 1.5: PBT — 属性 5：无效配置拒绝
+// Feature: network-adaptive-bitrate, Property 5: Invalid config rejected
+// **Validates: Requirements 5.3**
+// ===========================================================================
+
+RC_GTEST_PROP(NetworkAdaptivePBT, InvalidConfigRejected, ()) {
+    // 5 个必须为正整数的字段名
+    static const std::vector<std::string> positive_fields = {
+        "buffer_duration_sec",
+        "latency_pressure_threshold",
+        "latency_pressure_cooldown_sec",
+        "bandwidth_probe_duration_sec",
+        "writeframe_fail_threshold",
+    };
+
+    // 随机选择一个字段注入无效值
+    auto field_name = *rc::gen::elementOf(positive_fields);
+
+    // 生成无效值：负数或零
+    bool use_zero = *rc::gen::arbitrary<bool>();
+    int invalid_value;
+    if (use_zero) {
+        invalid_value = 0;
+    } else {
+        invalid_value = *rc::gen::inRange(-10000, 0);  // 负数
+    }
+
+    std::unordered_map<std::string, std::string> kv = {
+        {field_name, std::to_string(invalid_value)},
+    };
+
+    StreamingConfig config;
+    std::string err;
+    bool result = parse_streaming_config(kv, config, &err);
+    RC_ASSERT(result == false);
+    RC_ASSERT(!err.empty());
+}
+
+// ===========================================================================
+// Task 1.6: PBT — 属性 8：kvssink 属性初始化
+// Feature: network-adaptive-bitrate, Property 8: KvsSink config initialization
+// **Validates: Requirements 2.1, 2.2**
+// ===========================================================================
+
+RC_GTEST_PROP(NetworkAdaptivePBT, KvsSinkConfigInitialization, ()) {
+    // 生成随机有效 StreamingConfig
+    StreamingConfig sc;
+    sc.buffer_duration_sec = *rc::gen::inRange(1, 10001);
+
+    // 生成随机有效 BitrateConfig
+    BitrateConfig bc;
+    bc.default_kbps = *rc::gen::inRange(1, 10001);
+
+    KvsSinkConfig kc = to_kvssink_config(sc, bc);
+
+    // 验证：avg_bandwidth_bps == default_kbps × 1000
+    RC_ASSERT(kc.avg_bandwidth_bps == bc.default_kbps * 1000);
+    // 验证：buffer_duration_sec == StreamingConfig.buffer_duration_sec
+    RC_ASSERT(kc.buffer_duration_sec == sc.buffer_duration_sec);
+}

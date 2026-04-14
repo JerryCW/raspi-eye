@@ -1,7 +1,8 @@
 // kvs_sink_factory.cpp
 // KVS sink element factory implementation.
 #include "kvs_sink_factory.h"
-#include "config_util.h"  // parse_bool_field
+#include "config_manager.h"  // KvsSinkConfig
+#include "config_util.h"     // parse_bool_field
 #include <spdlog/spdlog.h>
 #include <vector>
 
@@ -59,6 +60,7 @@ std::string build_iot_certificate_string(const AwsConfig& aws_config) {
 GstElement* create_kvs_sink(
     const KvsConfig& kvs_config,
     const AwsConfig& aws_config,
+    const KvsSinkConfig* sink_config,
     std::string* error_msg) {
     auto pl = spdlog::get("pipeline");
 
@@ -94,6 +96,22 @@ GstElement* create_kvs_sink(
     // Log only stream-name and aws-region (no credential paths)
     if (pl) pl->info("Created kvssink: stream-name={}, aws-region={}",
                      kvs_config.stream_name, kvs_config.aws_region);
+
+    // 设置 avg-bandwidth-bps 和 buffer-duration（如果提供了 sink_config）
+    if (sink_config) {
+        GObjectClass* klass = G_OBJECT_GET_CLASS(sink);
+        if (g_object_class_find_property(klass, "avg-bandwidth-bps")) {
+            g_object_set(G_OBJECT(sink), "avg-bandwidth-bps",
+                         static_cast<guint>(sink_config->avg_bandwidth_bps), nullptr);
+        }
+        if (g_object_class_find_property(klass, "buffer-duration")) {
+            g_object_set(G_OBJECT(sink), "buffer-duration",
+                         static_cast<guint64>(sink_config->buffer_duration_sec) * GST_SECOND,
+                         nullptr);
+        }
+        if (pl) pl->info("kvssink configured: avg-bandwidth-bps={}, buffer-duration={}s",
+                         sink_config->avg_bandwidth_bps, sink_config->buffer_duration_sec);
+    }
 #else
     (void)aws_config;  // unused on macOS
     GstElement* sink = gst_element_factory_make("fakesink", "kvs-sink");

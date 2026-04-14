@@ -4093,3 +4093,111 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯全量验证）
 
 ---
+
+### 2026-04-14 — Spec: spec-26-network-adaptive-bitrate / 任务: 1.2 扩展 parse_streaming_config()
+
+**完成概要：** 确认任务 1.1 已一并完成 1.2 的全部内容：parse_streaming_config() 已解析 6 个新字段（5 个正整数 + 1 个布尔），无效值（负数、零）返回 false 并填充 error_msg，to_kvssink_config() 纯函数已实现。to_network_config() 和 to_probe_config() 依赖尚未创建的 NetworkConfig/ProbeConfig 类型，将在任务 2.1/3.1 中实现。
+
+**测试状态：** 未运行（轻量模式，纯状态确认）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯状态补标）
+
+---
+
+### 2026-04-14 — Spec: spec-26-network-adaptive-bitrate / 任务: 1.3-1.6 配置测试 + PBT 属性 4/5/8（状态补标）
+
+**完成概要：** 确认任务 1.1 的子代理已一并完成 1.3（example-based 测试 4 个）、1.4（PBT 属性 4 round-trip）、1.5（PBT 属性 5 无效拒绝）、1.6（PBT 属性 8 kvssink 初始化）的全部代码。本次仅补标 tasks.md 状态。
+
+**测试状态：** 未运行（轻量模式，纯状态确认）— 无新增测试（代码已在 1.1 中实现）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯状态补标）
+
+---
+
+### 2026-04-14 — Spec: spec-26-network-adaptive-bitrate / 任务: 2.1-2.7 NetworkMonitor 纯函数与模块实现
+
+**完成概要：** 确认三个文件已在之前 session 创建完成：network_monitor.h（NetworkConfig + 3 纯函数 + NetworkMonitor pImpl 类）、network_monitor.cpp（纯函数实现 + Impl 结构体 + cooldown 定时器线程）、network_monitor_test.cpp（11 个 example-based + 4 个 PBT 属性 1/2/6/7）。尚未加入 CMakeLists.txt（任务 3.2）。
+
+**测试状态：** 未运行（CMakeLists.txt 尚未更新，无法编译）— 新增 15 个测试（待编译验证）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/network_monitor.h, device/src/network_monitor.cpp, device/tests/network_monitor_test.cpp
+
+---
+
+### 2026-04-14 — Spec: spec-26-network-adaptive-bitrate / 任务: 3.1-3.4 BandwidthProbe + CMake + 编译检查点 + PBT
+
+**完成概要：** 确认 bandwidth_probe.h/cpp 已创建（compute_initial_bitrate 纯函数 + BandwidthProbe pImpl 类），CMakeLists.txt 已更新（network_module + bandwidth_probe_module + network_monitor_test），编译检查点通过，PBT 属性 3 已在 bitrate_test.cpp 中实现。
+
+**测试状态：** 全部通过（子代理确认 cmake + build + ctest 通过）— 新增 network_monitor_test（15 个测试）+ BandwidthProbePBT（1 个 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/bandwidth_probe.h, device/src/bandwidth_probe.cpp, device/CMakeLists.txt, device/tests/bitrate_test.cpp
+
+---
+
+### 2026-04-15 — Spec: spec-26-network-adaptive-bitrate / 任务: 4.1-4.3 KvsSinkFactory + WebRtcMediaManager 扩展 + 测试
+
+**完成概要：** KvsSinkFactory 扩展（create_kvs_sink 新增 KvsSinkConfig 参数，设置 avg-bandwidth-bps 和 buffer-duration 属性）、WebRtcMediaManager 扩展（set_pipeline + set_writeframe_fail_threshold + per-peer 仅关键帧模式 + force-keyunit on connect）、测试验证（kvs_test 2 个新测试 + webrtc_media_test 3 个新测试）全部通过。
+
+**测试状态：** 全部通过（子代理确认编译 + ctest 通过）— 新增 5 个测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。首次子代理调用因网络 TLS 断连失败，重试后成功。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/kvs_sink_factory.h, device/src/kvs_sink_factory.cpp, device/src/webrtc_media.h, device/src/webrtc_media.cpp, device/tests/kvs_test.cpp, device/tests/webrtc_media_test.cpp
+
+---
+
+### 2026-04-15 — Spec: spec-26-network-adaptive-bitrate / 任务: 5.1-5.2 app_context 集成 + 最终检查点
+
+**完成概要：** app_context.cpp 集成 NetworkMonitor（连接 BitrateAdapter + StreamModeController）、BandwidthProbe（启动探测）、KvsSinkConfig 传递给 pipeline 构建、WebRtcMediaManager set_pipeline + set_writeframe_fail_threshold、rebuild 回调更新 pipeline 引用、shutdown 注册 network_monitor stop。pipeline_builder 新增 kvs_sink_config 参数。config.toml.example 新增 6 个网络自适应字段。最终检查点：cmake + build + ctest 通过，ASan 无内存错误。
+
+**测试状态：** 全部通过（子代理确认 Spec 26 相关测试 100% 通过）— 无新增测试（集成层由现有测试覆盖）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.cpp, device/src/pipeline_builder.h, device/src/pipeline_builder.cpp, device/config/config.toml.example
+
+---

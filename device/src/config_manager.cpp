@@ -85,7 +85,7 @@ bool parse_streaming_config(
     StreamingConfig& config,
     std::string* error_msg) {
 
-    // Map of field names to member pointers
+    // 原有 7 个整数字段（允许零值，保持向后兼容）
     static const std::vector<std::pair<std::string, int StreamingConfig::*>> fields = {
         {"bitrate_min_kbps",           &StreamingConfig::bitrate_min_kbps},
         {"bitrate_max_kbps",           &StreamingConfig::bitrate_max_kbps},
@@ -100,6 +100,31 @@ bool parse_streaming_config(
         if (auto* val = find_value(kv, name)) {
             config.*member_ptr = std::stoi(*val);
         }
+    }
+
+    // 新增 5 个正整数字段（负数或零返回 false）
+    static const std::vector<std::pair<std::string, int StreamingConfig::*>> positive_fields = {
+        {"buffer_duration_sec",           &StreamingConfig::buffer_duration_sec},
+        {"latency_pressure_threshold",    &StreamingConfig::latency_pressure_threshold},
+        {"latency_pressure_cooldown_sec", &StreamingConfig::latency_pressure_cooldown_sec},
+        {"bandwidth_probe_duration_sec",  &StreamingConfig::bandwidth_probe_duration_sec},
+        {"writeframe_fail_threshold",     &StreamingConfig::writeframe_fail_threshold},
+    };
+
+    for (const auto& [name, member_ptr] : positive_fields) {
+        if (auto* val = find_value(kv, name)) {
+            int v = std::stoi(*val);
+            if (v <= 0) {
+                if (error_msg) *error_msg = "Invalid value for '" + name + "': must be positive, got " + std::to_string(v);
+                return false;
+            }
+            config.*member_ptr = v;
+        }
+    }
+
+    // bandwidth_probe_enabled（布尔字段，使用 parse_bool_field）
+    if (!parse_bool_field(kv, "bandwidth_probe_enabled", config.bandwidth_probe_enabled, error_msg)) {
+        return false;
     }
 
     return true;
@@ -233,6 +258,14 @@ BitrateConfig to_bitrate_config(const StreamingConfig& sc) {
         sc.bitrate_eval_interval_sec,
         sc.bitrate_rampup_interval_sec
     };
+}
+
+// ============================================================
+// to_kvssink_config
+// ============================================================
+
+KvsSinkConfig to_kvssink_config(const StreamingConfig& sc, const BitrateConfig& bc) {
+    return KvsSinkConfig{bc.default_kbps * 1000, sc.buffer_duration_sec};
 }
 
 // ============================================================

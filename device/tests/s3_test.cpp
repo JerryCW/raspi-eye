@@ -650,7 +650,7 @@ TEST(S3UploadOrder, UploadEvent_JpgBeforeJson) {
 
     uploader->start();
     uploader->notify_upload();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     uploader->stop();
 
     auto files = recorder->filenames();
@@ -687,7 +687,7 @@ TEST(S3UploadOrder, UploadEvent_JpgSorted) {
 
     uploader->start();
     uploader->notify_upload();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     uploader->stop();
 
     auto files = recorder->filenames();
@@ -716,7 +716,7 @@ TEST(S3UploadOrder, UploadEvent_JpgFailAborts) {
 
     uploader->start();
     uploader->notify_upload();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     uploader->stop();
 
     auto files = recorder->filenames();
@@ -747,7 +747,7 @@ TEST(S3UploadOrder, UploadEvent_OnlyJson) {
 
     uploader->start();
     uploader->notify_upload();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     uploader->stop();
 
     auto files = recorder->filenames();
@@ -798,7 +798,7 @@ TEST(S3UploadOrder, NotifyUpload_WakesScanThread) {
     uploader->notify_upload();
 
     // Wait for upload to complete (should be much faster than 300s interval)
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     auto elapsed = std::chrono::steady_clock::now() - before;
 
     uploader->stop();
@@ -857,7 +857,7 @@ RC_GTEST_PROP(S3UploadOrderPBT, JpgBeforeJsonSorted, ()) {
 
     uploader->start();
     uploader->notify_upload();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     uploader->stop();
 
     auto files = recorder->filenames();
@@ -923,7 +923,7 @@ RC_GTEST_PROP(S3UploadOrderPBT, JpgFailAbortsUpload, ()) {
 
     uploader->start();
     uploader->notify_upload();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     uploader->stop();
 
     auto files = recorder->filenames();

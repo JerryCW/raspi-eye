@@ -63,6 +63,17 @@ add_library(bitrate_module STATIC src/bitrate_adapter.cpp)
 target_include_directories(bitrate_module PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_libraries(bitrate_module PUBLIC stream_mode_module ${GST_LIBRARIES} spdlog::spdlog)
 
+# 网络监控模块
+add_library(network_module STATIC src/network_monitor.cpp)
+target_include_directories(network_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_libraries(network_module PUBLIC stream_mode_module bitrate_module spdlog::spdlog)
+
+# 带宽探测模块
+add_library(bandwidth_probe_module STATIC src/bandwidth_probe.cpp)
+target_include_directories(bandwidth_probe_module PUBLIC src ${GST_INCLUDE_DIRS})
+target_link_directories(bandwidth_probe_module PUBLIC ${GST_LIBRARY_DIRS})
+target_link_libraries(bandwidth_probe_module PUBLIC bitrate_module ${GST_LIBRARIES} spdlog::spdlog)
+
 # 摄像头源模块（独立库，打破 config_module ↔ pipeline_manager 循环依赖）
 add_library(camera_module STATIC src/camera_source.cpp)
 target_include_directories(camera_module PUBLIC src ${GST_INCLUDE_DIRS})
@@ -73,7 +84,7 @@ target_link_libraries(camera_module PUBLIC ${GST_LIBRARIES} spdlog::spdlog)
 add_library(pipeline_manager STATIC src/pipeline_manager.cpp src/pipeline_builder.cpp src/pipeline_health.cpp src/shutdown_handler.cpp src/app_context.cpp)
 target_include_directories(pipeline_manager PUBLIC src ${GST_INCLUDE_DIRS})
 target_link_directories(pipeline_manager PUBLIC ${GST_LIBRARY_DIRS})
-target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module stream_mode_module bitrate_module camera_module)
+target_link_libraries(pipeline_manager PUBLIC ${GST_LIBRARIES} log_module stream_mode_module bitrate_module network_module bandwidth_probe_module camera_module)
 target_compile_options(pipeline_manager PUBLIC ${GST_CFLAGS_OTHER})
 
 # GST_APP include/link for pipeline_manager (appsink support)
@@ -346,12 +357,25 @@ add_test(NAME stream_mode_test COMMAND stream_mode_test)
 add_executable(bitrate_test tests/bitrate_test.cpp)
 target_link_libraries(bitrate_test PRIVATE
     bitrate_module
+    bandwidth_probe_module
     stream_mode_module
     pipeline_manager
     GTest::gtest
     rapidcheck
     rapidcheck_gtest)
 add_test(NAME bitrate_test COMMAND bitrate_test)
+
+# 网络监控测试
+add_executable(network_monitor_test tests/network_monitor_test.cpp)
+target_link_libraries(network_monitor_test PRIVATE
+    network_module
+    GTest::gtest
+    rapidcheck
+    rapidcheck_gtest
+    ${GST_LIBRARIES})
+target_include_directories(network_monitor_test PRIVATE ${GST_INCLUDE_DIRS})
+target_link_directories(network_monitor_test PRIVATE ${GST_LIBRARY_DIRS})
+add_test(NAME network_monitor_test COMMAND network_monitor_test)
 
 # SdNotifier 测试
 add_executable(sd_notifier_test tests/sd_notifier_test.cpp)

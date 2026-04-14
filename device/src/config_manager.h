@@ -22,6 +22,20 @@ struct StreamingConfig {
     int bitrate_eval_interval_sec = 5;
     int bitrate_rampup_interval_sec = 30;
     int debounce_sec = 3;
+
+    // 网络自适应配置字段（Spec 26）
+    int buffer_duration_sec = 180;              // kvssink buffer-duration 秒数
+    int latency_pressure_threshold = 5;         // 10 秒内 pressure 次数阈值
+    int latency_pressure_cooldown_sec = 30;     // pressure 停止后恢复等待秒数
+    bool bandwidth_probe_enabled = true;        // 是否启用启动带宽探测
+    int bandwidth_probe_duration_sec = 10;      // 探测持续秒数
+    int writeframe_fail_threshold = 10;         // WebRTC writeFrame 连续失败阈值
+};
+
+// KVS sink 属性配置（POD，从 StreamingConfig + BitrateConfig 转换）
+struct KvsSinkConfig {
+    int avg_bandwidth_bps = 2500000;   // default_kbps * 1000
+    int buffer_duration_sec = 180;     // 从 StreamingConfig 获取
 };
 
 // Logging configuration (parsed from TOML [logging] section)
@@ -76,6 +90,9 @@ bool validate_streaming_config(
 
 // Convert StreamingConfig to BitrateConfig (pure function).
 BitrateConfig to_bitrate_config(const StreamingConfig& sc);
+
+// Convert StreamingConfig + BitrateConfig to KvsSinkConfig (pure function).
+KvsSinkConfig to_kvssink_config(const StreamingConfig& sc, const BitrateConfig& bc);
 
 // --- CLI override parameters ---
 

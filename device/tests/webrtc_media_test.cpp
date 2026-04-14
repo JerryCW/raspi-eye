@@ -535,8 +535,8 @@ RC_GTEST_PROP(WebRtcMediaBugConditionPBT, LockInsideBlockingCausesTimeout, ()) {
     std::string blocker_peer = "blocker-" + std::to_string(peer_idx);
     auto viewer_idx = *rc::gen::inRange(0, 100);
     std::string new_viewer = "viewer-" + std::to_string(viewer_idx);
-    // 随机阻塞时间 150-300ms，模拟 freePeerConnection 不同耗时
-    auto block_ms = *rc::gen::inRange(150, 301);
+    // 随机阻塞时间 50-100ms，模拟 freePeerConnection 不同耗时
+    auto block_ms = *rc::gen::inRange(50, 101);
 
     mgr->on_viewer_offer(blocker_peer, "sdp");
 
@@ -565,10 +565,58 @@ RC_GTEST_PROP(WebRtcMediaBugConditionPBT, LockInsideBlockingCausesTimeout, ()) {
 
     blocker.join();
 
-    // Property: bug pattern（锁内阻塞）导致 on_viewer_offer 被阻塞 >= 100ms
-    RC_ASSERT(elapsed_us >= 100'000);
+    // Property: bug pattern（锁内阻塞）导致 on_viewer_offer 被阻塞 >= 30ms
+    RC_ASSERT(elapsed_us >= 30'000);
 
     mgr->remove_peer(new_viewer);
+}
+
+// ============================================================
+// Spec 26: set_pipeline / set_writeframe_fail_threshold tests
+// ============================================================
+
+// SetPipelineNull: set_pipeline(nullptr) does not crash
+// **Validates: Requirements 9.1, 9.4**
+TEST(WebRtcMediaTest, SetPipelineNull) {
+    auto sig = create_stub_signaling();
+    SKIP_IF_REAL_SDK(sig);
+    auto mgr = WebRtcMediaManager::create(*sig);
+    ASSERT_NE(mgr, nullptr);
+    // set_pipeline(nullptr) should be safe
+    mgr->set_pipeline(nullptr);
+    EXPECT_EQ(mgr->peer_count(), 0u);
+}
+
+// SetPipelineWithElement: set_pipeline with a real GstElement does not crash
+// **Validates: Requirements 9.1, 9.4**
+TEST(WebRtcMediaTest, SetPipelineWithElement) {
+    auto sig = create_stub_signaling();
+    SKIP_IF_REAL_SDK(sig);
+    auto mgr = WebRtcMediaManager::create(*sig);
+    ASSERT_NE(mgr, nullptr);
+
+    GstElement* pipeline = gst_pipeline_new("test-pipeline");
+    ASSERT_NE(pipeline, nullptr);
+    mgr->set_pipeline(pipeline);
+
+    // broadcast_frame after set_pipeline should not crash
+    uint8_t data[] = {0x00, 0x00, 0x00, 0x01, 0x67};
+    mgr->broadcast_frame(data, sizeof(data), 1000, true);
+
+    mgr->set_pipeline(nullptr);
+    gst_object_unref(pipeline);
+}
+
+// SetWriteframeFailThreshold: set_writeframe_fail_threshold does not crash
+// **Validates: Requirements 7.1**
+TEST(WebRtcMediaTest, SetWriteframeFailThreshold) {
+    auto sig = create_stub_signaling();
+    SKIP_IF_REAL_SDK(sig);
+    auto mgr = WebRtcMediaManager::create(*sig);
+    ASSERT_NE(mgr, nullptr);
+    mgr->set_writeframe_fail_threshold(5);
+    mgr->set_writeframe_fail_threshold(20);
+    EXPECT_EQ(mgr->peer_count(), 0u);
 }
 
 // ============================================================

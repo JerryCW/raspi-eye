@@ -33,6 +33,10 @@ struct PeerInfo {
     std::string disconnect_reason;
     uint32_t sent_candidates = 0;
     uint32_t received_candidates = 0;
+    // Spec 26: 仅关键帧模式字段
+    bool keyframe_only_mode = false;
+    int keyframe_mode_success_count = 0;
+    uint32_t consecutive_write_failures = 0;
 };
 
 // 待释放 peer 的信息（在锁外输出日志）
@@ -49,6 +53,10 @@ struct WebRtcMediaManager::Impl {
     std::atomic<bool> running{true};
     std::thread cleanup_thread;
     std::condition_variable_any cv;
+
+    // Spec 26: pipeline 引用（不拥有，不 unref）和仅关键帧模式阈值
+    GstElement* pipeline_ = nullptr;
+    int writeframe_fail_threshold_ = 10;
 
     explicit Impl(WebRtcSignaling& sig) : signaling(sig) {
         cleanup_thread = std::thread([this]() { cleanup_loop(); });
@@ -276,6 +284,14 @@ size_t WebRtcMediaManager::peer_count() const {
     return count;
 }
 
+void WebRtcMediaManager::set_pipeline(GstElement* pipeline) {
+    impl_->pipeline_ = pipeline;
+}
+
+void WebRtcMediaManager::set_writeframe_fail_threshold(int threshold) {
+    impl_->writeframe_fail_threshold_ = threshold;
+}
+
 WebRtcMediaManager::WebRtcMediaManager() = default;
 WebRtcMediaManager::~WebRtcMediaManager() = default;
 
@@ -290,6 +306,7 @@ WebRtcMediaManager::~WebRtcMediaManager() = default;
 
 #include "webrtc_signaling.h"
 #include <spdlog/spdlog.h>
+#include <gst/video/video-event.h>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -324,6 +341,9 @@ struct PeerInfo {
     std::string disconnect_reason;
     uint32_t sent_candidates = 0;
     uint32_t received_candidates = 0;
+    // Spec 26: 仅关键帧模式字段
+    bool keyframe_only_mode = false;
+    int keyframe_mode_success_count = 0;
 };
 
 // 待释放 peer 的信息（在锁外执行 close + free）
@@ -364,6 +384,10 @@ struct WebRtcMediaManager::Impl {
     // Key: peer_id, Value: list of raw candidate JSON strings.
     static constexpr size_t kMaxPendingCandidates = 50;
     std::unordered_map<std::string, std::vector<std::string>> pending_candidates;
+
+    // Spec 26: pipeline 引用（不拥有，不 unref）和仅关键帧模式阈值
+    GstElement* pipeline_ = nullptr;
+    int writeframe_fail_threshold_ = 10;
 
     explicit Impl(WebRtcSignaling& sig) : signaling(sig) {
         cleanup_thread = std::thread([this]() { cleanup_loop(); });
@@ -467,6 +491,23 @@ struct WebRtcMediaManager::Impl {
                 if (prev != PeerState::CONNECTED) {
                     ctx->impl->viewer_count.fetch_add(1);
                 }
+            }
+            // Spec 26: 新 peer 连接后请求关键帧
+            if (ctx->impl->pipeline_) {
+                GstElement* encoder = gst_bin_get_by_name(
+                    GST_BIN(ctx->impl->pipeline_), "encoder");
+                if (encoder) {
+                    GstEvent* event = gst_video_event_new_upstream_force_key_unit(
+                        GST_CLOCK_TIME_NONE, TRUE, 0);
+                    gst_element_send_event(encoder, event);
+                    gst_object_unref(encoder);
+                    if (logger) logger->info("Force keyframe requested for new peer {}",
+                                             ctx->peer_id);
+                } else {
+                    if (logger) logger->warn("Cannot force keyframe: encoder element not found in pipeline");
+                }
+            } else {
+                if (logger) logger->warn("Cannot force keyframe: pipeline reference not set");
             }
             return;
         }
@@ -1027,6 +1068,11 @@ void WebRtcMediaManager::broadcast_frame(
         if (!info.video_transceiver) continue;
         if (info.state.load() != PeerState::CONNECTED) continue;
 
+        // Spec 26: 仅关键帧模式 — 跳过非关键帧
+        if (info.keyframe_only_mode && !is_keyframe) {
+            continue;
+        }
+
         Frame frame;
         MEMSET(&frame, 0, SIZEOF(Frame));
         frame.version = FRAME_CURRENT_VERSION;
@@ -1046,6 +1092,15 @@ void WebRtcMediaManager::broadcast_frame(
                 if (logger) logger->info("First frame sent to peer {} (size={}, keyframe={})",
                                          id, size, is_keyframe);
             }
+            // Spec 26: 仅关键帧模式恢复逻辑
+            if (info.keyframe_only_mode) {
+                info.keyframe_mode_success_count++;
+                if (info.keyframe_mode_success_count >= 10) {
+                    info.keyframe_only_mode = false;
+                    info.keyframe_mode_success_count = 0;
+                    if (logger) logger->info("Peer {} recovered from keyframe-only mode", id);
+                }
+            }
         } else if (ret == 0x5c000003) {
             // STATUS_SRTP_NOT_READY_YET — DTLS handshake still in progress,
             // skip without counting as failure.
@@ -1053,12 +1108,21 @@ void WebRtcMediaManager::broadcast_frame(
             continue;
         } else {
             info.consecutive_write_failures++;
+            info.keyframe_mode_success_count = 0;
             if (info.consecutive_write_failures == kMaxWriteFailures / 2) {
                 if (logger) logger->warn("writeFrame failing for peer {}: {}/{} consecutive failures",
                                          id, info.consecutive_write_failures, kMaxWriteFailures);
             }
             if (logger) logger->warn("writeFrame failed for peer {}, status: {}, failures: {}",
                                      id, status_to_hex(ret), info.consecutive_write_failures);
+            // Spec 26: 进入仅关键帧模式
+            if (info.consecutive_write_failures >= static_cast<uint32_t>(impl_->writeframe_fail_threshold_)
+                && !info.keyframe_only_mode) {
+                info.keyframe_only_mode = true;
+                info.keyframe_mode_success_count = 0;
+                if (logger) logger->info("Peer {} entered keyframe-only mode after {} consecutive failures",
+                                         id, info.consecutive_write_failures);
+            }
             if (info.consecutive_write_failures > kMaxWriteFailures) {
                 if (logger) logger->warn("Peer {} exceeded max write failures ({}), marking DISCONNECTING",
                                          id, kMaxWriteFailures);
@@ -1084,6 +1148,16 @@ size_t WebRtcMediaManager::peer_count() const {
         if (info.state.load() == PeerState::CONNECTED) ++count;
     }
     return count;
+}
+
+// ---- set_pipeline / set_writeframe_fail_threshold ----
+
+void WebRtcMediaManager::set_pipeline(GstElement* pipeline) {
+    impl_->pipeline_ = pipeline;
+}
+
+void WebRtcMediaManager::set_writeframe_fail_threshold(int threshold) {
+    impl_->writeframe_fail_threshold_ = threshold;
 }
 
 // ---- Constructor / Destructor ----
