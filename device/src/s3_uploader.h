@@ -123,6 +123,12 @@ public:
     void stop();
     void set_put_function(S3PutFunction fn);
 
+    // Event-driven upload notification.
+    // Thread-safe, can be called from any thread.
+    // Wakes up the scan thread via cv_.notify_one() without acquiring mutex_.
+    // Safe to call after stop() (notify has no receiver, silently ignored).
+    void notify_upload();
+
 private:
     S3Uploader(const S3Config& config,
                const std::string& snapshot_dir,
@@ -145,4 +151,5 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     bool stop_requested_ = false;
+    bool upload_notified_ = false;  // event-driven upload trigger
 };

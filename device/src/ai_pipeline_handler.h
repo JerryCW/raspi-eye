@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -21,6 +22,9 @@ struct AiConfig {
     bool enabled = true;                         // AI branch enabled (from config)
     std::string model_path;                      // ONNX model path
     int inference_fps = 2;                       // Frame sampling rate (frames per second)
+    int idle_fps = 1;                            // Idle mode sampling rate (1-10)
+    int active_fps = 3;                          // Active mode sampling rate (1-30)
+    int max_snapshots_per_event = 10;            // Top-K snapshot cache size
     float confidence_threshold = 0.25f;          // Global confidence threshold
     std::string snapshot_dir = "device/events/"; // Event snapshot root directory
     int event_timeout_sec = 15;                  // Event timeout in seconds
@@ -69,6 +73,32 @@ const char* coco_class_name(int class_id);
 // Returns true if elapsed_ms >= 1000 / fps.
 bool should_sample(int64_t elapsed_ms, int fps);
 
+// --- Smart snapshot selection types (standalone for testability) ---
+
+// Snapshot entry stored in Top-K min-heap cache.
+struct SnapshotEntry {
+    std::string filename;
+    std::vector<uint8_t> jpeg_data;     // JPEG encoded data
+    float confidence = 0.0f;
+    std::chrono::system_clock::time_point timestamp;
+};
+
+// Min-heap comparator: lowest confidence at top.
+// For std::push_heap/pop_heap: returns true when a should be below b,
+// so a.confidence > b.confidence puts the lowest confidence at front.
+struct SnapshotMinHeapCmp {
+    bool operator()(const SnapshotEntry& a, const SnapshotEntry& b) const {
+        return a.confidence > b.confidence;
+    }
+};
+
+// Try to submit a candidate to the Top-K min-heap cache.
+// Pure function: does not depend on AiPipelineHandler instance.
+// Returns true if candidate was accepted (added or replaced lowest), false if discarded.
+// When accepted, the candidate is moved into the heap.
+bool try_submit_to_topk(std::vector<SnapshotEntry>& heap, int max_k,
+                        SnapshotEntry candidate);
+
 // --- AiPipelineHandler class ---
 
 class AiPipelineHandler {
@@ -102,6 +132,10 @@ public:
     // Must be called before start(). Not thread-safe during inference.
     void set_detection_callback(DetectionCallback cb);
 
+    // Event close callback: called after close_event() disk write succeeds.
+    using EventCloseCallback = std::function<void()>;
+    void set_event_close_callback(EventCloseCallback cb);
+
 private:
     AiPipelineHandler(std::unique_ptr<YoloDetector> detector,
                       const AiConfig& config);
@@ -117,6 +151,9 @@ private:
     void open_event(const std::vector<Detection>& detections);
     void close_event();
     void encode_snapshot(const uint8_t* rgb_data, int width, int height);
+    void update_window_candidate(const std::vector<uint8_t>& rgb_frame,
+                                 int width, int height, float confidence);
+    void submit_window_candidate();  // Flush current window candidate to Top-K
     void update_detections_summary(const std::vector<Detection>& detections);
     void check_event_timeout();
     void flush_cache();  // Intermediate flush when cache exceeds max_cache_mb
@@ -130,8 +167,8 @@ private:
     GstPad* probe_pad_ = nullptr;
     gulong probe_id_ = 0;
 
-    // Frame sampling throttle
-    int64_t frame_interval_ms_ = 500;  // 1000 / inference_fps
+    // Adaptive fps: replaces fixed frame_interval_ms_
+    std::atomic<int> current_fps_{1};  // Current effective fps (idle or active)
     std::chrono::steady_clock::time_point last_sample_time_;
 
     // Inference thread synchronization
@@ -147,8 +184,12 @@ private:
     int frame_width_ = 0;
     int frame_height_ = 0;
 
-    // Event state
-    bool event_active_ = false;
+    // Event state machine
+    enum class EventState { IDLE, PENDING, CONFIRMED, CLOSING };
+    EventState event_state_ = EventState::IDLE;
+    int consecutive_detection_count_ = 0;
+    static constexpr int kConfirmationThreshold = 3;
+
     std::string event_id_;
     std::chrono::system_clock::time_point event_start_time_;
     std::chrono::steady_clock::time_point last_detection_time_;
@@ -163,10 +204,27 @@ private:
     size_t cached_bytes_ = 0;
     bool event_dir_created_ = false;  // Track if directory was created during intermediate flush
 
+    // Smart snapshot selection — 1-second sliding window
+    struct WindowCandidate {
+        std::vector<uint8_t> rgb_data;  // Raw RGB frame (for deferred JPEG encoding)
+        int width = 0;
+        int height = 0;
+        float confidence = 0.0f;       // Highest detection confidence in this frame
+        std::chrono::system_clock::time_point timestamp;
+    };
+    std::optional<WindowCandidate> window_candidate_;
+    std::chrono::steady_clock::time_point window_start_;
+
+    // Smart snapshot selection — Top-K min-heap cache
+    std::vector<SnapshotEntry> snapshot_heap_;
+
     // Detection summary (accumulated in memory)
     struct ClassSummary {
         int count = 0;
         float max_confidence = 0.0f;
     };
     std::unordered_map<std::string, ClassSummary> detections_summary_;
+
+    // Event close callback (optional, called after successful disk write)
+    EventCloseCallback event_close_cb_;
 };

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <set>
 #include <unordered_map>
 #include <nlohmann/json.hpp>
 #include "s3_uploader.h"
@@ -593,3 +594,357 @@ RC_GTEST_PROP(S3Config, ScanIntervalValidation, ()) {
         RC_ASSERT(config.scan_interval_sec == 30);  // default
     }
 }
+
+// ===========================================================================
+// Spec 24 Task 3.3: Example-based tests for upload order + notify_upload
+// ===========================================================================
+
+#include <thread>
+#include <chrono>
+#include <mutex>
+#include <sys/stat.h>
+#include "s3_upload_order_test_helper.h"
+
+// Helper: create S3Uploader with mock credentials for upload order tests
+static std::unique_ptr<S3Uploader> create_test_uploader(
+    const std::string& snapshot_dir,
+    S3TestEnv& env,
+    std::shared_ptr<UploadRecorder> recorder) {
+
+    auto http = std::make_shared<S3TestHttpClient>();
+    std::string err;
+    auto cred = CredentialProvider::create(env.config_path, http, &err);
+    if (!cred) return nullptr;
+
+    S3Config config;
+    config.bucket = "test-bucket";
+    config.region = "us-east-1";
+    config.scan_interval_sec = 5;
+    config.max_retries = 0;
+
+    auto uploader = S3Uploader::create(config, snapshot_dir, "dev1",
+                                        std::move(cred), &err);
+    if (!uploader) return nullptr;
+
+    uploader->set_put_function(
+        [recorder](const std::string& url,
+                   const std::vector<uint8_t>& data,
+                   const std::vector<std::string>& headers) {
+            return recorder->put(url, data, headers);
+        });
+
+    return uploader;
+}
+
+// 1. UploadEvent_JpgBeforeJson: .jpg uploaded before event.json
+TEST(S3UploadOrder, UploadEvent_JpgBeforeJson) {
+    auto env = S3TestEnv::create("s3_jpg_before_json");
+    auto snapshot_dir = env.tmp_dir / "events";
+    fs::create_directories(snapshot_dir);
+
+    create_event_dir(snapshot_dir, "evt_001", {"001.jpg", "002.jpg"});
+
+    auto recorder = std::make_shared<UploadRecorder>();
+    auto uploader = create_test_uploader(snapshot_dir.string(), env, recorder);
+    ASSERT_NE(uploader, nullptr);
+
+    uploader->start();
+    uploader->notify_upload();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    uploader->stop();
+
+    auto files = recorder->filenames();
+    ASSERT_GE(files.size(), 3u);
+
+    // All .jpg files must come before event.json
+    size_t json_pos = std::string::npos;
+    for (size_t i = 0; i < files.size(); ++i) {
+        if (files[i] == "event.json") {
+            json_pos = i;
+            break;
+        }
+    }
+    ASSERT_NE(json_pos, std::string::npos) << "event.json not found in uploads";
+    for (size_t i = 0; i < json_pos; ++i) {
+        EXPECT_TRUE(files[i].find(".jpg") != std::string::npos)
+            << "Non-jpg file before event.json at index " << i << ": " << files[i];
+    }
+
+    env.cleanup();
+}
+
+// 2. UploadEvent_JpgSorted: multiple .jpg files uploaded in lexicographic order
+TEST(S3UploadOrder, UploadEvent_JpgSorted) {
+    auto env = S3TestEnv::create("s3_jpg_sorted");
+    auto snapshot_dir = env.tmp_dir / "events";
+    fs::create_directories(snapshot_dir);
+
+    create_event_dir(snapshot_dir, "evt_002", {"c.jpg", "a.jpg", "b.jpg"});
+
+    auto recorder = std::make_shared<UploadRecorder>();
+    auto uploader = create_test_uploader(snapshot_dir.string(), env, recorder);
+    ASSERT_NE(uploader, nullptr);
+
+    uploader->start();
+    uploader->notify_upload();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    uploader->stop();
+
+    auto files = recorder->filenames();
+    ASSERT_EQ(files.size(), 4u);  // a.jpg, b.jpg, c.jpg, event.json
+    EXPECT_EQ(files[0], "a.jpg");
+    EXPECT_EQ(files[1], "b.jpg");
+    EXPECT_EQ(files[2], "c.jpg");
+    EXPECT_EQ(files[3], "event.json");
+
+    env.cleanup();
+}
+
+// 3. UploadEvent_JpgFailAborts: .jpg failure prevents event.json upload
+TEST(S3UploadOrder, UploadEvent_JpgFailAborts) {
+    auto env = S3TestEnv::create("s3_jpg_fail");
+    auto snapshot_dir = env.tmp_dir / "events";
+    fs::create_directories(snapshot_dir);
+
+    create_event_dir(snapshot_dir, "evt_003", {"a.jpg", "b.jpg", "c.jpg"});
+
+    auto recorder = std::make_shared<UploadRecorder>();
+    recorder->fail_at_index = 1;  // fail on second upload (b.jpg)
+
+    auto uploader = create_test_uploader(snapshot_dir.string(), env, recorder);
+    ASSERT_NE(uploader, nullptr);
+
+    uploader->start();
+    uploader->notify_upload();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    uploader->stop();
+
+    auto files = recorder->filenames();
+    // Only a.jpg should have been uploaded (b.jpg failed, c.jpg and event.json skipped)
+    EXPECT_EQ(files.size(), 1u);
+    if (!files.empty()) {
+        EXPECT_EQ(files[0], "a.jpg");
+    }
+    // event.json must NOT be in the list
+    for (const auto& f : files) {
+        EXPECT_NE(f, "event.json") << "event.json should not be uploaded after jpg failure";
+    }
+
+    env.cleanup();
+}
+
+// 4. UploadEvent_OnlyJson: event with only event.json (no .jpg) uploads normally
+TEST(S3UploadOrder, UploadEvent_OnlyJson) {
+    auto env = S3TestEnv::create("s3_only_json");
+    auto snapshot_dir = env.tmp_dir / "events";
+    fs::create_directories(snapshot_dir);
+
+    create_event_dir(snapshot_dir, "evt_004", {});  // no jpg files
+
+    auto recorder = std::make_shared<UploadRecorder>();
+    auto uploader = create_test_uploader(snapshot_dir.string(), env, recorder);
+    ASSERT_NE(uploader, nullptr);
+
+    uploader->start();
+    uploader->notify_upload();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    uploader->stop();
+
+    auto files = recorder->filenames();
+    ASSERT_EQ(files.size(), 1u);
+    EXPECT_EQ(files[0], "event.json");
+
+    env.cleanup();
+}
+
+// 5. NotifyUpload_WakesScanThread: notify_upload() wakes up waiting scan thread
+TEST(S3UploadOrder, NotifyUpload_WakesScanThread) {
+    auto env = S3TestEnv::create("s3_notify_wake");
+    auto snapshot_dir = env.tmp_dir / "events";
+    fs::create_directories(snapshot_dir);
+
+    auto recorder = std::make_shared<UploadRecorder>();
+
+    auto http = std::make_shared<S3TestHttpClient>();
+    std::string err;
+    auto cred = CredentialProvider::create(env.config_path, http, &err);
+    ASSERT_NE(cred, nullptr) << err;
+
+    S3Config config;
+    config.bucket = "test-bucket";
+    config.region = "us-east-1";
+    config.scan_interval_sec = 300;  // very long interval — won't trigger naturally
+    config.max_retries = 0;
+
+    auto uploader = S3Uploader::create(config, snapshot_dir.string(), "dev1",
+                                        std::move(cred), &err);
+    ASSERT_NE(uploader, nullptr) << err;
+
+    uploader->set_put_function(
+        [recorder](const std::string& url,
+                   const std::vector<uint8_t>& data,
+                   const std::vector<std::string>& headers) {
+            return recorder->put(url, data, headers);
+        });
+
+    uploader->start();
+
+    // Wait a bit for scan thread to enter wait state
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Create event AFTER start, then notify
+    create_event_dir(snapshot_dir, "evt_notify", {"snap.jpg"});
+    auto before = std::chrono::steady_clock::now();
+    uploader->notify_upload();
+
+    // Wait for upload to complete (should be much faster than 300s interval)
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    auto elapsed = std::chrono::steady_clock::now() - before;
+
+    uploader->stop();
+
+    auto files = recorder->filenames();
+    // Should have uploaded within ~500ms, not waiting for 300s
+    EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 5);
+    EXPECT_GE(files.size(), 1u) << "notify_upload should have triggered a scan";
+
+    env.cleanup();
+}
+
+
+// ===========================================================================
+// Spec 24 Task 3.4: PBT — Property 4: S3 upload order invariant
+// ===========================================================================
+
+// Tag: Feature: event-pipeline-optimization, Property 4: S3 upload order invariant
+// **Validates: Requirements 5.1, 5.3**
+
+// Helper: generate a valid .jpg filename (alphanumeric + underscore/dash + .jpg)
+static rc::Gen<std::string> genJpgFilename() {
+    return rc::gen::map(
+        rc::gen::container<std::string>(
+            *rc::gen::inRange(1, 16),
+            rc::gen::elementOf(std::vector<char>{
+                'a','b','c','d','e','f','g','h','i','j','k','l','m',
+                'n','o','p','q','r','s','t','u','v','w','x','y','z',
+                '0','1','2','3','4','5','6','7','8','9','_','-'})),
+        [](std::string base) { return base + ".jpg"; });
+}
+
+RC_GTEST_PROP(S3UploadOrderPBT, JpgBeforeJsonSorted, ()) {
+    // Tag: Feature: event-pipeline-optimization, Property 4: S3 upload order invariant
+    // Generate 0-20 unique .jpg filenames
+    auto num_jpgs = *rc::gen::inRange(0, 21);
+    std::vector<std::string> jpg_names;
+    std::set<std::string> seen;
+    for (int i = 0; i < num_jpgs; ++i) {
+        auto name = *genJpgFilename();
+        if (seen.count(name)) continue;  // skip duplicates
+        seen.insert(name);
+        jpg_names.push_back(name);
+    }
+
+    // Create test environment
+    auto env = S3TestEnv::create("s3_pbt_order");
+    auto snapshot_dir = env.tmp_dir / "events";
+    fs::create_directories(snapshot_dir);
+
+    create_event_dir(snapshot_dir, "evt_pbt", jpg_names);
+
+    auto recorder = std::make_shared<UploadRecorder>();
+    auto uploader = create_test_uploader(snapshot_dir.string(), env, recorder);
+    RC_ASSERT(uploader != nullptr);
+
+    uploader->start();
+    uploader->notify_upload();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    uploader->stop();
+
+    auto files = recorder->filenames();
+
+    // Expected: all .jpg sorted lexicographically, then event.json
+    auto expected_jpgs = jpg_names;
+    std::sort(expected_jpgs.begin(), expected_jpgs.end());
+
+    size_t expected_total = expected_jpgs.size() + 1;  // +1 for event.json
+    RC_ASSERT(files.size() == expected_total);
+
+    // Verify .jpg files are in sorted order before event.json
+    for (size_t i = 0; i < expected_jpgs.size(); ++i) {
+        RC_ASSERT(files[i] == expected_jpgs[i]);
+    }
+
+    // Last file must be event.json
+    RC_ASSERT(files.back() == "event.json");
+
+    env.cleanup();
+}
+
+// ===========================================================================
+// Spec 24 Task 3.5: PBT — Property 5: S3 upload failure abort
+// ===========================================================================
+
+// Tag: Feature: event-pipeline-optimization, Property 5: S3 upload failure abort
+// **Validates: Requirements 5.2**
+
+RC_GTEST_PROP(S3UploadOrderPBT, JpgFailAbortsUpload, ()) {
+    // Tag: Feature: event-pipeline-optimization, Property 5: S3 upload failure abort
+    // Generate 1-10 unique .jpg filenames
+    auto num_jpgs = *rc::gen::inRange(1, 11);
+    std::vector<std::string> jpg_names;
+    std::set<std::string> seen;
+    for (int i = 0; i < num_jpgs; ++i) {
+        auto name = *genJpgFilename();
+        if (seen.count(name)) continue;
+        seen.insert(name);
+        jpg_names.push_back(name);
+    }
+    RC_PRE(!jpg_names.empty());
+
+    // Sort to predict upload order
+    auto sorted_jpgs = jpg_names;
+    std::sort(sorted_jpgs.begin(), sorted_jpgs.end());
+
+    // Random failure position within the sorted jpg list
+    auto fail_pos = *rc::gen::inRange(0, static_cast<int>(sorted_jpgs.size()));
+
+    // Create test environment
+    auto env = S3TestEnv::create("s3_pbt_fail");
+    auto snapshot_dir = env.tmp_dir / "events";
+    fs::create_directories(snapshot_dir);
+
+    create_event_dir(snapshot_dir, "evt_pbt_fail", jpg_names);
+
+    auto recorder = std::make_shared<UploadRecorder>();
+    recorder->fail_at_index = fail_pos;  // fail at this position in upload sequence
+
+    auto uploader = create_test_uploader(snapshot_dir.string(), env, recorder);
+    RC_ASSERT(uploader != nullptr);
+
+    uploader->start();
+    uploader->notify_upload();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    uploader->stop();
+
+    auto files = recorder->filenames();
+
+    // Only files before the failure position should have been uploaded
+    RC_ASSERT(static_cast<int>(files.size()) == fail_pos);
+
+    // event.json must NOT be in the uploaded list
+    for (const auto& f : files) {
+        RC_ASSERT(f != "event.json");
+    }
+
+    // Files after the failure position must NOT be uploaded
+    for (size_t i = static_cast<size_t>(fail_pos); i < sorted_jpgs.size(); ++i) {
+        bool found = false;
+        for (const auto& f : files) {
+            if (f == sorted_jpgs[i]) { found = true; break; }
+        }
+        RC_ASSERT(!found);
+    }
+
+    env.cleanup();
+}
+

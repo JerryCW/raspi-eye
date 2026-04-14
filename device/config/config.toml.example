@@ -31,9 +31,25 @@ aws_region = "<your-aws-region>"
 
 # AI inference branch configuration (optional)
 # enabled: true/false, set to false to disable AI branch
-# Currently AI branch uses fakesink; this switch is reserved for future spec-10 integration
+# model_path: path to ONNX model file
+# inference_fps: DEPRECATED, use idle_fps + active_fps instead
+# idle_fps: sampling rate in idle mode, range [1,10], default 1
+# active_fps: sampling rate in active mode (detection in progress), range [1,30], default 3
+#   idle_fps must be less than active_fps
+#   backward compat: if only inference_fps is present, active_fps = inference_fps, idle_fps = 1
+# max_snapshots_per_event: Top-K snapshot cache size per event, default 10
+# confidence_threshold: global detection confidence threshold
+# snapshot_dir: root directory for event snapshots
+# event_timeout_sec: seconds of no detection before closing an event
+# max_cache_mb: JPEG memory cache limit in MB
+# target_classes: comma-separated list of COCO class names with optional per-class thresholds
 [ai]
 # enabled = true
+# model_path = "device/models/yolo11s.onnx"
+# inference_fps = 2              # DEPRECATED: use idle_fps + active_fps instead
+# idle_fps = 1
+# active_fps = 3
+# max_snapshots_per_event = 10
 
 # Camera configuration (optional, defaults shown)
 # type: test (macOS dev), v4l2 (USB camera), libcamera (CSI camera)

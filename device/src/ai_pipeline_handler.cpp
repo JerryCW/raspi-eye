@@ -104,12 +104,38 @@ bool should_sample(int64_t elapsed_ms, int fps) {
     return elapsed_ms >= 1000 / fps;
 }
 
+// --- Top-K min-heap pure function ---
+
+bool try_submit_to_topk(std::vector<SnapshotEntry>& heap, int max_k,
+                        SnapshotEntry candidate) {
+    if (max_k <= 0) return false;
+
+    if (static_cast<int>(heap.size()) < max_k) {
+        // Cache not full: add candidate
+        heap.push_back(std::move(candidate));
+        std::push_heap(heap.begin(), heap.end(), SnapshotMinHeapCmp{});
+        return true;
+    }
+
+    // Cache full: compare with lowest confidence (heap front)
+    if (candidate.confidence > heap.front().confidence) {
+        // Replace lowest
+        std::pop_heap(heap.begin(), heap.end(), SnapshotMinHeapCmp{});
+        heap.back() = std::move(candidate);
+        std::push_heap(heap.begin(), heap.end(), SnapshotMinHeapCmp{});
+        return true;
+    }
+
+    // Candidate confidence <= lowest: discard
+    return false;
+}
+
 // --- AiPipelineHandler class implementation ---
 
 AiPipelineHandler::AiPipelineHandler(std::unique_ptr<YoloDetector> detector,
                                      const AiConfig& config)
     : detector_(std::move(detector)), config_(config) {
-    frame_interval_ms_ = 1000 / config_.inference_fps;
+    current_fps_ = config_.idle_fps;
 }
 
 AiPipelineHandler::~AiPipelineHandler() {
@@ -136,9 +162,9 @@ std::unique_ptr<AiPipelineHandler> AiPipelineHandler::create(
     std::unique_ptr<AiPipelineHandler> handler(
         new AiPipelineHandler(std::move(detector), config));
 
-    ai_log->info("AiPipelineHandler created: model={}, inference_fps={}, "
+    ai_log->info("AiPipelineHandler created: model={}, idle_fps={}, active_fps={}, "
                  "confidence_threshold={:.2f}",
-                 config.model_path, config.inference_fps,
+                 config.model_path, config.idle_fps, config.active_fps,
                  config.confidence_threshold);
 
     return handler;
@@ -198,11 +224,11 @@ GstPadProbeReturn AiPipelineHandler::buffer_probe_cb(
     GstPad* pad, GstPadProbeInfo* info, gpointer user_data) {
     auto* self = static_cast<AiPipelineHandler*>(user_data);
 
-    // Check sampling interval
+    // Check sampling interval using adaptive fps
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - self->last_sample_time_).count();
-    if (!should_sample(elapsed, self->config_.inference_fps)) {
+    if (!should_sample(elapsed, self->current_fps_.load())) {
         return GST_PAD_PROBE_OK;
     }
 
@@ -289,8 +315,18 @@ void AiPipelineHandler::stop() {
         inference_thread_.join();
     }
 
-    if (event_active_) {
+    if (event_state_ == EventState::CONFIRMED || event_state_ == EventState::CLOSING) {
         close_event();
+    } else if (event_state_ == EventState::PENDING) {
+        // Discard pending event without disk write
+        event_state_ = EventState::IDLE;
+        consecutive_detection_count_ = 0;
+        cached_frames_.clear();
+        cached_bytes_ = 0;
+        detections_summary_.clear();
+        window_candidate_.reset();
+        snapshot_heap_.clear();
+        current_fps_ = config_.idle_fps;
     }
 }
 
@@ -324,22 +360,97 @@ void AiPipelineHandler::inference_loop() {
             auto filtered = filter_detections(
                 detections, config_.target_classes, config_.confidence_threshold);
 
-            if (!filtered.empty()) {
-                // Detections found
-                if (!event_active_) {
-                    open_event(filtered);
-                }
-                encode_snapshot(frame.data(), width, height);
-                update_detections_summary(filtered);
-                last_detection_time_ = std::chrono::steady_clock::now();
+            bool has_detections = !filtered.empty();
 
-                if (detection_cb_) {
-                    detection_cb_(filtered, stats, frame.data(), width, height);
+            // Compute max confidence from filtered detections for window candidate
+            float max_confidence = 0.0f;
+            if (has_detections) {
+                for (const auto& det : filtered) {
+                    max_confidence = std::max(max_confidence, det.confidence);
                 }
             }
 
-            // Check event timeout (whether or not we had detections)
-            if (event_active_) {
+            // --- Two-phase event confirmation state machine ---
+            if (has_detections) {
+                switch (event_state_) {
+                    case EventState::IDLE: {
+                        // First detection: enter PENDING state
+                        open_event(filtered);
+                        event_state_ = EventState::PENDING;
+                        consecutive_detection_count_ = 1;
+                        // Switch to active fps
+                        int old_fps = current_fps_.load();
+                        current_fps_ = config_.active_fps;
+                        ai_log->info("Inference fps: {} -> {}, reason=detection",
+                                     old_fps, config_.active_fps);
+                        // Accumulate detections summary from first detection
+                        update_detections_summary(filtered);
+                        // Update window candidate (replaces encode_snapshot)
+                        update_window_candidate(frame, width, height, max_confidence);
+                        last_detection_time_ = std::chrono::steady_clock::now();
+                        break;
+                    }
+                    case EventState::PENDING: {
+                        // Subsequent detection in pending state
+                        consecutive_detection_count_++;
+                        update_detections_summary(filtered);
+                        update_window_candidate(frame, width, height, max_confidence);
+                        last_detection_time_ = std::chrono::steady_clock::now();
+
+                        if (consecutive_detection_count_ >= kConfirmationThreshold) {
+                            // Upgrade to CONFIRMED
+                            event_state_ = EventState::CONFIRMED;
+                            ai_log->info("Event confirmed: event_id={}, after {} consecutive detections",
+                                         event_id_, consecutive_detection_count_);
+                        }
+                        break;
+                    }
+                    case EventState::CONFIRMED: {
+                        // Continued detection in confirmed state
+                        update_detections_summary(filtered);
+                        update_window_candidate(frame, width, height, max_confidence);
+                        last_detection_time_ = std::chrono::steady_clock::now();
+
+                        // detection_callback only for CONFIRMED events
+                        if (detection_cb_) {
+                            detection_cb_(filtered, stats, frame.data(), width, height);
+                        }
+                        break;
+                    }
+                    case EventState::CLOSING:
+                        // Should not normally receive detections during CLOSING
+                        break;
+                }
+            } else {
+                // No detections
+                switch (event_state_) {
+                    case EventState::PENDING: {
+                        // Pending event interrupted: discard
+                        ai_log->debug("Pending event discarded: detection interrupted");
+                        consecutive_detection_count_ = 0;
+                        cached_frames_.clear();
+                        cached_bytes_ = 0;
+                        detections_summary_.clear();
+                        frame_count_ = 0;
+                        window_candidate_.reset();
+                        snapshot_heap_.clear();
+                        event_state_ = EventState::IDLE;
+                        // Switch back to idle fps
+                        current_fps_ = config_.idle_fps;
+                        break;
+                    }
+                    case EventState::CONFIRMED: {
+                        // Check timeout for confirmed events
+                        // (timeout check is done below for both detection/no-detection cases)
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+
+            // Check event timeout for CONFIRMED state
+            if (event_state_ == EventState::CONFIRMED) {
                 check_event_timeout();
             }
 
@@ -347,7 +458,7 @@ void AiPipelineHandler::inference_loop() {
             auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 end_time - start_time).count();
 
-            if (!filtered.empty()) {
+            if (has_detections) {
                 // Detected targets -> info level summary
                 std::ostringstream summary;
                 for (size_t i = 0; i < filtered.size(); ++i) {
@@ -378,6 +489,10 @@ void AiPipelineHandler::inference_loop() {
 
 void AiPipelineHandler::set_detection_callback(DetectionCallback cb) {
     detection_cb_ = std::move(cb);
+}
+
+void AiPipelineHandler::set_event_close_callback(EventCloseCallback cb) {
+    event_close_cb_ = std::move(cb);
 }
 
 // --- Event management helpers ---
@@ -416,12 +531,17 @@ void AiPipelineHandler::open_event(const std::vector<Detection>& detections) {
     event_id_ = "evt_" + format_timestamp(now_sys);
     event_start_time_ = now_sys;
     last_detection_time_ = std::chrono::steady_clock::now();
-    event_active_ = true;
+    // event_state_ is set by the caller (inference_loop state machine)
     frame_count_ = 0;
     cached_frames_.clear();
     cached_bytes_ = 0;
     event_dir_created_ = false;
     detections_summary_.clear();
+
+    // Reset smart snapshot selection state
+    window_candidate_.reset();
+    window_start_ = std::chrono::steady_clock::now();
+    snapshot_heap_.clear();
 
     // Log trigger info: first detection's class + confidence
     if (!detections.empty()) {
@@ -437,16 +557,38 @@ void AiPipelineHandler::close_event() {
     auto ai_log = spdlog::get("ai");
     if (!ai_log) ai_log = spdlog::default_logger();
 
+    event_state_ = EventState::CLOSING;
     auto end_time = std::chrono::system_clock::now();
 
+    // Flush any pending window candidate to Top-K before writing
+    submit_window_candidate();
+    window_candidate_.reset();
+
     // Skip disk write for empty events
-    if (cached_frames_.empty() && frame_count_ == 0) {
-        event_active_ = false;
+    if (snapshot_heap_.empty()) {
+        event_state_ = EventState::IDLE;
+        consecutive_detection_count_ = 0;
         ai_log->info("Event closed (empty, no disk write): event_id={}", event_id_);
+        // Switch back to idle fps
+        int old_fps = current_fps_.load();
+        current_fps_ = config_.idle_fps;
+        if (old_fps != config_.idle_fps) {
+            ai_log->info("Inference fps: {} -> {}, reason=timeout", old_fps, config_.idle_fps);
+        }
         return;
     }
 
+    // Sort snapshot_heap_ by timestamp for chronological disk write
+    std::sort(snapshot_heap_.begin(), snapshot_heap_.end(),
+              [](const SnapshotEntry& a, const SnapshotEntry& b) {
+                  return a.timestamp < b.timestamp;
+              });
+
+    // frame_count = actual number of snapshots written to disk
+    frame_count_ = static_cast<int>(snapshot_heap_.size());
+
     // Batch write to disk
+    bool disk_write_ok = true;
     try {
         std::string event_dir = config_.snapshot_dir + event_id_;
 
@@ -456,13 +598,13 @@ void AiPipelineHandler::close_event() {
             event_dir_created_ = true;
         }
 
-        // Write all cached JPEG files
-        for (const auto& frame : cached_frames_) {
-            std::string filepath = event_dir + "/" + frame.filename;
+        // Write all snapshot JPEG files
+        for (const auto& entry : snapshot_heap_) {
+            std::string filepath = event_dir + "/" + entry.filename;
             std::ofstream ofs(filepath, std::ios::binary);
             if (ofs) {
-                ofs.write(reinterpret_cast<const char*>(frame.jpeg_data.data()),
-                          static_cast<std::streamsize>(frame.jpeg_data.size()));
+                ofs.write(reinterpret_cast<const char*>(entry.jpeg_data.data()),
+                          static_cast<std::streamsize>(entry.jpeg_data.size()));
             } else {
                 ai_log->warn("Failed to write snapshot: {}", filepath);
             }
@@ -493,10 +635,12 @@ void AiPipelineHandler::close_event() {
             json_ofs << event_json.dump(4);
         } else {
             ai_log->warn("Failed to write event.json: {}", json_path);
+            disk_write_ok = false;
         }
 
     } catch (const std::exception& e) {
         ai_log->warn("Error during event close disk write: {}", e.what());
+        disk_write_ok = false;
     }
 
     // Calculate duration
@@ -507,10 +651,26 @@ void AiPipelineHandler::close_event() {
     ai_log->info("Event closed: event_id={}, duration={}s, snapshots={}, dir={}",
                  event_id_, duration, frame_count_, event_dir);
 
-    // Clear cache
+    // Call event close callback if registered and disk write succeeded
+    if (disk_write_ok && event_close_cb_) {
+        event_close_cb_();
+    } else if (!disk_write_ok) {
+        ai_log->warn("Skipping event close callback due to disk write failure: event_id={}", event_id_);
+    }
+
+    // Clear cache and reset state
     cached_frames_.clear();
     cached_bytes_ = 0;
-    event_active_ = false;
+    snapshot_heap_.clear();
+    consecutive_detection_count_ = 0;
+    event_state_ = EventState::IDLE;
+
+    // Switch back to idle fps
+    int old_fps = current_fps_.load();
+    current_fps_ = config_.idle_fps;
+    if (old_fps != config_.idle_fps) {
+        ai_log->info("Inference fps: {} -> {}, reason=timeout", old_fps, config_.idle_fps);
+    }
 }
 
 void AiPipelineHandler::encode_snapshot(const uint8_t* rgb_data, int width, int height) {
@@ -548,6 +708,64 @@ void AiPipelineHandler::encode_snapshot(const uint8_t* rgb_data, int width, int 
     if (cached_bytes_ >= max_bytes) {
         flush_cache();
     }
+}
+
+void AiPipelineHandler::update_window_candidate(const std::vector<uint8_t>& rgb_frame,
+                                                 int width, int height, float confidence) {
+    auto now_steady = std::chrono::steady_clock::now();
+
+    // Check if 1-second window has elapsed
+    auto window_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now_steady - window_start_).count();
+    if (window_elapsed >= 1000 && window_candidate_.has_value()) {
+        // Window ended: submit current candidate to Top-K
+        submit_window_candidate();
+        window_candidate_.reset();
+        window_start_ = now_steady;
+    }
+
+    // Update candidate within current window: higher confidence replaces
+    if (!window_candidate_.has_value() || confidence > window_candidate_->confidence) {
+        WindowCandidate wc;
+        wc.rgb_data = rgb_frame;  // Copy RGB data
+        wc.width = width;
+        wc.height = height;
+        wc.confidence = confidence;
+        wc.timestamp = std::chrono::system_clock::now();
+        window_candidate_ = std::move(wc);
+    }
+}
+
+void AiPipelineHandler::submit_window_candidate() {
+    auto ai_log = spdlog::get("ai");
+    if (!ai_log) ai_log = spdlog::default_logger();
+
+    if (!window_candidate_.has_value()) return;
+
+    auto& wc = window_candidate_.value();
+
+    // JPEG encode the candidate
+    std::vector<uint8_t> jpeg_data;
+    int result = stbi_write_jpg_to_func(stbi_write_callback, &jpeg_data,
+                                         wc.width, wc.height, 3, wc.rgb_data.data(), 85);
+    if (result == 0 || jpeg_data.empty()) {
+        ai_log->warn("JPEG encoding failed for window candidate");
+        return;
+    }
+
+    // Generate filename from timestamp
+    std::string ts = format_timestamp(wc.timestamp);
+    int seq = static_cast<int>(snapshot_heap_.size()) + 1;
+    std::ostringstream fname;
+    fname << ts << "_" << std::setfill('0') << std::setw(3) << seq << ".jpg";
+
+    SnapshotEntry entry;
+    entry.filename = fname.str();
+    entry.jpeg_data = std::move(jpeg_data);
+    entry.confidence = wc.confidence;
+    entry.timestamp = wc.timestamp;
+
+    try_submit_to_topk(snapshot_heap_, config_.max_snapshots_per_event, std::move(entry));
 }
 
 void AiPipelineHandler::update_detections_summary(const std::vector<Detection>& detections) {

@@ -940,3 +940,234 @@ RC_GTEST_PROP(LogManagementPBT, InvalidLevelRejection, ()) {
     std::string err;
     RC_ASSERT(parse_logging_config(kv, config, &err) == false);
 }
+
+// ===========================================================================
+// Task 1.3: FPS 配置解析 Example-based 单元测试
+// Feature: event-pipeline-optimization
+// ===========================================================================
+
+// ParseAiConfig_IdleFps_Default: 缺失 idle_fps → AiConfig.idle_fps == 1
+TEST(ConfigExampleTest, ParseAiConfig_IdleFps_Default) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"active_fps", "5"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_EQ(config.idle_fps, 1);
+}
+
+// ParseAiConfig_ActiveFps_Default: 缺失 active_fps → AiConfig.active_fps == 3
+TEST(ConfigExampleTest, ParseAiConfig_ActiveFps_Default) {
+    std::unordered_map<std::string, std::string> kv;
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_EQ(config.active_fps, 3);
+}
+
+// ParseAiConfig_BackwardCompat_OnlyInferenceFps: 仅 inference_fps=5 → active_fps=5, idle_fps=1
+TEST(ConfigExampleTest, ParseAiConfig_BackwardCompat_OnlyInferenceFps) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"inference_fps", "5"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_EQ(config.active_fps, 5);
+    EXPECT_EQ(config.idle_fps, 1);
+}
+
+// ParseAiConfig_BackwardCompat_AllThreeFields: idle_fps + active_fps + inference_fps → 忽略 inference_fps
+TEST(ConfigExampleTest, ParseAiConfig_BackwardCompat_AllThreeFields) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"idle_fps", "2"},
+        {"active_fps", "8"},
+        {"inference_fps", "15"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_EQ(config.idle_fps, 2);
+    EXPECT_EQ(config.active_fps, 8);
+}
+
+// ParseAiConfig_MaxSnapshotsDefault: 缺失 → 默认 10
+TEST(ConfigExampleTest, ParseAiConfig_MaxSnapshotsDefault) {
+    std::unordered_map<std::string, std::string> kv;
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_EQ(config.max_snapshots_per_event, 10);
+}
+
+// ParseAiConfig_MaxSnapshotsBelowOne: 值 < 1 → 使用默认 10
+TEST(ConfigExampleTest, ParseAiConfig_MaxSnapshotsBelowOne) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"max_snapshots_per_event", "0"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_TRUE(parse_ai_config(kv, config, &err));
+    EXPECT_EQ(config.max_snapshots_per_event, 10);
+}
+
+// ParseAiConfig_IdleFpsOutOfRange: idle_fps=0 或 11 → 返回 false
+TEST(ConfigExampleTest, ParseAiConfig_IdleFpsOutOfRange_Zero) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"idle_fps", "0"},
+        {"active_fps", "5"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_ai_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+TEST(ConfigExampleTest, ParseAiConfig_IdleFpsOutOfRange_Eleven) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"idle_fps", "11"},
+        {"active_fps", "15"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_ai_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+// ParseAiConfig_ActiveFpsOutOfRange: active_fps=0 或 31 → 返回 false
+TEST(ConfigExampleTest, ParseAiConfig_ActiveFpsOutOfRange_Zero) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"active_fps", "0"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_ai_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+TEST(ConfigExampleTest, ParseAiConfig_ActiveFpsOutOfRange_ThirtyOne) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"active_fps", "31"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_ai_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+// ParseAiConfig_IdleGteActive: idle_fps=3, active_fps=3 → 返回 false
+TEST(ConfigExampleTest, ParseAiConfig_IdleGteActive) {
+    std::unordered_map<std::string, std::string> kv = {
+        {"idle_fps", "3"},
+        {"active_fps", "3"}
+    };
+    AiConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_ai_config(kv, config, &err));
+    EXPECT_FALSE(err.empty());
+}
+
+// ===========================================================================
+// Task 1.4: Property 1 - FPS 配置解析正确性
+// Feature: event-pipeline-optimization, Property 1: FPS config parsing correctness
+// **Validates: Requirements 1.1, 1.2**
+// ===========================================================================
+
+RC_GTEST_PROP(EventPipelinePBT, FpsConfigParsingCorrectness, ()) {
+    // Generator: random idle_fps in [1,10], random active_fps in [idle_fps+1, 30]
+    int idle_fps = *rc::gen::inRange(1, 11);
+    int active_fps = *rc::gen::inRange(idle_fps + 1, 31);
+
+    std::unordered_map<std::string, std::string> kv = {
+        {"idle_fps", std::to_string(idle_fps)},
+        {"active_fps", std::to_string(active_fps)}
+    };
+
+    AiConfig config;
+    std::string err;
+    bool result = parse_ai_config(kv, config, &err);
+
+    RC_ASSERT(result == true);
+    RC_ASSERT(config.idle_fps == idle_fps);
+    RC_ASSERT(config.active_fps == active_fps);
+}
+
+// ===========================================================================
+// Task 1.5: Property 2 - FPS 范围验证
+// Feature: event-pipeline-optimization, Property 2: FPS range validation
+// **Validates: Requirements 1.5, 1.6**
+// ===========================================================================
+
+RC_GTEST_PROP(EventPipelinePBT, FpsRangeValidation, ()) {
+    // Generator: random idle_fps in {<1, >10}, random active_fps in {<1, >30}
+    // At least one of them must be out of range
+    bool idle_out_of_range = *rc::gen::arbitrary<bool>();
+    bool active_out_of_range = *rc::gen::arbitrary<bool>();
+    RC_PRE(idle_out_of_range || active_out_of_range);
+
+    int idle_fps;
+    if (idle_out_of_range) {
+        bool below = *rc::gen::arbitrary<bool>();
+        if (below) {
+            idle_fps = *rc::gen::inRange(-100, 1);  // < 1
+        } else {
+            idle_fps = *rc::gen::inRange(11, 200);   // > 10
+        }
+    } else {
+        idle_fps = *rc::gen::inRange(1, 11);  // valid
+    }
+
+    int active_fps;
+    if (active_out_of_range) {
+        bool below = *rc::gen::arbitrary<bool>();
+        if (below) {
+            active_fps = *rc::gen::inRange(-100, 1);  // < 1
+        } else {
+            active_fps = *rc::gen::inRange(31, 200);   // > 30
+        }
+    } else {
+        active_fps = *rc::gen::inRange(1, 31);  // valid
+    }
+
+    std::unordered_map<std::string, std::string> kv = {
+        {"idle_fps", std::to_string(idle_fps)},
+        {"active_fps", std::to_string(active_fps)}
+    };
+
+    AiConfig config;
+    std::string err;
+    bool result = parse_ai_config(kv, config, &err);
+
+    RC_ASSERT(result == false);
+    RC_ASSERT(!err.empty());
+}
+
+// ===========================================================================
+// Task 1.6: Property 3 - idle_fps < active_fps 交叉验证
+// Feature: event-pipeline-optimization, Property 3: idle_fps < active_fps cross-validation
+// **Validates: Requirements 1.7**
+// ===========================================================================
+
+RC_GTEST_PROP(EventPipelinePBT, IdleFpsLessThanActiveFpsCrossValidation, ()) {
+    // Generator: random (idle, active) pair where idle >= active,
+    // both within their valid ranges
+    int idle_fps = *rc::gen::inRange(1, 11);   // [1, 10]
+    int active_fps = *rc::gen::inRange(1, 31); // [1, 30]
+    RC_PRE(idle_fps >= active_fps);
+
+    std::unordered_map<std::string, std::string> kv = {
+        {"idle_fps", std::to_string(idle_fps)},
+        {"active_fps", std::to_string(active_fps)}
+    };
+
+    AiConfig config;
+    std::string err;
+    bool result = parse_ai_config(kv, config, &err);
+
+    RC_ASSERT(result == false);
+    RC_ASSERT(!err.empty());
+    // error_msg should contain descriptive information
+    RC_ASSERT(err.find("idle_fps") != std::string::npos);
+    RC_ASSERT(err.find("active_fps") != std::string::npos);
+}

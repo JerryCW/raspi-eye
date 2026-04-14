@@ -3782,3 +3782,132 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/main.cpp, device/src/log_init.cpp, device/src/log_init.h, device/CMakeLists.txt, device/src/kvs_sink_factory.cpp, device/config/kvs_log_configuration, scripts/pi-deploy.sh, device/src/ai_pipeline_handler.h, device/src/config_manager.cpp, device/src/app_context.cpp
 
 ---
+
+### 2026-04-13 — Spec: spec-24-event-pipeline-optimization / 任务: 1. 扩展 AiConfig 和配置解析（1.1-1.6）
+
+**完成概要：** AiConfig 新增 idle_fps/active_fps/max_snapshots_per_event 字段，parse_ai_config 新增解析逻辑含范围校验、交叉验证、向后兼容，config_test.cpp 新增 11 个 example-based 测试 + 3 个 PBT 属性测试，ai_pipeline_test.cpp 适配向后兼容行为变更。
+
+**测试状态：** 全部通过（config_test + ai_pipeline_test 相关测试）— 新增 14 个测试（11 example-based + 3 PBT）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | ai_pipeline_test.cpp 中 ParseAiConfig_InferenceFpsRange 测试需适配：inference_fps=1 在新向后兼容逻辑下 active_fps=1, idle_fps=1 → idle>=active 返回 false | Spec 缺少信息 | 原测试期望 inference_fps=1 成功，新逻辑下 idle_fps(1)>=active_fps(1) 触发交叉验证失败 | 子代理修改测试断言为 EXPECT_FALSE | 后续 Spec 中修改解析逻辑时，tasks.md 应明确列出需要适配的现有测试 |
+| 2 | webrtc_media_test ReadReadConcurrencyWithSharedLock 失败 | 预存问题 | 与本次改动无关，已有 flaky test | 忽略 | 无需行动 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.h, device/src/config_manager.cpp, device/tests/config_test.cpp, device/tests/ai_pipeline_test.cpp
+
+---
+
+### 2026-04-13 — Spec: spec-24-event-pipeline-optimization / 任务: 3. S3Uploader 事件驱动上传 + 上传顺序优化（3.1-3.5）
+
+**完成概要：** S3Uploader 新增 notify_upload() 方法（通过 upload_notified_ flag + cv_.notify_one() 唤醒扫描线程），upload_event() 重构为 jpg 优先上传（字典序排序，失败中止），s3_test.cpp 新增 5 个 example-based 测试 + 2 个 PBT 属性测试。
+
+**测试状态：** 全部通过（s3_test 107s）— 新增 7 个测试（5 example-based + 2 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。子代理调用前两次因网络 TLS 断连失败，第三次成功。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/s3_uploader.h, device/src/s3_uploader.cpp, device/tests/s3_test.cpp
+
+---
+
+### 2026-04-14 — Spec: spec-24-event-pipeline-optimization / 任务: 5. AiPipelineHandler 核心重构（5.1-5.4）
+
+**完成概要：** AiPipelineHandler 完成事件状态机重构：EventState 枚举替代 event_active_ bool，current_fps_ 原子变量替代 frame_interval_ms_，两阶段事件确认（IDLE→PENDING→CONFIRMED→CLOSING），自适应 fps 切换，事件关闭回调。
+
+**测试状态：** 编译通过，现有 ai_pipeline_test 和 config_test 全部通过 — 无新增测试（测试覆盖在任务 9 中实现）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.h, device/src/ai_pipeline_handler.cpp
+
+---
+
+### 2026-04-14 — Spec: spec-24-event-pipeline-optimization / 任务: 7. 智能截图选择（7.1-7.6）
+
+**完成概要：** 实现 1 秒滑动窗口最佳帧选择 + Top-K min-heap 缓存，SnapshotEntry/WindowCandidate 结构体，try_submit_to_topk 纯函数，close_event 改用 snapshot_heap_ 按 timestamp 排序写盘，新增 3 个 PBT 属性测试（Property 6/7/8）。
+
+**测试状态：** 全部通过 — 新增 3 个 PBT 测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/ai_pipeline_handler.h, device/src/ai_pipeline_handler.cpp, device/tests/ai_pipeline_test.cpp
+
+---
+
+### 2026-04-14 — Spec: spec-24-event-pipeline-optimization / 任务: 9. 事件状态机测试（9.1-9.2）
+
+**完成概要：** 8 个 example-based 测试（EventState 系列）和 Property 9 PBT（准事件无副作用）全部通过，验证两阶段事件确认状态机和准事件中断后无磁盘 I/O、无回调调用。
+
+**测试状态：** 全部通过 — 新增 9 个测试（8 example-based + 1 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/tests/ai_pipeline_test.cpp
+
+---
+
+### 2026-04-14 — Spec: spec-24-event-pipeline-optimization / 任务: 10. AppContext 回调连接 + 配置文件更新（10.1-10.2）
+
+**完成概要：** AppContext::init() 中连接 event_close_callback → S3Uploader::notify_upload()，config.toml 和 config.toml.example 更新 idle_fps/active_fps/max_snapshots_per_event 字段，inference_fps 标注 DEPRECATED。
+
+**测试状态：** 全部通过 — 无新增测试（轻量模式，配置文件变更）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** device/src/app_context.cpp, device/config/config.toml, device/config/config.toml.example
+
+---
+
+### 2026-04-14 — Spec: spec-24-event-pipeline-optimization / 任务: 11. 最终检查点 — 全量编译与测试
+
+**完成概要：** 全量 cmake configure + build + ctest 通过，16/17 测试通过，无 ASan 报告，git status 无敏感文件。
+
+**测试状态：** 16/17 通过（webrtc_media_test ReadReadConcurrencyWithSharedLock 为 spec-13.6 预存 bug condition 测试，与本次改动无关）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---

@@ -371,6 +371,22 @@ void S3Uploader::set_put_function(S3PutFunction fn) {
 }
 
 // ============================================================
+// S3Uploader::notify_upload — event-driven upload trigger
+// ============================================================
+
+void S3Uploader::notify_upload() {
+    // Set the notification flag and wake up the scan thread.
+    // If scan_loop is in cv_.wait_for(), it will be woken up immediately.
+    // If scan_loop is processing uploads, the flag persists until next wait_for.
+    // After stop(), the thread is joined and notify has no receiver — safe to ignore.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        upload_notified_ = true;
+    }
+    cv_.notify_one();
+}
+
+// ============================================================
 // S3Uploader::start — launch background scan thread
 // ============================================================
 
@@ -424,10 +440,10 @@ void S3Uploader::scan_loop() {
     while (true) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            if (cv_.wait_for(lock, std::chrono::seconds(config_.scan_interval_sec),
-                             [this] { return stop_requested_; })) {
-                break;  // stop requested
-            }
+            cv_.wait_for(lock, std::chrono::seconds(config_.scan_interval_sec),
+                         [this] { return stop_requested_ || upload_notified_; });
+            if (stop_requested_) break;
+            upload_notified_ = false;  // consume the notification
         }
 
         auto events = scan_closed_events(snapshot_dir_);
@@ -491,21 +507,54 @@ bool S3Uploader::upload_event(const std::string& event_dir) {
         return false;
     }
 
-    // Upload each file in the event directory
+    // Collect files: separate jpg files and event.json
+    std::vector<std::string> jpg_files;
+    std::string event_json_file;
     for (const auto& file_entry : fs::directory_iterator(event_dir)) {
         if (!file_entry.is_regular_file()) continue;
         auto filename = file_entry.path().filename().string();
         if (filename == ".uploaded") continue;
 
-        auto s3_key = build_s3_key(device_id_, date_str, event_id, filename);
+        if (filename == "event.json") {
+            event_json_file = filename;
+        } else {
+            auto ext = file_entry.path().extension().string();
+            for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (ext == ".jpg" || ext == ".jpeg") {
+                jpg_files.push_back(filename);
+            }
+        }
+    }
+
+    // Sort jpg files lexicographically
+    std::sort(jpg_files.begin(), jpg_files.end());
+
+    // Upload all .jpg files first
+    for (const auto& jpg : jpg_files) {
+        auto s3_key = build_s3_key(device_id_, date_str, event_id, jpg);
         if (s3_key.empty()) {
-            s3_log->error("Invalid S3 key for file {} in {}", filename, event_dir);
+            s3_log->error("Invalid S3 key for file {} in {}", jpg, event_dir);
             return false;
         }
+        auto ctype = content_type_for(jpg);
+        auto local_path = (fs::path(event_dir) / jpg).string();
+        if (!upload_file(local_path, s3_key, ctype)) {
+            s3_log->error("Failed to upload {} after retries", jpg);
+            return false;
+        }
+    }
 
-        auto ctype = content_type_for(filename);
-        if (!upload_file(file_entry.path().string(), s3_key, ctype)) {
-            s3_log->error("Failed to upload {} after retries", filename);
+    // Upload event.json last
+    if (!event_json_file.empty()) {
+        auto s3_key = build_s3_key(device_id_, date_str, event_id, event_json_file);
+        if (s3_key.empty()) {
+            s3_log->error("Invalid S3 key for file {} in {}", event_json_file, event_dir);
+            return false;
+        }
+        auto ctype = content_type_for(event_json_file);
+        auto local_path = (fs::path(event_dir) / event_json_file).string();
+        if (!upload_file(local_path, s3_key, ctype)) {
+            s3_log->error("Failed to upload {} after retries", event_json_file);
             return false;
         }
     }

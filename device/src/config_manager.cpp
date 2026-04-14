@@ -256,14 +256,62 @@ bool parse_ai_config(
         config.model_path = *val;
     }
 
-    // inference_fps (1-30 range, 0 or out-of-range is error)
-    if (auto* val = find_value(kv, "inference_fps")) {
-        int fps = std::stoi(*val);
-        if (fps < 1 || fps > 30) {
-            if (error_msg) *error_msg = "inference_fps must be 1-30, got: " + *val;
+    // --- Adaptive FPS: idle_fps / active_fps / inference_fps (backward compat) ---
+    const bool has_idle_fps = (find_value(kv, "idle_fps") != nullptr);
+    const bool has_active_fps = (find_value(kv, "active_fps") != nullptr);
+    const bool has_inference_fps = (find_value(kv, "inference_fps") != nullptr);
+
+    if (has_idle_fps) {
+        int fps = std::stoi(*find_value(kv, "idle_fps"));
+        if (fps < 1 || fps > 10) {
+            if (error_msg) *error_msg = "idle_fps must be 1-10, got: " + std::to_string(fps);
             return false;
         }
+        config.idle_fps = fps;
+    }
+
+    if (has_active_fps) {
+        int fps = std::stoi(*find_value(kv, "active_fps"));
+        if (fps < 1 || fps > 30) {
+            if (error_msg) *error_msg = "active_fps must be 1-30, got: " + std::to_string(fps);
+            return false;
+        }
+        config.active_fps = fps;
+    }
+
+    // Backward compatibility: only inference_fps present -> active_fps = inference_fps, idle_fps = 1
+    if (!has_idle_fps && !has_active_fps && has_inference_fps) {
+        int fps = std::stoi(*find_value(kv, "inference_fps"));
+        if (fps < 1 || fps > 30) {
+            if (error_msg) *error_msg = "inference_fps must be 1-30, got: " + std::to_string(fps);
+            return false;
+        }
+        config.active_fps = fps;
+        config.idle_fps = 1;
         config.inference_fps = fps;
+    } else if (has_inference_fps) {
+        // idle_fps + active_fps present -> ignore inference_fps, just parse it for the field
+        int fps = std::stoi(*find_value(kv, "inference_fps"));
+        config.inference_fps = fps;
+        if (log) log->info("idle_fps and active_fps present, ignoring inference_fps={}", fps);
+    }
+
+    // Cross-validation: idle_fps must be strictly less than active_fps
+    if (config.idle_fps >= config.active_fps) {
+        if (error_msg) *error_msg = "idle_fps (" + std::to_string(config.idle_fps)
+            + ") must be less than active_fps (" + std::to_string(config.active_fps) + ")";
+        return false;
+    }
+
+    // max_snapshots_per_event (< 1 uses default 10 with warn)
+    if (auto* val = find_value(kv, "max_snapshots_per_event")) {
+        int snapshots = std::stoi(*val);
+        if (snapshots < 1) {
+            if (log) log->warn("max_snapshots_per_event={} is below 1, using default 10", snapshots);
+            config.max_snapshots_per_event = 10;
+        } else {
+            config.max_snapshots_per_event = snapshots;
+        }
     }
 
     // confidence_threshold

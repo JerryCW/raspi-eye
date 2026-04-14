@@ -157,6 +157,7 @@ bool AppContext::init(const std::string& config_path,
 #endif
 
     // --- Create S3Uploader (optional, requires S3 bucket config) ---
+    // Note: S3Uploader is created before the callback connection below.
     const auto& s3_cfg = config.s3_config();
     if (!s3_cfg.bucket.empty()) {
         auto http_client = std::make_shared<CurlHttpClient>();
@@ -179,6 +180,16 @@ bool AppContext::init(const std::string& config_path,
     } else {
         spdlog::info("S3Uploader skipped: S3 bucket not configured");
     }
+
+    // --- Connect event close callback: AiPipelineHandler -> S3Uploader ---
+#ifdef ENABLE_YOLO
+    if (impl_->ai_handler_ && impl_->s3_uploader_) {
+        impl_->ai_handler_->set_event_close_callback([this]() {
+            impl_->s3_uploader_->notify_upload();
+        });
+        if (logger) logger->info("Event close callback connected: AiPipelineHandler -> S3Uploader");
+    }
+#endif
 
     // --- Info log (only resource identifiers, no secrets) ---
     if (logger) {
