@@ -15,6 +15,7 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED gstreamer-1.0)
 pkg_check_modules(GST_APP REQUIRED gstreamer-app-1.0)
+pkg_check_modules(GST_VIDEO REQUIRED gstreamer-video-1.0)
 
 # Google Test（FetchContent）
 include(FetchContent)
@@ -256,8 +257,9 @@ target_link_libraries(webrtc_module PUBLIC spdlog::spdlog credential_module conf
 
 # WebRTC media module
 add_library(webrtc_media_module STATIC src/webrtc_media.cpp)
-target_include_directories(webrtc_media_module PUBLIC src)
-target_link_libraries(webrtc_media_module PUBLIC spdlog::spdlog webrtc_module)
+target_include_directories(webrtc_media_module PUBLIC src ${GST_VIDEO_INCLUDE_DIRS})
+target_link_directories(webrtc_media_module PUBLIC ${GST_VIDEO_LIBRARY_DIRS})
+target_link_libraries(webrtc_media_module PUBLIC spdlog::spdlog webrtc_module ${GST_VIDEO_LIBRARIES})
 
 # Link webrtc_media_module to pipeline_manager
 target_link_libraries(pipeline_manager PUBLIC webrtc_media_module)
