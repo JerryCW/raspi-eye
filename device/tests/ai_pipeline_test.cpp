@@ -447,7 +447,6 @@ RC_GTEST_PROP(AiPipelinePBT, FrameCountConsistency, ()) {
     event_json["device_id"] = "test_device";
     event_json["start_time"] = "2026-04-12T15:30:45Z";
     event_json["end_time"] = "2026-04-12T15:31:15Z";
-    event_json["status"] = "closed";
     event_json["frame_count"] = frame_count;
     event_json["detections_summary"] = nlohmann::json::object();
 

@@ -30,6 +30,8 @@ struct AiConfig {
     int event_timeout_sec = 15;                  // Event timeout in seconds
     int max_cache_mb = 16;                       // JPEG memory cache limit (MB)
     std::string device_id;                       // Device identifier (from aws.thing_name)
+    std::string kvs_stream_name;                 // KVS stream name (for event.json → viewer playback)
+    std::string kvs_region;                      // KVS region (for event.json → viewer playback)
     int num_threads = 2;                         // ONNX Runtime intra-op threads
     bool use_xnnpack = false;                    // Enable XNNPACK EP (ARM NEON)
 

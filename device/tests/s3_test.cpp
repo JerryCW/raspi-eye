@@ -471,16 +471,13 @@ RC_GTEST_PROP(EventScan, OnlyClosedEventsReturned, ()) {
         j["start_time"] = "2026-04-12T15:30:45Z";
 
         switch (event_type) {
-            case 0:  // closed with end_time
-                j["status"] = "closed";
+            case 0:  // has end_time → should be picked up
                 j["end_time"] = "2026-04-12T15:31:15Z";
                 expected_closed.push_back(event_dir.string());
                 break;
-            case 1:  // active
-                j["status"] = "active";
+            case 1:  // no end_time → should be skipped
                 break;
-            case 3:  // closed but missing end_time
-                j["status"] = "closed";
+            case 3:  // no end_time → should be skipped
                 break;
         }
 
@@ -491,14 +488,13 @@ RC_GTEST_PROP(EventScan, OnlyClosedEventsReturned, ()) {
 
     auto result = scan_closed_events(tmp_dir.string());
 
-    // Every returned event must be in expected_closed
+    // Every returned event must have end_time
     for (const auto& path : result) {
         auto event_json_path = fs::path(path) / "event.json";
         RC_ASSERT(fs::exists(event_json_path));
 
         std::ifstream ifs(event_json_path);
         auto j = nlohmann::json::parse(ifs);
-        RC_ASSERT(j.value("status", "") == "closed");
         RC_ASSERT(j.contains("end_time"));
     }
 

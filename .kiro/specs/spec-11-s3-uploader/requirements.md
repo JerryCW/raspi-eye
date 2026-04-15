@@ -2,13 +2,13 @@
 
 ## 简介
 
-本 Spec 实现检测事件截图上传到 S3 的功能。S3Uploader 是一个后台线程模块，定期扫描 `snapshot_dir` 下的事件目录，找到 `event.json` 中 `status` 为 `"closed"` 的事件，将整个事件目录（所有 JPEG + event.json）通过 libcurl HTTP PUT + AWS SigV4 签名逐文件上传到 S3 桶，上传成功后删除本地事件目录。
+本 Spec 实现检测事件截图上传到 S3 的功能。S3Uploader 是一个后台线程模块，定期扫描 `snapshot_dir` 下的事件目录，找到包含 `event.json` 的已关闭事件，将整个事件目录（所有 JPEG + event.json）通过 libcurl HTTP PUT + AWS SigV4 签名逐文件上传到 S3 桶，上传成功后删除本地事件目录。
 
 凭证来源：复用 Spec 7 的 CredentialProvider 获取 STS 临时凭证（access_key_id + secret_access_key + session_token）。认证链路：IoT X.509 证书 → IoT Credentials Provider → STS 临时凭证 → SigV4 签名 → S3 PUT。S3 不支持 IoT 证书直接认证，必须经过 STS 中转。SigV4 签名使用 OpenSSL libcrypto（SHA256 + HMAC-SHA256），不引入 AWS SDK for C++。
 
 ## 前置条件
 
-- Spec 10（ai-pipeline）✅ — 提供事件管理、JPEG 截图保存和 event.json 契约（`status: "closed"` 表示事件已关闭可上传）
+- Spec 10（ai-pipeline）✅ — 提供事件管理、JPEG 截图保存和 event.json 契约（event.json 存在即表示事件已关闭可上传）
 - Spec 7（credential-provider）✅ — 提供 STS 临时凭证（access_key_id、secret_access_key、session_token）和 libcurl + OpenSSL 基础设施
 
 ## 术语表
@@ -17,7 +17,39 @@
 - **SigV4**：AWS Signature Version 4，S3 REST API 的请求签名算法，使用 HMAC-SHA256 计算
 - **snapshot_dir**：事件截图保存根目录（默认 `device/events/`），由 Spec 10 的 AiPipelineHandler 写入
 - **事件目录**：`snapshot_dir` 下的 `evt_{timestamp}/` 目录，包含 JPEG 文件和 `event.json` 元数据
-- **event.json**：事件元数据文件，包含 event_id、device_id、start_time、end_time、status、frame_count、detections_summary。`status: "closed"` 表示事件已关闭可上传
+- **event.json**：事件元数据文件，由 AiPipelineHandler 在事件关闭时写入（最后写入的文件，存在即表示事件已关闭）。完整字段如下：
+
+```json
+{
+    "event_id": "evt_20260412_153045",
+    "device_id": "RaspiEyeAlpha",
+    "start_time": "2026-04-12T15:30:45Z",
+    "end_time": "2026-04-12T15:31:15Z",
+    "frame_count": 8,
+    "kvs_stream_name": "RaspiEyeAlphaStream",
+    "kvs_region": "ap-southeast-1",
+    "detections_summary": {
+        "bird": { "count": 8, "max_confidence": 0.92 },
+        "cat": { "count": 3, "max_confidence": 0.78 }
+    },
+    "snapshots": [
+        "20260412_153046_001.jpg",
+        "20260412_153047_002.jpg"
+    ]
+}
+```
+
+  | 字段 | 类型 | 说明 |
+  |------|------|------|
+  | event_id | string | 事件唯一标识，格式 `evt_YYYYMMDD_HHMMSS` |
+  | device_id | string | 设备标识，来自 config.toml `[aws].thing_name` |
+  | start_time | string | 事件开始时间，ISO 8601 UTC 格式 |
+  | end_time | string | 事件结束时间，ISO 8601 UTC 格式 |
+  | frame_count | int | 保存的截图数量（Top-K 选出的最终数量） |
+  | kvs_stream_name | string | KVS 流名称，来自 config.toml `[kvs].stream_name`，viewer 用于定位回放 |
+  | kvs_region | string | KVS 所在 AWS region，来自 config.toml `[kvs].aws_region` |
+  | detections_summary | object | YOLO 检测汇总，key 为 COCO 类名，value 含 count 和 max_confidence |
+  | snapshots | array | 截图文件名列表（按时间排序），Lambda 用于知道哪些图片需要送 SageMaker 识别 |
 - **CredentialProvider**：Spec 7 实现的凭证模块，提供 `get_credentials()` 返回 `shared_ptr<const StsCredential>`
 - **StsCredential**：STS 临时凭证结构体（access_key_id、secret_access_key、session_token、expiration）
 - **S3 路径**：上传目标路径格式 `{device_id}/{date}/{event_id}/{filename}`，例如 `RaspiEyeAlpha/2026-04-12/evt_20260412_153045/20260412_153046_001.jpg`。date 从 event.json 的 start_time 中提取（YYYY-MM-DD 格式），便于按日期分区查询和 S3 生命周期策略
@@ -64,8 +96,8 @@
   - 原因：密码学算法自行实现容易出错
   - 建议：使用 OpenSSL libcrypto 的 `EVP_DigestInit/Update/Final` 和 `HMAC()`
 - SHALL NOT 在上传线程中持有 GStreamer 对象的引用（来源：GStreamer 线程安全约束）
-- SHALL NOT 在扫描或上传过程中删除 `status` 不为 `"closed"` 的事件目录（来源：数据安全）
-  - 原因：`status: "active"` 的事件可能正在被 AiPipelineHandler 写入
+- SHALL NOT 在扫描或上传过程中删除不含 `event.json` 的事件目录（来源：数据安全）
+  - 原因：不含 event.json 的目录可能正在被 AiPipelineHandler 写入
 - SHALL NOT 在 S3 key 构建中直接拼接未校验的字符串（来源：安全基线）
   - 建议：S3 路径构建函数中校验各字段仅包含字母数字、连字符、下划线和点号
 
@@ -135,15 +167,14 @@
 
 1. THE S3Uploader SHALL 在 `start()` 时创建后台扫描线程
 2. THE 扫描线程 SHALL 每隔 scan_interval_sec 秒扫描一次 snapshot_dir 目录
-3. WHEN 扫描到事件目录时，THE S3Uploader SHALL 读取该目录下的 `event.json`，仅处理 `status` 为 `"closed"` 的事件
+3. WHEN 扫描到事件目录时，THE S3Uploader SHALL 检查该目录下是否存在 `event.json`，存在即视为已关闭的事件可以上传
 4. WHEN 事件目录中不存在 `event.json` 或 `event.json` 解析失败或缺少 `end_time` 字段时，THE S3Uploader SHALL 记录 warn 日志并跳过该目录（下次扫描重试）
-5. WHEN 事件 status 不为 `"closed"` 时，THE S3Uploader SHALL 跳过该事件目录（不上传、不删除）
-6. WHEN 找到可上传的事件时，THE S3Uploader SHALL 逐文件上传事件目录中的所有文件（JPEG + event.json）
-7. WHEN 事件目录中所有文件均上传成功时，THE S3Uploader SHALL 先写入 `.uploaded` 标记文件，然后删除本地事件目录。崩溃恢复时检测到 `.uploaded` 标记则直接删除目录
-8. WHEN 事件目录中任一文件上传失败（重试耗尽）时，THE S3Uploader SHALL 跳过该事件，记录 error 日志，在下次扫描时重试
-9. THE S3Uploader SHALL 在 `stop()` 时通知扫描线程退出并 join 等待线程结束
-10. THE S3Uploader SHALL 通过 spdlog 记录每次扫描的结果：发现的事件数、上传成功数、跳过数
-11. WHEN snapshot_dir 不存在时，THE S3Uploader SHALL 跳过本次扫描（不报错）
+5. WHEN 找到可上传的事件时，THE S3Uploader SHALL 逐文件上传事件目录中的所有文件（JPEG + event.json）
+6. WHEN 事件目录中所有文件均上传成功时，THE S3Uploader SHALL 先写入 `.uploaded` 标记文件，然后删除本地事件目录。崩溃恢复时检测到 `.uploaded` 标记则直接删除目录
+7. WHEN 事件目录中任一文件上传失败（重试耗尽）时，THE S3Uploader SHALL 跳过该事件，记录 error 日志，在下次扫描时重试
+8. THE S3Uploader SHALL 在 `stop()` 时通知扫描线程退出并 join 等待线程结束
+9. THE S3Uploader SHALL 通过 spdlog 记录每次扫描的结果：发现的事件数、上传成功数、跳过数
+10. WHEN snapshot_dir 不存在时，THE S3Uploader SHALL 跳过本次扫描（不报错）
 
 ### 需求 5：上传失败重试
 
@@ -277,7 +308,7 @@ std::vector<std::string> scan_closed_events(const std::string& snapshot_dir) {
         auto event_json_path = entry.path() / "event.json";
         if (!std::filesystem::exists(event_json_path)) continue;
         auto j = nlohmann::json::parse(read_file(event_json_path));
-        if (j.value("status", "") == "closed" && j.contains("end_time")) {
+        if (j.contains("end_time")) {
             result.push_back(entry.path().string());
         }
     }
@@ -299,5 +330,5 @@ cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device
 - 云端 AI 推理（Spec 17）
 - 上传进度通知或上传队列优先级
 - 事件目录的自动轮转或磁盘空间管理
-- 修改 AiPipelineHandler 的事件管理逻辑或 event.json 格式
+- 修改 AiPipelineHandler 的事件管理逻辑（event.json 格式已在本文档中定义）
 - AWS SDK for C++（使用 libcurl + OpenSSL 手动签名）

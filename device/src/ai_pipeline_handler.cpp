@@ -616,7 +616,6 @@ void AiPipelineHandler::close_event() {
         event_json["device_id"] = config_.device_id;
         event_json["start_time"] = format_utc_time(event_start_time_);
         event_json["end_time"] = format_utc_time(end_time);
-        event_json["status"] = "closed";
         event_json["frame_count"] = frame_count_;
 
         nlohmann::json summary_json = nlohmann::json::object();
@@ -627,6 +626,17 @@ void AiPipelineHandler::close_event() {
             };
         }
         event_json["detections_summary"] = summary_json;
+
+        // KVS playback info (for viewer to locate video clip)
+        event_json["kvs_stream_name"] = config_.kvs_stream_name;
+        event_json["kvs_region"] = config_.kvs_region;
+
+        // Snapshot filenames list (for Lambda to know which images to classify)
+        nlohmann::json snapshots_arr = nlohmann::json::array();
+        for (const auto& entry : snapshot_heap_) {
+            snapshots_arr.push_back(entry.filename);
+        }
+        event_json["snapshots"] = snapshots_arr;
 
         // Write event.json
         std::string json_path = event_dir + "/event.json";

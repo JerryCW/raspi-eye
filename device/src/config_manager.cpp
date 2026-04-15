@@ -530,6 +530,9 @@ bool ConfigManager::load(const std::string& config_path,
     }
     // Set device_id from aws config
     ai_config_.device_id = aws_config_.thing_name;
+    // Set KVS info for event.json (viewer playback)
+    ai_config_.kvs_stream_name = kvs_config_.stream_name;
+    ai_config_.kvs_region = kvs_config_.aws_region;
 
     // Parse [s3] (optional)
     std::string s3_err;

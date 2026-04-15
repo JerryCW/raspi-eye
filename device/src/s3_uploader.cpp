@@ -228,7 +228,7 @@ std::vector<std::string> scan_closed_events(const std::string& snapshot_dir) {
                 continue;
             }
             auto j = nlohmann::json::parse(ifs);
-            if (j.value("status", "") == "closed" && j.contains("end_time")) {
+            if (j.contains("end_time")) {
                 result.push_back(entry.path().string());
             }
         } catch (const nlohmann::json::exception& e) {
