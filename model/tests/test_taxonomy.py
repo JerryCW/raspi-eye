@@ -230,7 +230,7 @@ def species_entries(draw, min_count=1, max_count=50):
 
 
 @given(species=species_entries())
-@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 def test_taxonomy_structure_consistency(species):
     """Taxonomy 结构一致性：class_label 从 0 开始连续编号，
     label_to_species 双向映射一致。

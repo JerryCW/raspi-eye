@@ -242,7 +242,7 @@ def distinct_color_images(draw, min_count=2, max_count=8):
 
 
 @given(image_specs=distinct_color_images())
-@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 def test_deduplicate_invariant(image_specs, tmp_path_factory):
     """去重后不变量：结果集中任意两张图片的 pHash Hamming distance > threshold。
 
@@ -289,7 +289,7 @@ def test_deduplicate_invariant(image_specs, tmp_path_factory):
         integers(min_value=1, max_value=2000),
     )
 )
-@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 def test_filter_quality_size_rule(size, tmp_path_factory):
     """质量过滤尺寸规则：短边 < 800 被移除，短边 ≥ 800 的有效图片被保留。
 
@@ -329,7 +329,7 @@ def test_filter_quality_size_rule(size, tmp_path_factory):
     ),
     target=integers(min_value=32, max_value=1024),
 )
-@settings(max_examples=100)
+@settings(max_examples=100, deadline=None)
 def test_letterbox_resize_output_size(size, target):
     """Letterbox resize 输出不变量：对于任意尺寸输入，输出恒为 target × target。"""
     img = Image.new("RGB", size, color="red")

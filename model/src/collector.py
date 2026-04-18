@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """iNaturalist API 数据采集 + taxonomy 获取模块。
 
 提供 DataCollector 类，从 iNaturalist 公开 API 批量采集指定物种的
@@ -79,7 +81,7 @@ class DataCollector:
         return _retry_request(do_request)
 
     def _fetch_observations_page(
-        self, taxon_id: int, page: int
+        self, taxon_id: int, page: int, adult_only: bool = False
     ) -> dict:
         """获取单页观察记录。"""
         params = {
@@ -90,9 +92,10 @@ class DataCollector:
             "page": page,
             "order": "desc",
             "order_by": "votes",
-            "term_id": 1,
-            "term_value_id": 2,
         }
+        if adult_only:
+            params["term_id"] = 1
+            params["term_value_id"] = 2
         return self._api_get("/v1/observations", params)
 
     @staticmethod
@@ -162,57 +165,63 @@ class DataCollector:
 
         # 收集所有待下载的照片信息
         download_tasks: list[tuple[str, str, int, int]] = []  # (url, dest, obs_id, photo_id)
-        page = 1
-        total_api_results = 0
 
-        print(f"[{entry.scientific_name}] 查询 iNaturalist API（每页间隔 {self.config.global_config.rate_limit}s）...")
+        def _collect_urls(adult_only: bool, label: str):
+            """分页查询 API 收集照片 URL，追加到 download_tasks。"""
+            nonlocal next_seq
+            page = 1
+            print(f"[{entry.scientific_name}] 查询 iNaturalist API — {label}（每页间隔 {self.config.global_config.rate_limit}s）...")
 
-        while len(download_tasks) + len(manifest) < entry.max_images:
-            try:
-                sys.stdout.write(f"\r  API 第 {page} 页...")
-                sys.stdout.flush()
-                data = self._fetch_observations_page(entry.taxon_id, page)
-            except requests.RequestException as e:
-                logger.error(
-                    "获取 %s 第 %d 页失败，跳过: %s",
-                    entry.scientific_name, page, e,
-                )
-                break
-
-            results = data.get("results", [])
-            total_api_results = data.get("total_results", 0)
-            if not results:
-                break
-
-            photos = self._extract_photo_urls(results)
-            new_in_page = 0
-            for obs_id, photo_id, url in photos:
-                if len(download_tasks) + len(manifest) >= entry.max_images:
+            while len(download_tasks) + len(manifest) < entry.max_images:
+                try:
+                    sys.stdout.write(f"\r  API 第 {page} 页...")
+                    sys.stdout.flush()
+                    data = self._fetch_observations_page(entry.taxon_id, page, adult_only=adult_only)
+                except requests.RequestException as e:
+                    logger.error(
+                        "获取 %s 第 %d 页失败，跳过: %s",
+                        entry.scientific_name, page, e,
+                    )
                     break
-                key = f"{obs_id}_{photo_id}"
-                if key in existing_keys:
-                    stats.skipped += 1
-                    continue
-                existing_keys.add(key)
-                seq = next_seq + len(download_tasks)
-                filename = f"{species_prefix}_{seq:04d}.jpg"
-                dest = str(species_dir / filename)
-                download_tasks.append((url, dest, obs_id, photo_id))
-                new_in_page += 1
 
-            sys.stdout.write(
-                f"\r  API 第 {page} 页: {len(results)} 条记录, "
-                f"{new_in_page} 张新图, "
-                f"累计待下载={len(download_tasks)} "
-                f"(API 总计={total_api_results})\n"
-            )
-            sys.stdout.flush()
+                results = data.get("results", [])
+                total_api_results = data.get("total_results", 0)
+                if not results:
+                    break
 
-            # 检查是否还有更多页
-            total_results = data.get("total_results", 0)
-            if page * 200 >= total_results:
-                break
-            page += 1
+                photos = self._extract_photo_urls(results)
+                new_in_page = 0
+                for obs_id, photo_id, url in photos:
+                    if len(download_tasks) + len(manifest) >= entry.max_images:
+                        break
+                    key = f"{obs_id}_{photo_id}"
+                    if key in existing_keys:
+                        continue
+                    existing_keys.add(key)
+                    seq = next_seq + len(download_tasks)
+                    filename = f"{species_prefix}_{seq:04d}.jpg"
+                    dest = str(species_dir / filename)
+                    download_tasks.append((url, dest, obs_id, photo_id))
+                    new_in_page += 1
+
+                sys.stdout.write(
+                    f"\r  API 第 {page} 页: {len(results)} 条记录, "
+                    f"{new_in_page} 张新图, "
+                    f"累计待下载={len(download_tasks)} "
+                    f"(API 总计={total_api_results})\n"
+                )
+                sys.stdout.flush()
+
+                total_results = data.get("total_results", 0)
+                if page * 200 >= total_results:
+                    break
+                page += 1
+
+        # 策略：先查成鸟，不够再补查全部
+        _collect_urls(adult_only=True, label="仅成鸟")
+        if len(download_tasks) + len(manifest) < entry.max_images:
+            print(f"  成鸟数据不足 ({len(download_tasks) + len(manifest)}/{entry.max_images})，补查全部观察...")
+            _collect_urls(adult_only=False, label="全部观察")
 
         stats.skipped = len(manifest)  # 断点续传跳过的总数
 
