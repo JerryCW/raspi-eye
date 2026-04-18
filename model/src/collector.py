@@ -227,8 +227,7 @@ class DataCollector:
             f"线程={max_workers}"
         )
 
-        # 记录新下载成功的文件映射
-        new_entries: list[tuple[str, dict]] = []
+        # 记录新下载成功的文件映射（实时写入 manifest，支持中断续传）
         lock = threading.Lock()
 
         def _download_and_track(url, dest, obs_id, photo_id):
@@ -236,12 +235,15 @@ class DataCollector:
             if success:
                 filename = Path(dest).name
                 with lock:
-                    new_entries.append((filename, {
+                    manifest[filename] = {
                         "obs_id": obs_id,
                         "photo_id": photo_id,
                         "url": url,
-                    }))
+                    }
             return success
+
+        # 定期刷盘 manifest 的计数器
+        flush_counter = 0
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
@@ -252,9 +254,17 @@ class DataCollector:
             for future in as_completed(futures):
                 if future.result():
                     stats.downloaded += 1
+                    flush_counter += 1
                 else:
                     stats.failed += 1
                 done_count += 1
+
+                # 每 50 张成功下载刷盘一次 manifest
+                if flush_counter >= 50:
+                    with lock:
+                        with open(manifest_path, "w", encoding="utf-8") as f:
+                            json.dump(manifest, f, ensure_ascii=False, indent=2)
+                    flush_counter = 0
 
                 # 每 10 张或最后一张时打印进度
                 if done_count % 10 == 0 or done_count == total_tasks:
@@ -271,9 +281,7 @@ class DataCollector:
         if total_tasks > 0:
             print()  # 换行
 
-        # 更新 manifest
-        for filename, info in new_entries:
-            manifest[filename] = info
+        # 最终刷盘 manifest
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
 

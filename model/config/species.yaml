@@ -7,7 +7,7 @@
 global:
   image_size: 518
   phash_threshold: 8
-  rate_limit: 1.0
+  rate_limit: 0.5
   random_seed: 42
   download_threads: 10
 
