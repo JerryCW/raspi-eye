@@ -7,6 +7,8 @@ research grade 成鸟观察照片，并获取物种分类层级信息生成 taxo
 import json
 import logging
 import os
+import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -136,20 +138,39 @@ class DataCollector:
         2. 提取每个 observation 的第一张照片 URL，替换为 original 尺寸
         3. 多线程并发下载图片到 raw/{scientific_name}/
         4. 支持断点续传（跳过已存在文件）
+        5. 顺序编号命名，映射关系写入 manifest.json
         """
         stats = CollectStats(species=entry.scientific_name, target=entry.max_images)
         species_dir = self.output_dir / entry.scientific_name
         species_dir.mkdir(parents=True, exist_ok=True)
+        species_prefix = entry.scientific_name.replace(" ", "_")
 
-        # 收集已存在的文件名（断点续传）
-        existing_files = {f.name for f in species_dir.iterdir() if f.is_file()}
+        # 加载已有 manifest（断点续传）
+        manifest_path = species_dir / "manifest.json"
+        if manifest_path.is_file():
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        else:
+            manifest = {}  # filename -> {obs_id, photo_id, url}
+
+        # 已下载的 observation_id_photo_id 集合（用于去重）
+        existing_keys = {
+            f"{v['obs_id']}_{v['photo_id']}" for v in manifest.values()
+        }
+        # 下一个序号 = 已有文件数 + 1
+        next_seq = len(manifest)
 
         # 收集所有待下载的照片信息
-        download_tasks: list[tuple[str, str]] = []  # (url, dest_path)
+        download_tasks: list[tuple[str, str, int, int]] = []  # (url, dest, obs_id, photo_id)
         page = 1
+        total_api_results = 0
 
-        while len(download_tasks) + stats.skipped < entry.max_images:
+        print(f"[{entry.scientific_name}] 查询 iNaturalist API（每页间隔 {self.config.global_config.rate_limit}s）...")
+
+        while len(download_tasks) + len(manifest) < entry.max_images:
             try:
+                sys.stdout.write(f"\r  API 第 {page} 页...")
+                sys.stdout.flush()
                 data = self._fetch_observations_page(entry.taxon_id, page)
             except requests.RequestException as e:
                 logger.error(
@@ -159,19 +180,33 @@ class DataCollector:
                 break
 
             results = data.get("results", [])
+            total_api_results = data.get("total_results", 0)
             if not results:
                 break
 
             photos = self._extract_photo_urls(results)
+            new_in_page = 0
             for obs_id, photo_id, url in photos:
-                if len(download_tasks) + stats.skipped >= entry.max_images:
+                if len(download_tasks) + len(manifest) >= entry.max_images:
                     break
-                filename = f"{obs_id}_{photo_id}.jpg"
-                dest = str(species_dir / filename)
-                if filename in existing_files:
+                key = f"{obs_id}_{photo_id}"
+                if key in existing_keys:
                     stats.skipped += 1
                     continue
-                download_tasks.append((url, dest))
+                existing_keys.add(key)
+                seq = next_seq + len(download_tasks)
+                filename = f"{species_prefix}_{seq:04d}.jpg"
+                dest = str(species_dir / filename)
+                download_tasks.append((url, dest, obs_id, photo_id))
+                new_in_page += 1
+
+            sys.stdout.write(
+                f"\r  API 第 {page} 页: {len(results)} 条记录, "
+                f"{new_in_page} 张新图, "
+                f"累计待下载={len(download_tasks)} "
+                f"(API 总计={total_api_results})\n"
+            )
+            sys.stdout.flush()
 
             # 检查是否还有更多页
             total_results = data.get("total_results", 0)
@@ -179,18 +214,68 @@ class DataCollector:
                 break
             page += 1
 
-        # 多线程并发下载
+        stats.skipped = len(manifest)  # 断点续传跳过的总数
+
+        # 多线程并发下载（带实时进度）
+        total_tasks = len(download_tasks)
         max_workers = self.config.global_config.download_threads
+        start_time = time.time()
+
+        print(
+            f"[{entry.scientific_name}] "
+            f"待下载={total_tasks} 已有={len(manifest)} "
+            f"线程={max_workers}"
+        )
+
+        # 记录新下载成功的文件映射
+        new_entries: list[tuple[str, dict]] = []
+        lock = threading.Lock()
+
+        def _download_and_track(url, dest, obs_id, photo_id):
+            success = self._download_single(url, dest)
+            if success:
+                filename = Path(dest).name
+                with lock:
+                    new_entries.append((filename, {
+                        "obs_id": obs_id,
+                        "photo_id": photo_id,
+                        "url": url,
+                    }))
+            return success
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(self._download_single, url, dest): (url, dest)
-                for url, dest in download_tasks
+                executor.submit(_download_and_track, url, dest, obs_id, photo_id): dest
+                for url, dest, obs_id, photo_id in download_tasks
             }
+            done_count = 0
             for future in as_completed(futures):
                 if future.result():
                     stats.downloaded += 1
                 else:
                     stats.failed += 1
+                done_count += 1
+
+                # 每 10 张或最后一张时打印进度
+                if done_count % 10 == 0 or done_count == total_tasks:
+                    elapsed = time.time() - start_time
+                    speed = done_count / elapsed if elapsed > 0 else 0
+                    sys.stdout.write(
+                        f"\r  进度: {done_count}/{total_tasks} "
+                        f"({done_count * 100 // total_tasks if total_tasks > 0 else 100}%) "
+                        f"速度: {speed:.1f} 张/秒 "
+                        f"成功={stats.downloaded} 失败={stats.failed}"
+                    )
+                    sys.stdout.flush()
+
+        if total_tasks > 0:
+            print()  # 换行
+
+        # 更新 manifest
+        for filename, info in new_entries:
+            manifest[filename] = info
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
 
         # 打印统计
         print(
