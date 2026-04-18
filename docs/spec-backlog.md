@@ -96,9 +96,10 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
 | 14 | webrtc-sdp-fix | Bugfix: WebRTC SDP 协商 + ICE 连接 + NALU 格式修复（addSupportedCodec、ICE 缓存、byte-stream 格式） | spec-13.5 | device | ✅ |
-| 13.6 | webrtc-peer-lifecycle-fix | Bugfix: WebRTC peer connection 生命周期死锁修复 — deferred cleanup + shared_mutex + cleanup thread | spec-13 | device | 🔄 |
+| 13.6 | webrtc-peer-lifecycle-fix | Bugfix: WebRTC peer connection 生命周期死锁修复 — deferred cleanup + shared_mutex + cleanup thread | spec-13 | device | ✅ |
 | 15 | adaptive-streaming | 自适应码率控制 + 流模式切换（FULL/KVS_ONLY/WEBRTC_ONLY/DEGRADED） | spec-8, spec-13 | device | ✅ |
-| 16 | zero-copy-buffers | 缓冲区零拷贝重构与预分配池化，目标 CPU 负载 ~26% @ 720p15 | spec-15 | device | ⬜ |
+| 15.5 | shutdown-fix | Bugfix: Shutdown 卡死修复 — std::thread + condition_variable 替换 std::async | spec-15 | device | ✅ |
+| 16 | zero-copy-buffers | 缓冲区零拷贝重构与预分配池化，目标 CPU 负载 ~26% @ 720p15 | spec-15 | device | ✅ |
 
 零拷贝在自适应码率之后：自适应码率会动态启停分支改变数据流路径，零拷贝需要在最终路径上优化。
 
@@ -106,7 +107,9 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
-| 17 | sagemaker-endpoint | SageMaker Serverless 推理 endpoint（DINOv2 种类识别） | spec-11 | model + infra | ⬜ |
+| 27 | inat-data-collection | iNaturalist 鸟类图片采集 + 数据清洗（去重、质量过滤、统一 resize）→ 按物种分目录的训练数据集 | 无 | model | ⬜ |
+| 28 | bird-classifier-training | DINOv3-ViT-L/14 backbone（frozen）+ linear head fine-tuning，含特征空间去噪（离群点检测 + 余弦相似度去重）+ YOLO 裁切 + 数据增强 → 鸟类分类模型训练 + 评估 + 导出 | spec-27 | model | ⬜ |
+| 17 | sagemaker-endpoint | SageMaker Serverless 推理 endpoint（部署 spec-28 产出的模型） | spec-28 | model + infra | ⬜ |
 | 18 | lambda-trigger | S3 事件触发 Lambda → 调用 SageMaker → 结果写 DynamoDB | spec-17 | model + infra | ⬜ |
 
 ## 阶段六：部署运维
@@ -116,7 +119,7 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 | 19 | config-file | ConfigManager 统一配置加载：TOML 解析 camera/streaming/logging section，命令行覆盖，三层优先级 | spec-7 | device | ✅ |
 | 20 | systemd-watchdog | systemd 服务集成 + 进程级看门狗（7×24 无人值守），配置文件路径通过 systemd unit 指定 | spec-19 | device + scripts | ✅ |
 | 22 | pi-deploy | Pi 5 部署自动化：build + install + systemctl restart 一键脚本，config.toml 初始化部署 | spec-20 | scripts | ✅ |
-| 23 | log-management | 统一日志管理：per-component level 配置 + KVS SDK 日志重定向到 spdlog + 统一格式 | spec-19 | device | ⬜ |
+| 23 | log-management | 统一日志管理：per-component level 配置 + KVS SDK 日志重定向到 spdlog + 统一格式 | spec-19 | device | ✅ |
 
 ## 阶段七：前端（可选，优先级低）
 
@@ -180,4 +183,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ~ spec-9.5 ✅, spec-10 ✅, spec-11 ✅, spec-12 ~ spec-15 ✅, spec-16 ✅（pipeline CPU 优化）, spec-19 ✅, spec-20 ✅, spec-22 ✅ 已完成。下一个：spec-13.6（WebRTC peer 生命周期修复）→ spec-23（统一日志管理）
+当前进度：spec-0 ~ spec-16 ✅（含 spec-4.5 ⬜、spec-13.6 ✅、spec-15.5 ✅）, spec-19 ~ spec-26 ✅（含 spec-21 ⬜、spec-23 ✅、spec-24 ✅、spec-25 ✅、spec-26 ✅）。设备端功能开发完成。下一步：spec-17（SageMaker endpoint）→ spec-18（Lambda + DynamoDB）→ spec-21（前端 viewer）

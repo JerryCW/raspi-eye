@@ -4201,3 +4201,223 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** device/src/app_context.cpp, device/src/pipeline_builder.h, device/src/pipeline_builder.cpp, device/config/config.toml.example
 
 ---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 1.1 创建 model/ 目录结构与 Python 包初始化
+
+**完成概要：** 创建 model/src/、model/config/、model/tests/、model/data/ 目录，创建 __init__.py 空包文件和 conftest.py（3 个 fixture），更新 .gitignore 添加 model/data/ 排除规则。
+
+**测试状态：** 未运行（轻量模式，纯目录/文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/__init__.py, model/tests/__init__.py, model/tests/conftest.py, .gitignore
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 1.2 创建 requirements.txt 并安装依赖
+
+**完成概要：** 创建 requirements.txt（6 个依赖），创建 .venv-raspi-eye venv 并安装全部依赖，import 验证通过。
+
+**测试状态：** 未运行（轻量模式，纯依赖安装）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** requirements.txt
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 2.1 创建 model/src/config.py
+
+**完成概要：** 创建 config.py，包含 GlobalConfig、SpeciesEntry、DatasetConfig 三个 dataclass 和 load_config() 函数，支持 FileNotFoundError/ValueError 异常和缺少必填字段跳过。
+
+**测试状态：** 未运行（测试覆盖将在任务 2.3 test_config.py 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/config.py
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 2.2 创建 model/config/species.yaml
+
+**完成概要：** 创建 species.yaml，包含 global 段和 46 个物种条目（A类 6 种 ×2000、B类 33 种 ×1500、C类 7 种 ×800），load_config 验证输出 `46 species loaded`。
+
+**测试状态：** 未运行（轻量模式，纯配置文件创建）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/config/species.yaml
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 2.3 创建 model/tests/test_config.py
+
+**完成概要：** 创建 test_config.py 包含 7 个单元测试（有效配置、缺少必填字段跳过、文件不存在、非法 YAML、全局默认值、空物种列表、species 非列表），全部通过。同时修复 conftest.py 的 sys.path 配置。
+
+**测试状态：** 全部通过（7/7）— 新增 7 个测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/tests/test_config.py, model/tests/conftest.py
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 3.1 创建 model/src/cleaner.py
+
+**完成概要：** 创建 cleaner.py，包含 CleanStats dataclass、模块级函数（deduplicate、filter_quality、letterbox_resize）和 DataCleaner 类（clean_species、clean_all），使用 Pillow + imagehash，不使用 OpenCV。
+
+**测试状态：** 未运行（测试覆盖将在任务 3.2-3.5 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/cleaner.py
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 3.2+3.3+3.4+3.5 test_cleaner.py 单元测试 + PBT
+
+**完成概要：** 创建 test_cleaner.py 包含 18 个单元测试（pHash 去重 6 + 质量过滤 7 + letterbox resize 5）和 3 个 PBT 属性测试（去重后不变量、质量过滤尺寸规则、letterbox resize 输出不变量），全部 28 个测试通过。PBT Property 3 发现并修复了 letterbox_resize 的极端宽高比 bug。
+
+**测试状态：** 全部通过（28/28）— 新增 21 个测试（18 单元 + 3 PBT）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | PBT Property 3 发现 letterbox_resize 极端宽高比 bug：输入 1×101, target=32 时 `int(1 * 0.317)` = 0，Pillow resize 报 `ValueError: tile cannot extend outside image` | 模型能力边界 | `ValueError: tile cannot extend outside image` at `image.resize((0, 32))` | 在 cleaner.py 中添加 `new_w = max(1, new_w)` / `new_h = max(1, new_h)` 保护 | PBT 正确发现了边界条件 bug，验证了 PBT 的价值 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（PBT 发现的 bug 已修复，属于正常开发流程）
+
+**涉及文件：** model/tests/test_cleaner.py, model/src/cleaner.py（修复极端宽高比 bug）
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 4. 检查点 — 配置与清洗模块验证
+
+**完成概要：** 检查点验证通过，test_config.py 7/7 + test_cleaner.py 21/21 = 28/28 全部通过（8.65s），离线无网络依赖。
+
+**测试状态：** 全部通过（28/28）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | Pillow `Image.getdata()` 弃用警告（50 条） | Spec 缺少信息 | `DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.` | 不阻断，Pillow 14 预计 2027-10 发布，当前 Pillow 10+ 兼容 | Spec 28 或后续维护时迁移到 `get_flattened_data` |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证检查点）
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 5.1 创建 model/src/collector.py
+
+**完成概要：** 创建 collector.py，包含 CollectStats dataclass 和 DataCollector 类（collect_species、fetch_taxonomy、collect_all、build_taxonomy、save_taxonomy），支持速率限制、指数退避重试、ThreadPoolExecutor 并发下载、断点续传。
+
+**测试状态：** 未运行（测试覆盖将在任务 5.2-5.3 中实现）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/collector.py
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 5.2+5.3 test_taxonomy.py 单元测试 + PBT
+
+**完成概要：** 创建 test_taxonomy.py 包含 4 个单元测试（必填字段、class_label 连续、label_to_species 双向映射、中文名填充）和 1 个 PBT 属性测试（Property 4 Taxonomy 结构一致性），全量 33/33 测试通过。
+
+**测试状态：** 全部通过（33/33）— 新增 5 个测试（4 单元 + 1 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/tests/test_taxonomy.py
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 6.1 创建 model/prepare_dataset.py
+
+**完成概要：** 创建 prepare_dataset.py CLI 入口，实现 argparse（--config/--skip-download/--species）、完整流程（采集→清洗→taxonomy→统计报告），全量 33 个测试通过无回归。
+
+**测试状态：** 全部通过（33/33）— 无新增测试（CLI 入口为集成层，由端到端验证覆盖）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/prepare_dataset.py
+
+---
+
+### 2026-04-18 — Spec: spec-27-inat-data-collection / 任务: 7. 最终检查点 — 全量测试验证
+
+**完成概要：** 最终全量验证通过，33/33 测试全部通过（7.78s），model/data/ 已加入 .gitignore，离线无网络依赖。
+
+**测试状态：** 全部通过（33/33：test_config 7 + test_cleaner 21 + test_taxonomy 5）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。Pillow getdata() 弃用警告（49 条）不影响功能，Pillow 14 预计 2027-10 发布。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证检查点）
+
+---

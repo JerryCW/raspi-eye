@@ -1,6 +1,7 @@
 # Cache
 .cache/
 .SignalingCache_v1
+.pytest_cache/
 
 # Build
 build/
@@ -17,6 +18,8 @@ __pycache__/
 *.pyo
 *.egg-info/
 dist/
+.hypothesis/
+.pytest_cache/
 
 # IDE
 .vscode/
@@ -63,3 +66,6 @@ device/config/config.toml
 # GStreamer plugins (kvssink, webrtc — copied manually on Pi 5, see docs/pi-setup.md)
 device/plugins/*
 !device/plugins/.gitkeep
+
+# Model data (downloaded via model/prepare_dataset.py, too large for git)
+model/data/

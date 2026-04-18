@@ -1,0 +1,246 @@
+# model/config/species.yaml
+# 46 种目标鸟类配置 — iNaturalist 数据采集
+# A 类（地狱级难度）max_images: 2000
+# B 类（常见多样性高）max_images: 1500
+# C 类（家养鹦鹉与稀有种）max_images: 800
+
+global:
+  image_size: 518
+  phash_threshold: 8
+  rate_limit: 1.0
+  random_seed: 42
+  download_threads: 10
+
+species:
+  # --- A 类（地狱级难度）max_images: 2000 ---
+  - taxon_id: 1289311
+    scientific_name: "Pterorhinus sannio"
+    common_name_cn: "白颊噪鹛"
+    max_images: 2000
+
+  - taxon_id: 15159
+    scientific_name: "Garrulax canorus"
+    common_name_cn: "画眉"
+    max_images: 2000
+
+  - taxon_id: 1289299
+    scientific_name: "Pterorhinus perspicillatus"
+    common_name_cn: "黑脸噪鹛"
+    max_images: 2000
+
+  - taxon_id: 14588
+    scientific_name: "Pycnonotus sinensis"
+    common_name_cn: "白头鹎"
+    max_images: 2000
+
+  - taxon_id: 14594
+    scientific_name: "Pycnonotus xanthorrhous"
+    common_name_cn: "黄臀鹎"
+    max_images: 2000
+
+  - taxon_id: 1289357
+    scientific_name: "Sinosuthora webbiana"
+    common_name_cn: "棕头鸦雀"
+    max_images: 2000
+
+  # --- B 类（常见多样性高）max_images: 1500 ---
+  - taxon_id: 14522
+    scientific_name: "Leiothrix lutea"
+    common_name_cn: "红嘴相思鸟"
+    max_images: 1500
+
+  - taxon_id: 14674
+    scientific_name: "Spizixos semitorques"
+    common_name_cn: "领雀嘴鹎"
+    max_images: 1500
+
+  - taxon_id: 14591
+    scientific_name: "Pycnonotus jocosus"
+    common_name_cn: "红耳鹎"
+    max_images: 1500
+
+  - taxon_id: 71755
+    scientific_name: "Parus minor"
+    common_name_cn: "远东山雀"
+    max_images: 1500
+
+  - taxon_id: 7247
+    scientific_name: "Aegithalos concinnus"
+    common_name_cn: "红头长尾山雀"
+    max_images: 1500
+
+  - taxon_id: 7246
+    scientific_name: "Aegithalos caudatus"
+    common_name_cn: "银喉长尾山雀"
+    max_images: 1500
+
+  - taxon_id: 8336
+    scientific_name: "Urocissa erythroryncha"
+    common_name_cn: "红嘴蓝鹊"
+    max_images: 1500
+
+  - taxon_id: 144514
+    scientific_name: "Pica pica"
+    common_name_cn: "喜鹊"
+    max_images: 1500
+
+  - taxon_id: 8449
+    scientific_name: "Dendrocitta formosae"
+    common_name_cn: "灰树鹊"
+    max_images: 1500
+
+  - taxon_id: 1067253
+    scientific_name: "Turdus mandarinus"
+    common_name_cn: "乌鸫"
+    max_images: 1500
+
+  - taxon_id: 12975
+    scientific_name: "Copsychus saularis"
+    common_name_cn: "鹊鸲"
+    max_images: 1500
+
+  - taxon_id: 144573
+    scientific_name: "Spilopelia chinensis"
+    common_name_cn: "珠颈斑鸠"
+    max_images: 1500
+
+  - taxon_id: 2960
+    scientific_name: "Streptopelia orientalis"
+    common_name_cn: "山斑鸠"
+    max_images: 1500
+
+  - taxon_id: 13695
+    scientific_name: "Passer montanus"
+    common_name_cn: "树麻雀"
+    max_images: 1500
+
+  - taxon_id: 853879
+    scientific_name: "Zosterops simplex"
+    common_name_cn: "暗绿绣眼鸟"
+    max_images: 1500
+
+  - taxon_id: 12034
+    scientific_name: "Lanius schach"
+    common_name_cn: "棕背伯劳"
+    max_images: 1500
+
+  - taxon_id: 11893
+    scientific_name: "Hirundo rustica"
+    common_name_cn: "家燕"
+    max_images: 1500
+
+  - taxon_id: 68046
+    scientific_name: "Cecropis daurica"
+    common_name_cn: "金腰燕"
+    max_images: 1500
+
+  - taxon_id: 13106
+    scientific_name: "Phoenicurus auroreus"
+    common_name_cn: "北红尾鸲"
+    max_images: 1500
+
+  - taxon_id: 7120
+    scientific_name: "Upupa epops"
+    common_name_cn: "戴胜"
+    max_images: 1500
+
+  - taxon_id: 2391
+    scientific_name: "Alcedo atthis"
+    common_name_cn: "普通翠鸟"
+    max_images: 1500
+
+  - taxon_id: 4942
+    scientific_name: "Egretta garzetta"
+    common_name_cn: "白鹭"
+    max_images: 1500
+
+  - taxon_id: 4958
+    scientific_name: "Ardeola bacchus"
+    common_name_cn: "池鹭"
+    max_images: 1500
+
+  - taxon_id: 4967
+    scientific_name: "Nycticorax nycticorax"
+    common_name_cn: "夜鹭"
+    max_images: 1500
+
+  - taxon_id: 4827
+    scientific_name: "Gallinula chloropus"
+    common_name_cn: "黑水鸡"
+    max_images: 1500
+
+  - taxon_id: 3779
+    scientific_name: "Tachybaptus ruficollis"
+    common_name_cn: "小鸊鷉"
+    max_images: 1500
+
+  - taxon_id: 4954
+    scientific_name: "Ardea cinerea"
+    common_name_cn: "苍鹭"
+    max_images: 1500
+
+  - taxon_id: 13739
+    scientific_name: "Motacilla alba"
+    common_name_cn: "白鹡鸰"
+    max_images: 1500
+
+  - taxon_id: 13735
+    scientific_name: "Motacilla cinerea"
+    common_name_cn: "灰鹡鸰"
+    max_images: 1500
+
+  - taxon_id: 12044
+    scientific_name: "Dicrurus macrocercus"
+    common_name_cn: "黑卷尾"
+    max_images: 1500
+
+  - taxon_id: 12024
+    scientific_name: "Lanius cristatus"
+    common_name_cn: "红尾伯劳"
+    max_images: 1500
+
+  - taxon_id: 8314
+    scientific_name: "Cyanopica cyanus"
+    common_name_cn: "灰喜鹊"
+    max_images: 1500
+
+  - taxon_id: 3017
+    scientific_name: "Columba livia"
+    common_name_cn: "家鸽/岩鸽"
+    max_images: 1500
+
+  # --- C 类（家养鹦鹉与稀有种）max_images: 800 ---
+  - taxon_id: 18903
+    scientific_name: "Melopsittacus undulatus"
+    common_name_cn: "虎皮鹦鹉"
+    max_images: 800
+
+  - taxon_id: 18910
+    scientific_name: "Nymphicus hollandicus"
+    common_name_cn: "玄凤鹦鹉"
+    max_images: 800
+
+  - taxon_id: 19077
+    scientific_name: "Agapornis roseicollis"
+    common_name_cn: "桃脸牡丹鹦鹉"
+    max_images: 800
+
+  - taxon_id: 18882
+    scientific_name: "Myiopsitta monachus"
+    common_name_cn: "和尚鹦鹉"
+    max_images: 800
+
+  - taxon_id: 18898
+    scientific_name: "Aratinga solstitialis"
+    common_name_cn: "金太阳锥尾鹦鹉"
+    max_images: 800
+
+  - taxon_id: 19150
+    scientific_name: "Forpus coelestis"
+    common_name_cn: "太平洋鹦鹉"
+    max_images: 800
+
+  - taxon_id: 145321
+    scientific_name: "Pardaliparus venustulus"
+    common_name_cn: "黄腹山雀"
+    max_images: 800
