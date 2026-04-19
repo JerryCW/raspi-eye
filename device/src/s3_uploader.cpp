@@ -464,8 +464,12 @@ void S3Uploader::scan_loop() {
             }
         }
 
-        s3_log->info("S3 scan complete: found={}, uploaded={}, skipped={}",
-                     events.size(), uploaded_count, skipped_count);
+        if (events.empty()) {
+            s3_log->debug("S3 scan complete: found=0");
+        } else {
+            s3_log->info("S3 scan complete: found={}, uploaded={}, skipped={}",
+                         events.size(), uploaded_count, skipped_count);
+        }
     }
 }
 
