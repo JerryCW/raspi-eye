@@ -84,6 +84,7 @@ def crop_species(
     model,
     conf_threshold: float = 0.3,
     padding: float = 0.2,
+    min_bbox_ratio: float = 0.01,
 ) -> CropStats:
     """裁切单个物种所有图片。
 
@@ -111,7 +112,7 @@ def crop_species(
     stats = CropStats(species=species_name, total=len(image_paths))
 
     for img_path in image_paths:
-        result = crop_bird(img_path, model, conf_threshold, padding)
+        result = crop_bird(img_path, model, conf_threshold, padding, min_bbox_ratio)
         if result is not None:
             out_name = Path(img_path).stem + ".jpg"
             result.save(str(output_path / out_name), format="JPEG", quality=95)

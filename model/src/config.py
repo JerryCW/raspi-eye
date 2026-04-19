@@ -29,6 +29,7 @@ class SpeciesEntry:
     common_name_cn: str = ""
     max_images: int = 200
     outlier_alpha: float | None = None
+    min_bbox_ratio: float | None = None  # per-species bbox 面积占比阈值，None 时使用全局默认 0.01
 
 
 @dataclass

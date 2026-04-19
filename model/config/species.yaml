@@ -12,202 +12,241 @@ global:
   download_threads: 10
 
 species:
-  # --- A 类（地狱级难度）max_images: 2000 ---
+  # --- A 类（地狱级难度）max_images: 2000, min_bbox_ratio: 5% ---
   - taxon_id: 1289401
     scientific_name: "Pterorhinus sannio"
     common_name_cn: "白颊噪鹛"
     max_images: 2000
+    min_bbox_ratio: 0.05
 
   - taxon_id: 15156
     scientific_name: "Garrulax canorus"
     common_name_cn: "画眉"
     max_images: 2000
+    min_bbox_ratio: 0.05
 
   - taxon_id: 1289400
     scientific_name: "Pterorhinus perspicillatus"
     common_name_cn: "黑脸噪鹛"
     max_images: 2000
+    min_bbox_ratio: 0.05
 
   - taxon_id: 14621
     scientific_name: "Pycnonotus sinensis"
     common_name_cn: "白头鹎"
     max_images: 2000
+    min_bbox_ratio: 0.05
 
   - taxon_id: 14615
     scientific_name: "Pycnonotus xanthorrhous"
     common_name_cn: "黄臀鹎"
     max_images: 2000
+    min_bbox_ratio: 0.05
 
   - taxon_id: 1505899
     scientific_name: "Sinosuthora webbiana"
     common_name_cn: "棕头鸦雀"
     max_images: 2000
+    min_bbox_ratio: 0.05
 
-  # --- B 类（常见多样性高）max_images: 1500 ---
+  # --- B 类（常见多样性高）max_images: 1500, min_bbox_ratio: 3% ---
   - taxon_id: 15560
     scientific_name: "Leiothrix lutea"
     common_name_cn: "红嘴相思鸟"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 14658
     scientific_name: "Spizixos semitorques"
     common_name_cn: "领雀嘴鹎"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 14591
     scientific_name: "Pycnonotus jocosus"
     common_name_cn: "红耳鹎"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 339691
     scientific_name: "Parus minor"
     common_name_cn: "远东山雀"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 7277
     scientific_name: "Aegithalos concinnus"
     common_name_cn: "红头长尾山雀"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 7278
     scientific_name: "Aegithalos caudatus"
     common_name_cn: "银喉长尾山雀"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 495200
     scientific_name: "Urocissa erythroryncha"
     common_name_cn: "红嘴蓝鹊"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 891696
     scientific_name: "Pica pica"
     common_name_cn: "喜鹊"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 8306
     scientific_name: "Dendrocitta formosae"
     common_name_cn: "灰树鹊"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 472778
     scientific_name: "Turdus mandarinus"
     common_name_cn: "乌鸫"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 204491
     scientific_name: "Copsychus saularis"
     common_name_cn: "鹊鸲"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 1455918
     scientific_name: "Spilopelia chinensis"
     common_name_cn: "珠颈斑鸠"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 2927
     scientific_name: "Streptopelia orientalis"
     common_name_cn: "山斑鸠"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 13851
     scientific_name: "Passer montanus"
     common_name_cn: "树麻雀"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 980257
     scientific_name: "Zosterops simplex"
     common_name_cn: "暗绿绣眼鸟"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 12035
     scientific_name: "Lanius schach"
     common_name_cn: "棕背伯劳"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 11901
     scientific_name: "Hirundo rustica"
     common_name_cn: "家燕"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 144792
     scientific_name: "Cecropis daurica"
     common_name_cn: "金腰燕"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 12993
     scientific_name: "Phoenicurus auroreus"
     common_name_cn: "北红尾鸲"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 20969
     scientific_name: "Upupa epops"
     common_name_cn: "戴胜"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 2599
     scientific_name: "Alcedo atthis"
     common_name_cn: "普通翠鸟"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 4943
     scientific_name: "Egretta garzetta"
     common_name_cn: "白鹭"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 4990
     scientific_name: "Ardeola bacchus"
     common_name_cn: "池鹭"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 4981
     scientific_name: "Nycticorax nycticorax"
     common_name_cn: "夜鹭"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 201282
     scientific_name: "Gallinula chloropus"
     common_name_cn: "黑水鸡"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 4237
     scientific_name: "Tachybaptus ruficollis"
     common_name_cn: "小鸊鷉"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 4954
     scientific_name: "Ardea cinerea"
     common_name_cn: "苍鹭"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 13695
     scientific_name: "Motacilla alba"
     common_name_cn: "白鹡鸰"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 13688
     scientific_name: "Motacilla cinerea"
     common_name_cn: "灰鹡鸰"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 8277
     scientific_name: "Dicrurus macrocercus"
     common_name_cn: "黑卷尾"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 12021
     scientific_name: "Lanius cristatus"
     common_name_cn: "红尾伯劳"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 72785
     scientific_name: "Cyanopica cyanus"
     common_name_cn: "灰喜鹊"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   - taxon_id: 3017
     scientific_name: "Columba livia"
     common_name_cn: "家鸽/岩鸽"
     max_images: 1500
+    min_bbox_ratio: 0.03
 
   # --- C 类（家养鹦鹉与稀有种）max_images: 800 ---
   - taxon_id: 19339
