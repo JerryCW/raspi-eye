@@ -86,8 +86,42 @@ def deduplicate(image_paths: list[str], threshold: int) -> list[str]:
     return [hashes[i][0] for i in range(len(hashes)) if i not in removed]
 
 
+def _check_single_image(path: str) -> tuple[str, str]:
+    """进程池 worker：检查单张图片质量。返回 (path, result)。
+    result: "pass" | "corrupt" | "small" | "lowvar"
+    """
+    try:
+        img = Image.open(path)
+        img.load()
+    except Exception:
+        return path, "corrupt"
+
+    w, h = img.size
+    if min(w, h) < 800:
+        return path, "small"
+
+    is_grayscale = img.mode == "L"
+    if not is_grayscale and img.mode in ("RGB", "RGBA"):
+        rgb_data = list(img.convert("RGB").getdata())
+        if rgb_data:
+            is_grayscale = all(r == g == b for r, g, b in rgb_data[:1000])
+
+    if is_grayscale:
+        gray = img.convert("L")
+        pixels = list(gray.getdata())
+        n = len(pixels)
+        if n == 0:
+            return path, "lowvar"
+        mean = sum(pixels) / n
+        variance = sum((x - mean) ** 2 for x in pixels) / n
+        if variance ** 0.5 < 10:
+            return path, "lowvar"
+
+    return path, "pass"
+
+
 def filter_quality(image_paths: list[str]) -> tuple[list[str], dict]:
-    """质量过滤：
+    """质量过滤（多进程并行）：
     - 无法打开 → 移除（corrupt）
     - 短边 < 800px → 移除（small）
     - 灰度图且标准差 < 10 → 移除（lowvar）
@@ -98,56 +132,22 @@ def filter_quality(image_paths: list[str]) -> tuple[list[str], dict]:
     counts = {"corrupt": 0, "small": 0, "lowvar": 0}
     total = len(image_paths)
 
-    for idx, p in enumerate(image_paths, 1):
-        # 检查是否可以打开
-        try:
-            img = Image.open(p)
-            img.load()  # 强制加载像素数据，检测截断/损坏
-        except Exception:
-            counts["corrupt"] += 1
+    if total == 0:
+        return passed, counts
+
+    workers = min(os.cpu_count() or 4, 8)
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for idx, (path, result) in enumerate(pool.map(_check_single_image, image_paths), 1):
+            if result == "pass":
+                passed.append(path)
+            else:
+                counts[result] += 1
             if idx % 100 == 0 or idx == total:
-                print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
-            continue
-
-        # 检查短边尺寸
-        w, h = img.size
-        if min(w, h) < 800:
-            counts["small"] += 1
-            if idx % 100 == 0 or idx == total:
-                print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
-            continue
-
-        # 检查灰度低方差（纯色/损坏）
-        # 仅对灰度图（mode == "L"）或实际为灰度的 RGB 图检查
-        is_grayscale = img.mode == "L"
-        if not is_grayscale and img.mode in ("RGB", "RGBA"):
-            # 检查 RGB 图是否实际为灰度（R == G == B）
-            # 采样检查以提高性能
-            rgb_data = list(img.convert("RGB").getdata())
-            if rgb_data:
-                is_grayscale = all(r == g == b for r, g, b in rgb_data[:1000])
-
-        if is_grayscale:
-            gray = img.convert("L")
-            pixels = list(gray.getdata())
-            n = len(pixels)
-            if n == 0:
-                counts["lowvar"] += 1
-                if idx % 100 == 0 or idx == total:
-                    print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
-                continue
-            mean = sum(pixels) / n
-            variance = sum((x - mean) ** 2 for x in pixels) / n
-            std = variance ** 0.5
-            if std < 10:
-                counts["lowvar"] += 1
-                if idx % 100 == 0 or idx == total:
-                    print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
-                continue
-
-        passed.append(p)
-        if idx % 100 == 0 or idx == total:
-            print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
+                print(
+                    f"  质量过滤: {idx}/{total} "
+                    f"(损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})",
+                    flush=True,
+                )
 
     return passed, counts
 
