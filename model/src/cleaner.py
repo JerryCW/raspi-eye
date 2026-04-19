@@ -6,6 +6,7 @@
 
 import os
 import time
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -180,6 +181,18 @@ def letterbox_resize(image: Image.Image, target_size: int) -> Image.Image:
     return canvas
 
 
+def _resize_and_save(args: tuple) -> bool:
+    """进程池 worker：打开图片 → letterbox resize → 保存。返回是否成功。"""
+    src_path, out_path, target_size = args
+    try:
+        img = Image.open(src_path).convert("RGB")
+        resized = letterbox_resize(img, target_size)
+        resized.save(out_path, format="JPEG", quality=95)
+        return True
+    except Exception:
+        return False
+
+
 class DataCleaner:
     """数据清洗器：去重 → 质量过滤 → letterbox resize → 保存。"""
 
@@ -270,28 +283,28 @@ class DataCleaner:
         t2 = time.time() - species_start
         print(f"  [步骤 2/3] 质量过滤完成: {len(deduped)} → {len(passed)} ({t2:.1f}s)", flush=True)
 
-        # 3. Letterbox resize + 保存
+        # 3. Letterbox resize + 保存（多进程）
         print(f"  [步骤 3/3] Letterbox resize ({len(passed)} 张)...", flush=True)
         target_size = self.config.global_config.image_size
         species_cleaned_dir = self.cleaned_dir / species_name
         species_cleaned_dir.mkdir(parents=True, exist_ok=True)
 
+        # 构建任务列表
+        resize_tasks = []
+        for p in passed:
+            out_name = Path(p).stem + ".jpg"
+            out_path = str(species_cleaned_dir / out_name)
+            resize_tasks.append((p, out_path, target_size))
+
         saved = 0
-        total = len(passed)
-        for i, p in enumerate(passed, 1):
-            try:
-                img = Image.open(p)
-                img = img.convert("RGB")
-                resized = self.letterbox_resize(img, target_size)
-                out_name = Path(p).stem + ".jpg"
-                out_path = species_cleaned_dir / out_name
-                resized.save(str(out_path), format="JPEG", quality=95)
-                saved += 1
-                # 文件级进度：每 50 张或最后一张打印
-                if saved % 50 == 0 or i == total:
+        total = len(resize_tasks)
+        workers = min(os.cpu_count() or 4, 8)
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            for i, success in enumerate(pool.map(_resize_and_save, resize_tasks), 1):
+                if success:
+                    saved += 1
+                if i % 50 == 0 or i == total:
                     print(f"  [{species_name}] resize 进度: {i}/{total}", flush=True)
-            except Exception as e:
-                print(f"警告: resize/保存失败 {p}: {e}")
 
         stats.output_count = saved
         t3 = time.time() - species_start

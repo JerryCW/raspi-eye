@@ -121,17 +121,22 @@ class DataCollector:
         return results
 
     @staticmethod
-    def _download_single(url: str, dest_path: str) -> bool:
-        """下载单张图片到指定路径。成功返回 True，失败返回 False。"""
-        try:
-            resp = requests.get(url, timeout=60)
-            resp.raise_for_status()
-            with open(dest_path, "wb") as f:
-                f.write(resp.content)
-            return True
-        except Exception as e:
-            logger.error("下载失败 %s: %s", url, e)
-            return False
+    def _download_single(url: str, dest_path: str, max_retries: int = 3) -> bool:
+        """下载单张图片到指定路径，失败自动重试。成功返回 True，失败返回 False。"""
+        for attempt in range(max_retries):
+            try:
+                resp = requests.get(url, timeout=60)
+                resp.raise_for_status()
+                with open(dest_path, "wb") as f:
+                    f.write(resp.content)
+                return True
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = 2.0 * (2 ** attempt)
+                    time.sleep(delay)
+                else:
+                    logger.error("下载失败 %s: %s", url, e)
+        return False
 
     def collect_species(self, entry: SpeciesEntry) -> CollectStats:
         """采集单个物种的图片。
