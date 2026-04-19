@@ -28,6 +28,9 @@ def main():
     parser.add_argument(
         "--species", type=str, help="指定单个物种（scientific_name）用于调试"
     )
+    parser.add_argument(
+        "--force-clean", action="store_true", help="强制重新清洗（忽略已有输出）"
+    )
     args = parser.parse_args()
 
     # 1. 加载配置
@@ -73,9 +76,9 @@ def main():
 
     if args.species:
         # 单物种模式：只清洗指定物种
-        clean_results = [cleaner.clean_species(args.species)]
+        clean_results = [cleaner.clean_species(args.species, force=args.force_clean)]
     else:
-        clean_results = cleaner.clean_all()
+        clean_results = cleaner.clean_all(force=args.force_clean)
 
     # 4. 生成 taxonomy.json
     print("\n=== 阶段 3: 生成 taxonomy.json ===")

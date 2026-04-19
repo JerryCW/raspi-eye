@@ -186,14 +186,32 @@ class DataCleaner:
         """Letterbox resize（委托给模块级函数）。"""
         return letterbox_resize(image, target_size)
 
-    def clean_species(self, species_name: str) -> CleanStats:
-        """清洗单个物种：去重 → 质量过滤 → resize → 保存到 cleaned/。"""
+    def clean_species(self, species_name: str, force: bool = False) -> CleanStats:
+        """清洗单个物种：去重 → 质量过滤 → resize → 保存到 cleaned/。
+
+        Args:
+            species_name: 物种名称
+            force: 强制重新清洗（忽略已有输出）
+        """
         stats = CleanStats(species=species_name)
 
         species_raw_dir = self.raw_dir / species_name
         if not species_raw_dir.is_dir():
             print(f"警告: 物种目录不存在: {species_raw_dir}")
             return stats
+
+        # 跳过已完成的物种（cleaned 目录已有 .jpg 文件）
+        species_cleaned_dir = self.cleaned_dir / species_name
+        if not force and species_cleaned_dir.is_dir():
+            existing = list(species_cleaned_dir.glob("*.jpg"))
+            if existing:
+                stats.output_count = len(existing)
+                stats.input_count = len([
+                    p for p in species_raw_dir.iterdir()
+                    if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+                ])
+                print(f"[{species_name}] 已完成，跳过（{len(existing)} 张）")
+                return stats
 
         # 收集所有图片路径
         image_paths = sorted([
@@ -225,7 +243,8 @@ class DataCleaner:
         species_cleaned_dir.mkdir(parents=True, exist_ok=True)
 
         saved = 0
-        for p in passed:
+        total = len(passed)
+        for i, p in enumerate(passed, 1):
             try:
                 img = Image.open(p)
                 img = img.convert("RGB")
@@ -234,6 +253,9 @@ class DataCleaner:
                 out_path = species_cleaned_dir / out_name
                 resized.save(str(out_path), format="JPEG", quality=95)
                 saved += 1
+                # 文件级进度：每 50 张或最后一张打印
+                if saved % 50 == 0 or i == total:
+                    print(f"  [{species_name}] resize 进度: {i}/{total}", flush=True)
             except Exception as e:
                 print(f"警告: resize/保存失败 {p}: {e}")
 
@@ -253,11 +275,17 @@ class DataCleaner:
 
         return stats
 
-    def clean_all(self) -> list[CleanStats]:
-        """清洗所有物种，返回统计列表。"""
+    def clean_all(self, force: bool = False) -> list[CleanStats]:
+        """清洗所有物种，返回统计列表。
+
+        Args:
+            force: 强制重新清洗所有物种（忽略已有输出）
+        """
         results: list[CleanStats] = []
-        for entry in self.config.species:
-            stats = self.clean_species(entry.scientific_name)
+        total_species = len(self.config.species)
+        for idx, entry in enumerate(self.config.species, 1):
+            print(f"--- 物种 {idx}/{total_species}: {entry.scientific_name} ---")
+            stats = self.clean_species(entry.scientific_name, force=force)
             results.append(stats)
 
             if stats.output_count == 0:
