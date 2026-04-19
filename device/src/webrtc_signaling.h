@@ -78,6 +78,9 @@ public:
     bool get_ice_config(uint32_t index,
                         std::vector<IceServerInfo>& servers) const;
 
+    // Log current signaling health status (for periodic health check)
+    void log_health_status() const;
+
     ~WebRtcSignaling();
     WebRtcSignaling(const WebRtcSignaling&) = delete;
     WebRtcSignaling& operator=(const WebRtcSignaling&) = delete;

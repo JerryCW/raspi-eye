@@ -81,14 +81,28 @@ struct WebRtcSignaling::Impl {
                                              SIGNALING_CLIENT_STATE state) {
         auto* self = reinterpret_cast<Impl*>(custom_data);
         auto logger = spdlog::get("webrtc");
+
+        // 所有状态变化都打 warn 级别日志，确保长时间运行时可观测
+        static const char* state_names[] = {
+            "NEW", "GET_CREDENTIALS", "DESCRIBE", "CREATE",
+            "GET_ENDPOINT", "GET_ICE_CONFIG", "READY",
+            "CONNECTING", "CONNECTED", "DISCONNECTED",
+            "DELETE", "DELETED", "MAX"
+        };
+        const char* name = (state < sizeof(state_names)/sizeof(state_names[0]))
+            ? state_names[state] : "UNKNOWN";
+
         if (state == SIGNALING_CLIENT_STATE_CONNECTED) {
             self->connected = true;
-            if (logger) logger->info("Signaling client connected to channel: {}",
-                                     self->config.channel_name);
+            if (logger) logger->warn("Signaling state: {} → channel {}",
+                                     name, self->config.channel_name);
         } else if (state == SIGNALING_CLIENT_STATE_DISCONNECTED) {
             self->connected = false;
-            if (logger) logger->info("Signaling client disconnected from channel: {}",
-                                     self->config.channel_name);
+            if (logger) logger->warn("Signaling state: DISCONNECTED — channel {} "
+                                     "(SDK reconnect={}, will auto-retry)",
+                                     self->config.channel_name, "TRUE");
+        } else {
+            if (logger) logger->warn("Signaling state: {} ({})", name, static_cast<int>(state));
         }
         return STATUS_SUCCESS;
     }
@@ -465,4 +479,11 @@ uint32_t WebRtcSignaling::get_ice_config_count() const {
 bool WebRtcSignaling::get_ice_config(uint32_t index,
                                      std::vector<IceServerInfo>& servers) const {
     return impl_->ice_config(index, servers);
+}
+
+void WebRtcSignaling::log_health_status() const {
+    auto logger = spdlog::get("webrtc");
+    if (!logger) return;
+    logger->warn("Signaling health: connected={}, channel={}",
+                 impl_->connected, impl_->config.channel_name);
 }
