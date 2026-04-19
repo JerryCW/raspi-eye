@@ -5,6 +5,7 @@
 """
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -94,20 +95,25 @@ def filter_quality(image_paths: list[str]) -> tuple[list[str], dict]:
     """
     passed: list[str] = []
     counts = {"corrupt": 0, "small": 0, "lowvar": 0}
+    total = len(image_paths)
 
-    for p in image_paths:
+    for idx, p in enumerate(image_paths, 1):
         # 检查是否可以打开
         try:
             img = Image.open(p)
             img.load()  # 强制加载像素数据，检测截断/损坏
         except Exception:
             counts["corrupt"] += 1
+            if idx % 100 == 0 or idx == total:
+                print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
             continue
 
         # 检查短边尺寸
         w, h = img.size
         if min(w, h) < 800:
             counts["small"] += 1
+            if idx % 100 == 0 or idx == total:
+                print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
             continue
 
         # 检查灰度低方差（纯色/损坏）
@@ -126,15 +132,21 @@ def filter_quality(image_paths: list[str]) -> tuple[list[str], dict]:
             n = len(pixels)
             if n == 0:
                 counts["lowvar"] += 1
+                if idx % 100 == 0 or idx == total:
+                    print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
                 continue
             mean = sum(pixels) / n
             variance = sum((x - mean) ** 2 for x in pixels) / n
             std = variance ** 0.5
             if std < 10:
                 counts["lowvar"] += 1
+                if idx % 100 == 0 or idx == total:
+                    print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
                 continue
 
         passed.append(p)
+        if idx % 100 == 0 or idx == total:
+            print(f"  质量过滤: {idx}/{total} (损坏={counts['corrupt']} 小图={counts['small']} 低方差={counts['lowvar']})", flush=True)
 
     return passed, counts
 
@@ -238,19 +250,28 @@ class DataCleaner:
             print(f"警告: {species_name} 无图片文件")
             return stats
 
+        species_start = time.time()
+
         # 1. pHash 去重
+        print(f"  [步骤 1/3] pHash 去重 ({len(image_paths)} 张)...", flush=True)
         threshold = self.config.global_config.phash_threshold
         deduped = self.deduplicate(image_paths, threshold)
         stats.after_dedup = len(deduped)
+        t1 = time.time() - species_start
+        print(f"  [步骤 1/3] pHash 去重完成: {len(image_paths)} → {len(deduped)} ({t1:.1f}s)", flush=True)
 
         # 2. 质量过滤
+        print(f"  [步骤 2/3] 质量过滤 ({len(deduped)} 张)...", flush=True)
         passed, counts = self.filter_quality(deduped)
         stats.removed_corrupt = counts.get("corrupt", 0)
         stats.removed_small = counts.get("small", 0)
         stats.removed_lowvar = counts.get("lowvar", 0)
         stats.after_filter = len(passed)
+        t2 = time.time() - species_start
+        print(f"  [步骤 2/3] 质量过滤完成: {len(deduped)} → {len(passed)} ({t2:.1f}s)", flush=True)
 
         # 3. Letterbox resize + 保存
+        print(f"  [步骤 3/3] Letterbox resize ({len(passed)} 张)...", flush=True)
         target_size = self.config.global_config.image_size
         species_cleaned_dir = self.cleaned_dir / species_name
         species_cleaned_dir.mkdir(parents=True, exist_ok=True)
@@ -273,6 +294,8 @@ class DataCleaner:
                 print(f"警告: resize/保存失败 {p}: {e}")
 
         stats.output_count = saved
+        t3 = time.time() - species_start
+        print(f"  [步骤 3/3] resize 完成: {saved} 张保存 ({t3:.1f}s 总耗时)", flush=True)
 
         # 写入完成标记（仅在有输出时）
         if saved > 0:
@@ -301,6 +324,7 @@ class DataCleaner:
         """
         results: list[CleanStats] = []
         total_species = len(self.config.species)
+        all_start = time.time()
         for idx, entry in enumerate(self.config.species, 1):
             print(f"--- 物种 {idx}/{total_species}: {entry.scientific_name} ---")
             stats = self.clean_species(entry.scientific_name, force=force)
@@ -308,5 +332,8 @@ class DataCleaner:
 
             if stats.output_count == 0:
                 print(f"错误: {entry.scientific_name} 最终图片数为 0，跳过")
+
+        elapsed = time.time() - all_start
+        print(f"=== 清洗完成: {total_species} 个物种, 总耗时 {elapsed:.1f}s ===", flush=True)
 
         return results
