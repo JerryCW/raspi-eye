@@ -200,18 +200,18 @@ class DataCleaner:
             print(f"警告: 物种目录不存在: {species_raw_dir}")
             return stats
 
-        # 跳过已完成的物种（cleaned 目录已有 .jpg 文件）
+        # 跳过已完成的物种（检查 .done 标记文件）
         species_cleaned_dir = self.cleaned_dir / species_name
-        if not force and species_cleaned_dir.is_dir():
+        done_marker = species_cleaned_dir / ".done"
+        if not force and done_marker.is_file():
             existing = list(species_cleaned_dir.glob("*.jpg"))
-            if existing:
-                stats.output_count = len(existing)
-                stats.input_count = len([
-                    p for p in species_raw_dir.iterdir()
-                    if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-                ])
-                print(f"[{species_name}] 已完成，跳过（{len(existing)} 张）")
-                return stats
+            stats.output_count = len(existing)
+            stats.input_count = len([
+                p for p in species_raw_dir.iterdir()
+                if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+            ])
+            print(f"[{species_name}] 已完成，跳过（{len(existing)} 张）")
+            return stats
 
         # 收集所有图片路径
         image_paths = sorted([
@@ -260,6 +260,11 @@ class DataCleaner:
                 print(f"警告: resize/保存失败 {p}: {e}")
 
         stats.output_count = saved
+
+        # 写入完成标记（仅在有输出时）
+        if saved > 0:
+            done_marker = species_cleaned_dir / ".done"
+            done_marker.write_text(f"{saved}\n", encoding="utf-8")
 
         # 打印统计
         print(
