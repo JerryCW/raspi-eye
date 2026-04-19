@@ -29,6 +29,7 @@ def crop_bird(
     model,
     conf_threshold: float = 0.3,
     padding: float = 0.2,
+    min_bbox_ratio: float = 0.01,
 ) -> Image.Image | None:
     """YOLO 鸟体裁切。
 
@@ -37,6 +38,7 @@ def crop_bird(
         model: YOLOv11 模型实例（ultralytics.YOLO）
         conf_threshold: 最低置信度阈值
         padding: bounding box 四周扩展比例（默认 20%）
+        min_bbox_ratio: bbox 面积占原图面积的最小比例（默认 1%），低于此值丢弃
 
     Returns:
         裁切后的 PIL Image（518×518 letterbox resize），未检测到鸟体时返回 None
@@ -57,6 +59,12 @@ def crop_bird(
     # 取置信度最高的 box
     best = max(bird_boxes, key=lambda b: float(b.conf))
     x1, y1, x2, y2 = best.xyxy[0].tolist()
+
+    # bbox 面积占比检查：鸟太小则丢弃
+    bbox_area = (x2 - x1) * (y2 - y1)
+    img_area = img.width * img.height
+    if img_area > 0 and bbox_area / img_area < min_bbox_ratio:
+        return None
 
     # 扩展 padding（clamp 到图片边界）
     w, h = x2 - x1, y2 - y1
