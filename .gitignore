@@ -69,3 +69,12 @@ device/plugins/*
 
 # Model data (downloaded via model/prepare_dataset.py, too large for git)
 model/data/
+# Spec 28 中间产物（均已被 model/data/ 规则覆盖）:
+#   model/data/cropped/   — YOLO 鸟体裁切后图片
+#   model/data/features/  — DINOv3 特征向量 .npy
+#   model/data/train/     — 训练集（ImageFolder 格式）
+#   model/data/val/       — 验证集（ImageFolder 格式）
+#   model/data/report/    — 清洗统计报告
+
+# Model output (training artifacts, exported models)
+model/output/

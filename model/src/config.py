@@ -28,6 +28,7 @@ class SpeciesEntry:
     scientific_name: str
     common_name_cn: str = ""
     max_images: int = 200
+    outlier_alpha: float | None = None
 
 
 @dataclass

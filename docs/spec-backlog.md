@@ -108,8 +108,9 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
 | 27 | inat-data-collection | iNaturalist 鸟类图片采集 + 数据清洗（去重、质量过滤、统一 resize）→ 按物种分目录的训练数据集 | 无 | model | ⬜ |
-| 28 | bird-classifier-training | DINOv3-ViT-L/14 backbone（frozen）+ linear head fine-tuning，含特征空间去噪（离群点检测 + 余弦相似度去重）+ YOLO 裁切 + 数据增强 → 鸟类分类模型训练 + 评估 + 导出 | spec-27 | model | ⬜ |
-| 17 | sagemaker-endpoint | SageMaker Serverless 推理 endpoint（部署 spec-28 产出的模型） | spec-28 | model + infra | ⬜ |
+| 28 | feature-space-cleaning | DINOv3 特征空间深度清洗：YOLO 鸟体裁切 + DINOv3 特征提取（frozen backbone）+ Mahalanobis 离群点检测 + 余弦相似度语义去重 + train/val 分层划分 → ImageFolder 格式数据集 | spec-27 | model | ⬜ |
+| 29 | bird-classifier-training | DINOv3-ViT-L/16 backbone（frozen）+ linear head fine-tuning + 数据增强 → 鸟类分类模型训练 + 评估 + 导出 | spec-28 | model | ⬜ |
+| 17 | sagemaker-endpoint | SageMaker Serverless 推理 endpoint（部署 spec-29 产出的模型） | spec-29 | model + infra | ⬜ |
 | 18 | lambda-trigger | S3 事件触发 Lambda → 调用 SageMaker → 结果写 DynamoDB | spec-17 | model + infra | ⬜ |
 
 ## 阶段六：部署运维

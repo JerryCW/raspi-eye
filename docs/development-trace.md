@@ -4421,3 +4421,129 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证检查点）
 
 ---
+
+### 2026-04-19 — Spec: spec-28-feature-space-cleaning / 任务: 1. 依赖更新与 .gitignore 扩展
+
+**完成概要：** requirements.txt 追加 torch/torchvision/ultralytics/scikit-learn/scipy/sagemaker 六个依赖并 pip install 成功；.gitignore 追加 Spec 28 中间产物注释和 model/output/ 排除规则。
+
+**测试状态：** 未运行（轻量模式，纯配置变更）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** requirements.txt, .gitignore
+
+---
+
+### 2026-04-19 — Spec: spec-28-feature-space-cleaning / 任务: 2. config.py 扩展与 YOLO 裁切模块
+
+**完成概要：** SpeciesEntry 增加 outlier_alpha 字段；创建 cropper.py（CropStats、crop_bird、crop_species）；创建 test_cropper.py（7 个单元测试 + 1 个 PBT 属性测试），pytest 9/9 通过。
+
+**测试状态：** 全部通过（9/9）— 新增 8 个测试（7 单元 + 1 PBT Property 1）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/config.py, model/src/cropper.py, model/tests/test_cropper.py
+
+---
+
+### 2026-04-19 — Spec: spec-28-feature-space-cleaning / 任务: 4. 特征提取模块
+
+**完成概要：** 创建 feature_extractor.py（ExtractStats + FeatureExtractor 类，torch.hub.load dinov3_vitl16，混合精度推理，GPU/CPU 自动检测）；创建 test_feature_cleaning.py 并实现 PBT 属性 2（.npy round trip，100 examples 通过）。
+
+**测试状态：** 全部通过（1/1 PBT）— 新增 1 个 PBT 测试（Property 2）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/feature_extractor.py, model/tests/test_feature_cleaning.py
+
+---
+
+### 2026-04-19 — Spec: spec-28-feature-space-cleaning / 任务: 5. 离群点检测与语义去重模块
+
+**完成概要：** 创建 outlier_detector.py（三路径 Mahalanobis 检测）和 semantic_dedup.py（余弦相似度去重）；在 test_feature_cleaning.py 中追加 7 个单元测试 + 2 个 PBT 属性测试（Property 3/4），10/10 通过（2.80s）。
+
+**测试状态：** 全部通过（10/10）— 新增 9 个测试（7 单元 + 2 PBT）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/outlier_detector.py, model/src/semantic_dedup.py, model/tests/test_feature_cleaning.py
+
+---
+
+### 2026-04-19 — Spec: spec-28-feature-space-cleaning / 任务: 7. Train/Val 划分模块
+
+**完成概要：** 创建 splitter.py（SplitStats + split_dataset + split_and_copy）；在 test_feature_cleaning.py 中追加 PBT 属性 5（无交集+比例约束，min_value 调整为 12 避免 sklearn 取整问题）和属性 6（可复现），12/12 通过。
+
+**测试状态：** 全部通过（12/12）— 新增 2 个 PBT 测试（Property 5/6）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/splitter.py, model/tests/test_feature_cleaning.py
+
+---
+
+### 2026-04-19 — Spec: spec-28-feature-space-cleaning / 任务: 8. CLI 入口与 SageMaker 部署脚本
+
+**完成概要：** 创建 clean_features.py（端到端 CLI 入口，detect_paths + argparse + 五阶段流程 + cleaning_report.json）、launch_processing.py（PyTorchProcessor SageMaker 启动脚本）、create-sagemaker-role.sh（IAM Role 最小权限）；追加 2 个 SageMaker 路径检测测试，14/14 通过（3.10s）。
+
+**测试状态：** 全部通过（14/14）— 新增 2 个测试（SageMaker 路径检测）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/clean_features.py, model/launch_processing.py, scripts/create-sagemaker-role.sh, model/tests/test_feature_cleaning.py
+
+---
+
+### 2026-04-19 — Spec: spec-28-feature-space-cleaning / 任务: 9. 最终检查点 — 全量测试验证
+
+**完成概要：** 全量验证通过，23/23 测试全部通过（4.26s），所有模块导入正常，git status 无敏感文件泄露。
+
+**测试状态：** 全部通过（23/23：test_cropper 9 + test_feature_cleaning 14）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。Spec 28 全部 9 个任务组完成，零失败。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
