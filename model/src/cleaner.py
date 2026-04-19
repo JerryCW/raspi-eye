@@ -39,7 +39,8 @@ def deduplicate(image_paths: list[str], threshold: int) -> list[str]:
 
     # 计算每张图片的 pHash，跳过无法打开的图片
     hashes: list[tuple[str, imagehash.ImageHash]] = []
-    for p in image_paths:
+    total = len(image_paths)
+    for idx, p in enumerate(image_paths, 1):
         try:
             img = Image.open(p)
             h = imagehash.phash(img)
@@ -47,11 +48,14 @@ def deduplicate(image_paths: list[str], threshold: int) -> list[str]:
         except Exception:
             # 无法打开的图片跳过（后续 filter_quality 会处理）
             hashes.append((p, None))
+        if idx % 100 == 0 or idx == total:
+            print(f"  pHash 计算: {idx}/{total}", flush=True)
 
     # 标记需要移除的索引
     removed: set[int] = set()
+    n = len(hashes)
 
-    for i in range(len(hashes)):
+    for i in range(n):
         if i in removed:
             continue
         if hashes[i][1] is None:
@@ -59,7 +63,7 @@ def deduplicate(image_paths: list[str], threshold: int) -> list[str]:
 
         # 收集与 i 重复的所有图片（包括 i 自身）
         group = [i]
-        for j in range(i + 1, len(hashes)):
+        for j in range(i + 1, n):
             if j in removed:
                 continue
             if hashes[j][1] is None:
@@ -73,6 +77,9 @@ def deduplicate(image_paths: list[str], threshold: int) -> list[str]:
             for idx in group:
                 if idx != best:
                     removed.add(idx)
+
+        if (i + 1) % 200 == 0 or i == n - 1:
+            print(f"  pHash 去重比较: {i + 1}/{n} (已移除 {len(removed)})", flush=True)
 
     return [hashes[i][0] for i in range(len(hashes)) if i not in removed]
 
@@ -212,6 +219,12 @@ class DataCleaner:
             ])
             print(f"[{species_name}] 已完成，跳过（{len(existing)} 张）")
             return stats
+
+        # force 模式：清空旧的 cleaned 目录
+        if force and species_cleaned_dir.is_dir():
+            import shutil
+            shutil.rmtree(species_cleaned_dir)
+            print(f"  [{species_name}] 已清空旧 cleaned 目录")
 
         # 收集所有图片路径
         image_paths = sorted([
