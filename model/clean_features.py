@@ -13,6 +13,13 @@ import argparse
 import json
 import os
 import sys
+
+# SageMaker 容器中代码在 /opt/ml/processing/input/code/，
+# 本地运行时在项目根目录。统一将代码目录加入 sys.path，
+# 使 `from src.xxx import yyy` 在两种环境下都能工作。
+_code_dir = os.path.dirname(os.path.abspath(__file__))
+if _code_dir not in sys.path:
+    sys.path.insert(0, _code_dir)
 import time
 from pathlib import Path
 
@@ -68,7 +75,7 @@ def main():
     paths = detect_paths()
     config_path = paths["config_path"] or args.config
 
-    from model.src.config import load_config
+    from src.config import load_config
     config = load_config(config_path)
 
     # 筛选物种
@@ -102,7 +109,7 @@ def main():
         print("阶段 1: YOLO 鸟体裁切")
         print("=" * 60)
         from ultralytics import YOLO
-        from model.src.cropper import crop_species
+        from src.cropper import crop_species
 
         yolo_model = YOLO("yolo11x.pt")
         for entry in species_list:
@@ -132,7 +139,7 @@ def main():
         print("=" * 60)
         print("阶段 2: DINOv3 特征提取")
         print("=" * 60)
-        from model.src.feature_extractor import FeatureExtractor
+        from src.feature_extractor import FeatureExtractor
 
         extractor = FeatureExtractor(
             repo_dir=args.dinov3_repo,
@@ -149,9 +156,9 @@ def main():
     print("=" * 60)
     print("阶段 3: 离群点检测 + 语义去重 + Train/Val 划分")
     print("=" * 60)
-    from model.src.outlier_detector import detect_outliers
-    from model.src.semantic_dedup import semantic_deduplicate
-    from model.src.splitter import split_and_copy
+    from src.outlier_detector import detect_outliers
+    from src.semantic_dedup import semantic_deduplicate
+    from src.splitter import split_and_copy
 
     for entry in species_list:
         sp_name = entry.scientific_name
