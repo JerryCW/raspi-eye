@@ -283,6 +283,14 @@ RC_GTEST_PROP(LoggerFactoryCorrectness, CreatesAndRegisters, ()) {
     // Initialize log_init (required before create_logger)
     log_init::init();
 
+    // Skip if name collides with a pre-existing logger (init creates 9 named loggers)
+    if (spdlog::get(name)) {
+        log_init::shutdown();
+        spdlog::drop_all();
+        RC_SUCCEED("Name collides with pre-existing logger, skipping");
+        return;
+    }
+
     // Create a logger with the generated name
     auto logger = log_init::create_logger(name);
 
