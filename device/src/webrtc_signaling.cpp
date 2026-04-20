@@ -143,7 +143,7 @@ struct WebRtcSignaling::Impl {
 
                 // Attempt reconnect
                 STATUS status = signalingClientConnectSync(signaling_handle);
-                if (STATUS_SUCCESS(status)) {
+                if (STATUS_SUCCEEDED(status)) {
                     total_reconnects_++;
                     if (logger) logger->warn("Reconnect successful — total_reconnects={} for channel: {}",
                                               total_reconnects_, config.channel_name);
