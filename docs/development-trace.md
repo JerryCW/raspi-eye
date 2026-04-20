@@ -4659,3 +4659,32 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 **涉及文件：** 无文件变更（纯验证）
 
 ---
+
+## Spec 28: DINOv3 特征空间深度清洗 — SageMaker 部署 Trace
+
+### 日期：2026-04-20
+
+### 问题与解决
+
+1. **SageMaker 容器 import 路径错误**：`from model.src.config` 在容器中找不到 `model` 包。修复：`clean_features.py` 开头 `sys.path.insert(0, _code_dir)` + 所有 import 改为 `from src.xxx`
+
+2. **缺失依赖 imagehash**：`cleaner.py` 顶层 import `imagehash`，通过 `cropper.py` 的 import 链被拉入。修复：容器 entrypoint 加 `pip install imagehash`
+
+3. **DINOv3 本地 repo 不存在**：`torch.hub.load(third_party/dinov3)` 在容器中找不到。修复：改用 HuggingFace Transformers `AutoModel.from_pretrained`
+
+4. **PyTorch 版本过低**：容器 PyTorch 2.1，transformers>=4.56 需要 PyTorch>=2.4。修复：容器镜像从 2.1 升级到 2.6
+
+5. **DINOv3 gated repo 401**：需要 HuggingFace token 认证。修复：token 存 Secrets Manager，`launch_processing.py` 读取后通过 Environment 传给容器
+
+6. **SageMaker Input/Output 名称冲突**：cropped 同时作为输入和输出，名称重复。修复：输入改名 `cropped-cache`
+
+7. **裁切结果丢失**：job 失败后 cropped 数据随容器销毁。修复：cropped 输出通道改为 `Continuous` 上传模式
+
+8. **半截裁切数据误判为完成**：Continuous 上传的部分数据被当成完整数据跳过。修复：加 `.done` 标记文件
+
+### 教训
+
+- SageMaker Processing Job 的 `source_dir` 打包机制与 `S3Input` code 通道是两种不同的代码部署方式，不能混用
+- gated model 的 token 管理需要在 job 提交前解决，不能依赖容器内认证
+- 每次改代码后必须 `aws s3 sync` 到 S3 code 路径，否则容器跑的是旧代码
+- 长时间运行的 Processing Job 应该用 Continuous 上传模式保存中间产物，防止失败后全部丢失

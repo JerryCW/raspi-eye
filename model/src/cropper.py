@@ -110,6 +110,7 @@ def crop_species(
     ])
 
     stats = CropStats(species=species_name, total=len(image_paths))
+    discarded_files: list[str] = []
 
     for img_path in image_paths:
         result = crop_bird(img_path, model, conf_threshold, padding, min_bbox_ratio)
@@ -119,10 +120,22 @@ def crop_species(
             stats.cropped += 1
         else:
             stats.discarded += 1
+            discarded_files.append(Path(img_path).name)
+
+    # 保存丢弃文件列表，方便人工验证
+    if discarded_files:
+        discard_log = output_path / "discarded.txt"
+        discard_log.write_text("\n".join(discarded_files) + "\n", encoding="utf-8")
 
     print(
         f"[{species_name}] 裁切统计: 总数={stats.total} "
         f"成功={stats.cropped} 丢弃={stats.discarded}"
+    )
+
+    # 写入完成标记，用于断点续传判断
+    (output_path / ".done").write_text(
+        f"total={stats.total} cropped={stats.cropped} discarded={stats.discarded}\n",
+        encoding="utf-8",
     )
 
     return stats

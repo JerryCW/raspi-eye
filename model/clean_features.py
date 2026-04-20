@@ -12,7 +12,15 @@ SageMaker Processing Job 中自动检测 /opt/ml/processing/ 路径。
 import argparse
 import json
 import os
+import subprocess
 import sys
+
+# SageMaker Processing Job 容器中缺少部分依赖，启动时自动安装
+_sagemaker_base = "/opt/ml/processing"
+if os.path.isdir(_sagemaker_base):
+    _req_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requirements.txt")
+    if os.path.isfile(_req_file):
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", _req_file])
 
 # SageMaker 容器中代码在 /opt/ml/processing/input/code/，
 # 本地运行时在项目根目录。统一将代码目录加入 sys.path，
@@ -37,6 +45,7 @@ def detect_paths() -> dict:
         return {
             "cleaned_dir": f"{sagemaker_base}/input/cleaned",
             "config_path": f"{sagemaker_base}/input/config/species.yaml",
+            "cropped_input_dir": f"{sagemaker_base}/input/cropped",
             "cropped_dir": f"{sagemaker_base}/output/cropped",
             "features_dir": f"{sagemaker_base}/output/features",
             "train_dir": f"{sagemaker_base}/output/train",
@@ -46,11 +55,12 @@ def detect_paths() -> dict:
     return {
         "cleaned_dir": "model/data/cleaned",
         "config_path": None,
-        "cropped_dir": "model/data/cropped",
-        "features_dir": "model/data/features",
-        "train_dir": "model/data/train",
-        "val_dir": "model/data/val",
-        "report_dir": "model/data/report",
+        "cropped_input_dir": "model/data/pipeline/cropped",
+        "cropped_dir": "model/data/pipeline/cropped",
+        "features_dir": "model/data/pipeline/features",
+        "train_dir": "model/data/dataset/train",
+        "val_dir": "model/data/dataset/val",
+        "report_dir": "model/data/pipeline/report",
     }
 
 
@@ -87,6 +97,7 @@ def main():
             sys.exit(1)
 
     cleaned_dir = paths["cleaned_dir"]
+    cropped_input_dir = paths.get("cropped_input_dir", "")
     cropped_dir = paths["cropped_dir"]
     features_dir = paths["features_dir"]
     train_dir = paths["train_dir"]
@@ -103,25 +114,53 @@ def main():
         "per_species": {},
     }
 
-    # ---- 2. YOLO 裁切（除非 --skip-crop）----
+    # ---- 2. YOLO 裁切（智能跳过已完成的物种）----
     if not args.skip_crop:
         print("=" * 60)
         print("阶段 1: YOLO 鸟体裁切")
         print("=" * 60)
         from ultralytics import YOLO
         from src.cropper import crop_species
+        import shutil
 
-        yolo_model = YOLO("yolo11x.pt")
+        yolo_model = None  # 延迟加载，只在需要裁切时才下载模型
+
         for entry in species_list:
-            species_input = os.path.join(cleaned_dir, entry.scientific_name)
-            species_output = os.path.join(cropped_dir, entry.scientific_name)
+            sp_name = entry.scientific_name
+            species_input = os.path.join(cleaned_dir, sp_name)
+            species_output = os.path.join(cropped_dir, sp_name)
+
+            # 检查 cropped 输入目录是否已有该物种的裁切结果
+            species_cropped_input = os.path.join(cropped_input_dir, sp_name) if cropped_input_dir else ""
+            if species_cropped_input and os.path.isdir(species_cropped_input):
+                done_marker = Path(species_cropped_input) / ".done"
+                existing_jpgs = list(Path(species_cropped_input).glob("*.jpg"))
+                if done_marker.exists() and len(existing_jpgs) > 0:
+                    # 已有裁切结果，复制到输出目录（如果输入输出不同路径）
+                    if os.path.abspath(species_cropped_input) != os.path.abspath(species_output):
+                        os.makedirs(species_output, exist_ok=True)
+                        for src_file in Path(species_cropped_input).iterdir():
+                            shutil.copy2(str(src_file), str(Path(species_output) / src_file.name))
+                    print(f"[{sp_name}] 已有裁切结果: {len(existing_jpgs)} 张，跳过裁切")
+                    report["per_species"].setdefault(sp_name, {})
+                    report["per_species"][sp_name]["input"] = len(existing_jpgs)
+                    report["per_species"][sp_name]["after_crop"] = len(existing_jpgs)
+                    report["per_species"][sp_name]["crop_discarded"] = 0
+                    report["per_species"][sp_name]["crop_skipped"] = True
+                    continue
+
+            # 需要裁切，延迟加载 YOLO 模型
+            if yolo_model is None:
+                yolo_model = YOLO("yolo11x.pt")
+
             crop_stats = crop_species(
-                entry.scientific_name, species_input, species_output, yolo_model
+                sp_name, species_input, species_output, yolo_model,
+                min_bbox_ratio=entry.min_bbox_ratio if entry.min_bbox_ratio is not None else 0.01,
             )
-            report["per_species"].setdefault(entry.scientific_name, {})
-            report["per_species"][entry.scientific_name]["input"] = crop_stats.total
-            report["per_species"][entry.scientific_name]["after_crop"] = crop_stats.cropped
-            report["per_species"][entry.scientific_name]["crop_discarded"] = crop_stats.discarded
+            report["per_species"].setdefault(sp_name, {})
+            report["per_species"][sp_name]["input"] = crop_stats.total
+            report["per_species"][sp_name]["after_crop"] = crop_stats.cropped
+            report["per_species"][sp_name]["crop_discarded"] = crop_stats.discarded
     else:
         print("跳过 YOLO 裁切（--skip-crop）")
         # 使用 cleaned 目录作为裁切后目录
@@ -193,11 +232,19 @@ def main():
         mask = detect_outliers(features, alpha=alpha)
         features_clean = features[mask]
         paths_clean = [p for p, m in zip(image_paths, mask) if m]
+        paths_outlier = [p for p, m in zip(image_paths, mask) if not m]
         sp_report["after_outlier"] = len(paths_clean)
         sp_report["outlier_removed"] = int(len(image_paths) - len(paths_clean))
         sp_report["used_pca"] = bool(len(features) < 1.5 * features.shape[1] and len(features) >= 10)
         sp_report["used_cosine_fallback"] = bool(len(features) < 10)
         sp_report["outlier_alpha"] = alpha
+
+        # 记录被移除的离群点图片路径
+        if paths_outlier:
+            os.makedirs(report_dir, exist_ok=True)
+            outlier_log = os.path.join(report_dir, f"{sp_name}_outliers.txt")
+            with open(outlier_log, "w", encoding="utf-8") as f:
+                f.write("\n".join(paths_outlier) + "\n")
 
         print(f"  [{sp_name}] 离群点检测: {len(image_paths)} → {len(paths_clean)} "
               f"(移除 {sp_report['outlier_removed']})")
@@ -213,8 +260,15 @@ def main():
         features_dedup, paths_dedup = semantic_deduplicate(
             features_clean, paths_clean, threshold=args.cosine_threshold
         )
+        paths_dedup_removed = sorted(set(paths_clean) - set(paths_dedup))
         sp_report["after_dedup"] = len(paths_dedup)
         sp_report["dedup_removed"] = int(len(paths_clean) - len(paths_dedup))
+
+        # 记录被语义去重移除的图片路径
+        if paths_dedup_removed:
+            dedup_log = os.path.join(report_dir, f"{sp_name}_dedup_removed.txt")
+            with open(dedup_log, "w", encoding="utf-8") as f:
+                f.write("\n".join(paths_dedup_removed) + "\n")
 
         print(f"  [{sp_name}] 语义去重: {len(paths_clean)} → {len(paths_dedup)} "
               f"(移除 {sp_report['dedup_removed']})")

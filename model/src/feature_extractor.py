@@ -76,32 +76,68 @@ class FeatureExtractor:
     def _load_model(self) -> torch.nn.Module:
         """加载 DINOv3 ViT-L/16 frozen backbone。
 
-        使用 torch.hub.load 从本地 repo 加载模型，
-        设置 eval 模式，移动到目标设备。
+        优先从本地 repo 加载（source='local'），
+        如果本地 repo 不存在则通过 Hugging Face Transformers 加载。
         """
-        model = torch.hub.load(
-            self.repo_dir,
-            "dinov3_vitl16",
-            source="local",
-            weights=self.weights_path,
-        )
-        model.eval()
-        model.to(self.device)
-        return model
+        # 尝试本地 repo 加载
+        if self.repo_dir and os.path.isfile(os.path.join(self.repo_dir, "hubconf.py")):
+            print(f"从本地 repo 加载 DINOv3: {self.repo_dir}")
+            model = torch.hub.load(
+                self.repo_dir,
+                "dinov3_vitl16",
+                source="local",
+                weights=self.weights_path if self.weights_path else None,
+            )
+            model.eval()
+            model.to(self.device)
+            return model
+
+        # Hugging Face Transformers 加载
+        model_id = "facebook/dinov3-vitl16-pretrain-lvd1689m"
+        print(f"从 Hugging Face 加载 DINOv3: {model_id}")
+        from transformers import AutoImageProcessor, AutoModel as HFAutoModel
+
+        self._hf_processor = AutoImageProcessor.from_pretrained(model_id)
+        hf_model = HFAutoModel.from_pretrained(model_id)
+        hf_model.eval()
+        hf_model.to(self.device)
+
+        # 包装成返回 class token 的 callable
+        class _HFWrapper(torch.nn.Module):
+            def __init__(self, hf_model):
+                super().__init__()
+                self.hf_model = hf_model
+
+            def forward(self, x):
+                outputs = self.hf_model(pixel_values=x)
+                return outputs.last_hidden_state[:, 0]
+
+        wrapper = _HFWrapper(hf_model)
+        wrapper.eval()
+        wrapper.to(self.device)
+        return wrapper
 
     def _make_transform(self) -> v2.Compose:
-        """DINOv3 标准预处理（LVD-1689M 权重）。
+        """DINOv3 标准预处理。
 
-        ToImage → Resize(518,518) → ToDtype(float32) → Normalize(ImageNet mean/std)
+        如果使用 HF 加载，用 AutoImageProcessor 的参数；
+        否则使用默认 ImageNet 预处理。
         """
+        if hasattr(self, '_hf_processor') and self._hf_processor is not None:
+            # 从 HF processor 提取 normalize 参数
+            mean = self._hf_processor.image_mean
+            std = self._hf_processor.image_std
+            size = self._hf_processor.size.get("height", 518)
+        else:
+            mean = (0.485, 0.456, 0.406)
+            std = (0.229, 0.224, 0.225)
+            size = 518
+
         return v2.Compose([
             v2.ToImage(),
-            v2.Resize((518, 518), antialias=True),
+            v2.Resize((size, size), antialias=True),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(
-                mean=(0.485, 0.456, 0.406),
-                std=(0.229, 0.224, 0.225),
-            ),
+            v2.Normalize(mean=mean, std=std),
         ])
 
     def extract_species(

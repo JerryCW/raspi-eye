@@ -421,11 +421,11 @@ def detect_paths() -> dict:
     return {
         "cleaned_dir": "model/data/cleaned",
         "config_path": None,  # 从 CLI --config 参数获取
-        "cropped_dir": "model/data/cropped",
-        "features_dir": "model/data/features",
-        "train_dir": "model/data/train",
-        "val_dir": "model/data/val",
-        "report_dir": "model/data/report",
+        "cropped_dir": "model/data/pipeline/cropped",
+        "features_dir": "model/data/pipeline/features",
+        "train_dir": "model/data/dataset/train",
+        "val_dir": "model/data/dataset/val",
+        "report_dir": "model/data/pipeline/report",
     }
 
 def main():
@@ -460,7 +460,6 @@ SageMaker Processing Job 启动脚本。
 用法：
     python model/launch_processing.py \
         --s3-bucket my-bucket \
-        --s3-prefix bird-data \
         --role arn:aws:iam::xxx:role/SageMakerRole
 """
 import argparse
@@ -469,7 +468,6 @@ import os
 def main():
     parser = argparse.ArgumentParser(description="启动 SageMaker Processing Job")
     parser.add_argument("--s3-bucket", required=True, help="S3 桶名")
-    parser.add_argument("--s3-prefix", default="bird-data", help="S3 路径前缀")
     parser.add_argument("--role", type=str, help="SageMaker Execution Role ARN")
     parser.add_argument("--instance-type", default="ml.g4dn.xlarge", help="GPU 实例类型")
     parser.add_argument("--wait", action="store_true", help="等待 Job 完成")
@@ -527,23 +525,25 @@ model/data/
 ├── cleaned/                          # Spec 27 产出（只读输入）
 │   ├── Pterorhinus sannio/
 │   └── Passer montanus/
-├── cropped/                          # YOLO 裁切后（中间产物）
-│   ├── Pterorhinus sannio/
-│   └── Passer montanus/
-├── features/                         # DINOv3 特征向量
-│   ├── Pterorhinus sannio.npy        # shape (N, feature_dim)
-│   ├── Pterorhinus sannio_paths.json # 图片路径映射
-│   └── Passer montanus.npy
-├── train/                            # 最终输出：训练集（ImageFolder 格式）
-│   ├── Pterorhinus sannio/
-│   │   ├── 123456_789.jpg
-│   │   └── ...
-│   └── Passer montanus/
-├── val/                              # 最终输出：验证集（ImageFolder 格式）
-│   ├── Pterorhinus sannio/
-│   └── Passer montanus/
-├── report/                           # 清洗统计报告
-│   └── cleaning_report.json
+├── pipeline/                         # 清洗管道中间产物
+│   ├── cropped/                      # YOLO 裁切后
+│   │   ├── Pterorhinus sannio/
+│   │   └── Passer montanus/
+│   ├── features/                     # DINOv3 特征向量
+│   │   ├── Pterorhinus sannio.npy    # shape (N, feature_dim)
+│   │   ├── Pterorhinus sannio_paths.json
+│   │   └── Passer montanus.npy
+│   └── report/                       # 清洗统计报告
+│       └── cleaning_report.json
+├── dataset/                          # 训练就绪数据（ImageFolder 格式）
+│   ├── train/
+│   │   ├── Pterorhinus sannio/
+│   │   │   ├── 123456_789.jpg
+│   │   │   └── ...
+│   │   └── Passer montanus/
+│   └── val/
+│       ├── Pterorhinus sannio/
+│       └── Passer montanus/
 └── taxonomy.json                     # Spec 27 产出（只读）
 ```
 
@@ -597,14 +597,17 @@ with open(f"model/data/features/{species_name}_paths.json") as f:
 
 ### SageMaker Processing Job 路径映射
 
+S3 目录按职责分层：`bird-data/`（源数据）、`pipeline/`（清洗中间产物）、`dataset/`（训练就绪）。
+
 | 本地路径 | SageMaker 路径 | S3 路径 |
 |---------|---------------|---------|
-| `model/data/cleaned/` | `/opt/ml/processing/input/cleaned/` | `s3://{bucket}/{prefix}/cleaned/` |
-| `model/config/species.yaml` | `/opt/ml/processing/input/config/species.yaml` | `s3://{bucket}/{prefix}/config/species.yaml` |
-| `model/data/train/` | `/opt/ml/processing/output/train/` | `s3://{bucket}/{prefix}/train/` |
-| `model/data/val/` | `/opt/ml/processing/output/val/` | `s3://{bucket}/{prefix}/val/` |
-| `model/data/features/` | `/opt/ml/processing/output/features/` | `s3://{bucket}/{prefix}/features/` |
-| `model/data/report/` | `/opt/ml/processing/output/report/` | `s3://{bucket}/{prefix}/report/` |
+| `model/data/cleaned/` | `/opt/ml/processing/input/cleaned/` | `s3://{bucket}/bird-data/cleaned/` |
+| `model/config/species.yaml` | `/opt/ml/processing/input/config/species.yaml` | `s3://{bucket}/bird-data/config/species.yaml` |
+| `model/data/pipeline/cropped/` | `/opt/ml/processing/output/cropped/` | `s3://{bucket}/pipeline/cropped/` |
+| `model/data/pipeline/features/` | `/opt/ml/processing/output/features/` | `s3://{bucket}/pipeline/features/` |
+| `model/data/pipeline/report/` | `/opt/ml/processing/output/report/` | `s3://{bucket}/pipeline/report/` |
+| `model/data/dataset/train/` | `/opt/ml/processing/output/train/` | `s3://{bucket}/dataset/train/` |
+| `model/data/dataset/val/` | `/opt/ml/processing/output/val/` | `s3://{bucket}/dataset/val/` |
 
 
 ## 正确性属性
@@ -826,7 +829,37 @@ python model/clean_features.py --config model/config/species.yaml \
 # 提交 SageMaker Processing Job
 python model/launch_processing.py \
     --s3-bucket my-bucket \
-    --s3-prefix bird-data \
     --role arn:aws:iam::xxx:role/SageMakerRole \
     --wait
 ```
+
+
+## 实际部署改动记录
+
+以下记录 SageMaker Processing Job 实际部署过程中与原始设计的偏差：
+
+### SageMaker Processing Job 部署改动
+
+1. **容器镜像**：从 PyTorch 2.1 升级到 PyTorch 2.6（`2.6.0-gpu-py312-cu126-ubuntu22.04-sagemaker`），因为 transformers>=4.56 需要 PyTorch>=2.4
+
+2. **DINOv3 加载方式**：从 `torch.hub.load(local_repo)` 改为 HuggingFace Transformers `AutoModel.from_pretrained("facebook/dinov3-vitl16-pretrain-lvd1689m")`，因为 SageMaker 容器无法 clone GitHub repo
+
+3. **HF Token 管理**：DINOv3 是 gated model，需要 HuggingFace token。token 存储在 AWS Secrets Manager `raspi-eye/huggingface-token`（账号 014498626607），`launch_processing.py` 提交 job 时自动读取并通过 Environment 传给容器
+
+4. **裁切结果持久化**：cropped 输出通道使用 `S3UploadMode: Continuous`（实时上传），其他输出保持 `EndOfJob`
+
+5. **裁切断点续传**：每个物种裁切完成后写 `.done` 标记文件，重跑时检查 `.done` + jpg 数量决定是否跳过
+
+6. **cropped 缓存**：`launch_processing.py` 提交 job 前检查 S3 `cropped/` 是否存在，有则作为输入通道下载到容器，`clean_features.py` 逐物种检查已有裁切结果
+
+7. **丢弃文件记录**：`cropper.py` 裁切完成后在物种目录下写 `discarded.txt`，记录被丢弃的文件名
+
+8. **单物种测试**：`launch_processing.py` 新增 `--species` 参数，支持只处理单个物种（用于调试）
+
+9. **依赖安装**：容器 entrypoint 通过 `pip install` 安装缺失依赖（ultralytics、scikit-learn、scipy、imagehash、transformers>=4.56）
+
+10. **S3 桶**：`raspi-eye-model-data`（us-east-1），不带 region 后缀
+
+11. **代码部署方式**：通过 `aws s3 sync model/ s3://raspi-eye-model-data/pipeline/code/` 上传代码到 S3，容器从 S3 code 输入通道读取
+
+12. **S3 目录重组**：从平铺的 `bird-data/*` 重组为分层结构：`bird-data/`（源数据：cleaned + config）、`pipeline/`（清洗管道：code + cropped + features + report）、`dataset/`（训练就绪：train + val），便于后续 Spec 29 训练 job 直接指向 `dataset/`

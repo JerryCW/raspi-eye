@@ -1,0 +1,7 @@
+# SageMaker Processing Job 容器内额外依赖
+# PyTorch 预构建容器已包含 torch/torchvision/numpy/scipy/scikit-learn
+# 以下是容器中缺少的包
+imagehash>=4.3
+Pillow>=10.0
+PyYAML>=6.0
+ultralytics>=8.0
