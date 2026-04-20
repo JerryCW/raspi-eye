@@ -86,7 +86,7 @@ def main():
             "ImageUri": image_uri,
             "ContainerEntrypoint": [
                 "bash", "-c",
-                "pip install ultralytics scikit-learn scipy && "
+                "pip install ultralytics scikit-learn scipy imagehash && "
                 "python3 /opt/ml/processing/input/code/clean_features.py "
                 "--config /opt/ml/processing/input/config/species.yaml"
             ],
