@@ -13,7 +13,7 @@ from pathlib import Path
 import imagehash
 from PIL import Image
 
-from model.src.config import DatasetConfig
+from src.config import DatasetConfig
 
 
 @dataclass

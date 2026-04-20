@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from model.src.cleaner import letterbox_resize
+from src.cleaner import letterbox_resize
 
 BIRD_CLASS_ID = 14  # COCO class 14 = bird
 

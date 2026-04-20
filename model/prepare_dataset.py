@@ -11,12 +11,12 @@ import sys
 import time
 from pathlib import Path
 
-# 将项目根目录加入 sys.path，使 model.src.* 可导入
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# 将代码目录加入 sys.path，使 src.* 可导入（兼容本地和 SageMaker 环境）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from model.src.cleaner import DataCleaner
-from model.src.collector import DataCollector
-from model.src.config import load_config
+from src.cleaner import DataCleaner
+from src.collector import DataCollector
+from src.config import load_config
 
 
 def main():
