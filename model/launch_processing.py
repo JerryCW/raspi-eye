@@ -84,9 +84,11 @@ def main():
         },
         AppSpecification={
             "ImageUri": image_uri,
-            "ContainerEntrypoint": ["python3", "/opt/ml/processing/input/code/clean_features.py"],
-            "ContainerArguments": [
-                "--config", "/opt/ml/processing/input/config/species.yaml",
+            "ContainerEntrypoint": [
+                "bash", "-c",
+                "pip install ultralytics scikit-learn scipy && "
+                "python3 /opt/ml/processing/input/code/clean_features.py "
+                "--config /opt/ml/processing/input/config/species.yaml"
             ],
         },
         RoleArn=role,
