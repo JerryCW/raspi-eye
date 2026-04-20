@@ -10,6 +10,11 @@
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <vector>
+#include <atomic>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
 
 // ============================================================
 // build_webrtc_config — same pattern as build_kvs_config / build_aws_config
@@ -75,6 +80,85 @@ struct WebRtcSignaling::Impl {
     OfferCallback offer_cb;
     IceCandidateCallback ice_cb;
 
+    // 重连监控
+    std::atomic<bool> needs_reconnect_{false};
+    std::atomic<bool> shutdown_requested_{false};
+    std::thread reconnect_thread_;
+    std::mutex reconnect_mutex_;
+    std::condition_variable reconnect_cv_;
+    std::chrono::steady_clock::time_point connected_at_;
+    uint32_t total_disconnects_ = 0;
+    uint32_t total_reconnects_ = 0;
+    uint32_t reconnect_attempt_ = 0;
+
+    static constexpr int kInitialBackoffSec = 1;
+    static constexpr int kMaxBackoffSec = 30;
+    static constexpr int kStableConnectionSec = 30;
+    static constexpr int kHealthCheckIntervalSec = 60;
+
+    void reconnect_loop() {
+        auto logger = spdlog::get("webrtc");
+        if (logger) logger->info("Reconnect monitor thread started for channel: {}", config.channel_name);
+
+        while (!shutdown_requested_.load()) {
+            std::unique_lock<std::mutex> lock(reconnect_mutex_);
+            reconnect_cv_.wait_for(lock, std::chrono::seconds(kHealthCheckIntervalSec), [this] {
+                return needs_reconnect_.load() || shutdown_requested_.load();
+            });
+
+            if (shutdown_requested_.load()) break;
+
+            // Health check logging
+            if (connected) {
+                auto duration = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - connected_at_).count();
+                if (logger) logger->debug("Signaling health: connected for {}s, disconnects={}, reconnects={}",
+                                           duration, total_disconnects_, total_reconnects_);
+                // Reset backoff if connection stable > 30s
+                if (duration > kStableConnectionSec) {
+                    reconnect_attempt_ = 0;
+                }
+            } else if (!needs_reconnect_.load()) {
+                if (logger) logger->warn("Signaling health: NOT connected, disconnects={}, reconnects={}",
+                                          total_disconnects_, total_reconnects_);
+            }
+
+            if (needs_reconnect_.load()) {
+                needs_reconnect_.store(false);
+                lock.unlock();
+
+                // Exponential backoff
+                int backoff = std::min(kInitialBackoffSec << reconnect_attempt_, kMaxBackoffSec);
+                if (logger) logger->warn("Reconnect attempt {} — backoff {}s for channel: {}",
+                                          reconnect_attempt_ + 1, backoff, config.channel_name);
+
+                // Wait with shutdown check
+                {
+                    std::unique_lock<std::mutex> wait_lock(reconnect_mutex_);
+                    reconnect_cv_.wait_for(wait_lock, std::chrono::seconds(backoff), [this] {
+                        return shutdown_requested_.load();
+                    });
+                }
+                if (shutdown_requested_.load()) break;
+
+                // Attempt reconnect
+                STATUS status = signalingClientConnectSync(signaling_handle);
+                if (STATUS_SUCCESS(status)) {
+                    total_reconnects_++;
+                    if (logger) logger->warn("Reconnect successful — total_reconnects={} for channel: {}",
+                                              total_reconnects_, config.channel_name);
+                    // Note: connected=true is set by SDK callback, not here
+                } else {
+                    reconnect_attempt_++;
+                    needs_reconnect_.store(true);
+                    if (logger) logger->error("Reconnect failed — status: 0x{}, attempt={} for channel: {}",
+                                               to_hex(status), reconnect_attempt_, config.channel_name);
+                }
+            }
+        }
+        if (logger) logger->info("Reconnect monitor thread stopped for channel: {}", config.channel_name);
+    }
+
     // SDK callback: signaling client state changed
     // Forwards to C++ side — no heavy work here.
     static STATUS on_signaling_state_changed(UINT64 custom_data,
@@ -94,15 +178,34 @@ struct WebRtcSignaling::Impl {
 
         if (state == SIGNALING_CLIENT_STATE_CONNECTED) {
             self->connected = true;
-            if (logger) logger->warn("Signaling state: {} → channel {}",
-                                     name, self->config.channel_name);
+            self->connected_at_ = std::chrono::steady_clock::now();
+            if (logger) logger->warn("Signaling state: {} — channel {}", name, self->config.channel_name);
         } else if (state == SIGNALING_CLIENT_STATE_DISCONNECTED) {
             self->connected = false;
-            if (logger) logger->warn("Signaling state: DISCONNECTED — channel {} "
-                                     "(SDK reconnect={}, will auto-retry)",
-                                     self->config.channel_name, "TRUE");
+            if (!self->shutdown_requested_.load()) {
+                self->needs_reconnect_.store(true);
+                self->total_disconnects_++;
+                auto duration = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - self->connected_at_).count();
+                if (logger) logger->warn("Signaling state: DISCONNECTED — channel {} "
+                                         "(was connected for {}s, total_disconnects={}, triggering auto-reconnect)",
+                                         self->config.channel_name, duration, self->total_disconnects_);
+                self->reconnect_cv_.notify_one();
+            } else {
+                if (logger) logger->info("Signaling state: DISCONNECTED — channel {} (shutdown requested, no reconnect)",
+                                         self->config.channel_name);
+            }
         } else {
-            if (logger) logger->warn("Signaling state: {} ({})", name, static_cast<int>(state));
+            if (state == SIGNALING_CLIENT_STATE_READY) {
+                if (self->total_disconnects_ == 0) {
+                    if (logger) logger->warn("Signaling state: READY (initial connect) — channel {}", self->config.channel_name);
+                } else {
+                    if (logger) logger->warn("Signaling state: READY (reconnect recovery, disconnects={}) — channel {}",
+                                             self->total_disconnects_, self->config.channel_name);
+                }
+            } else {
+                if (logger) logger->warn("Signaling state: {} ({})", name, static_cast<int>(state));
+            }
         }
         return STATUS_SUCCESS;
     }
@@ -290,6 +393,11 @@ struct WebRtcSignaling::Impl {
     }
 
     ~Impl() {
+        shutdown_requested_.store(true);
+        reconnect_cv_.notify_all();
+        if (reconnect_thread_.joinable()) {
+            reconnect_thread_.join();
+        }
         release_signaling_client();
         if (credential_provider != nullptr) {
             freeIotCredentialProvider(&credential_provider);
@@ -316,6 +424,44 @@ struct WebRtcSignaling::Impl {
     OfferCallback offer_cb;
     IceCandidateCallback ice_cb;
 
+    // 重连监控（stub 版本）
+    std::atomic<bool> needs_reconnect_{false};
+    std::atomic<bool> shutdown_requested_{false};
+    std::thread reconnect_thread_;
+    std::mutex reconnect_mutex_;
+    std::condition_variable reconnect_cv_;
+    uint32_t total_disconnects_ = 0;
+    uint32_t total_reconnects_ = 0;
+
+    void simulate_disconnect() {
+        connected = false;
+        needs_reconnect_.store(true);
+        total_disconnects_++;
+        reconnect_cv_.notify_one();
+    }
+
+    void reconnect_loop() {
+        auto logger = spdlog::get("webrtc");
+        while (!shutdown_requested_.load()) {
+            std::unique_lock<std::mutex> lock(reconnect_mutex_);
+            reconnect_cv_.wait(lock, [this] {
+                return needs_reconnect_.load() || shutdown_requested_.load();
+            });
+            if (shutdown_requested_.load()) break;
+            if (needs_reconnect_.load()) {
+                needs_reconnect_.store(false);
+                // Stub: short delay then reconnect
+                lock.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (!shutdown_requested_.load()) {
+                    connected = true;
+                    total_reconnects_++;
+                    if (logger) logger->info("Stub: auto-reconnected after disconnect (total_reconnects={})", total_reconnects_);
+                }
+            }
+        }
+    }
+
     bool init_credential_provider(std::string* /*error_msg*/) {
         // Stub: no real credentials needed
         return true;
@@ -336,7 +482,13 @@ struct WebRtcSignaling::Impl {
     uint32_t ice_config_count() const { return 0; }
     bool ice_config(uint32_t, std::vector<WebRtcSignaling::IceServerInfo>&) const { return false; }
 
-    ~Impl() = default;
+    ~Impl() {
+        shutdown_requested_.store(true);
+        reconnect_cv_.notify_all();
+        if (reconnect_thread_.joinable()) {
+            reconnect_thread_.join();
+        }
+    }
 };
 
 #endif  // HAVE_KVS_WEBRTC_SDK
@@ -374,13 +526,28 @@ std::unique_ptr<WebRtcSignaling> WebRtcSignaling::create(
 }
 
 bool WebRtcSignaling::connect(std::string* error_msg) {
-    return impl_->create_and_connect(error_msg);
+    // Stop existing reconnect thread if running
+    impl_->shutdown_requested_.store(true);
+    impl_->reconnect_cv_.notify_all();
+    if (impl_->reconnect_thread_.joinable()) {
+        impl_->reconnect_thread_.join();
+    }
+    if (!impl_->create_and_connect(error_msg)) return false;
+    impl_->shutdown_requested_.store(false);
+    auto* p = impl_.get();
+    impl_->reconnect_thread_ = std::thread([p] { p->reconnect_loop(); });
+    return true;
 }
 
 void WebRtcSignaling::disconnect() {
+    impl_->shutdown_requested_.store(true);
+    impl_->reconnect_cv_.notify_all();
+    if (impl_->reconnect_thread_.joinable()) {
+        impl_->reconnect_thread_.join();
+    }
     impl_->release_signaling_client();
     auto logger = spdlog::get("webrtc");
-    if (logger) logger->info("Signaling client disconnected");
+    if (logger) logger->info("Signaling client disconnected (shutdown_requested)");
 }
 
 bool WebRtcSignaling::is_connected() const {
@@ -388,8 +555,14 @@ bool WebRtcSignaling::is_connected() const {
 }
 
 bool WebRtcSignaling::reconnect(std::string* error_msg) {
-    impl_->release_signaling_client();
-    return impl_->create_and_connect(error_msg);
+    if (impl_->reconnect_thread_.joinable() && !impl_->shutdown_requested_.load()) {
+        // Reconnect thread is running — trigger async reconnect
+        impl_->needs_reconnect_.store(true);
+        impl_->reconnect_cv_.notify_one();
+        return true;
+    }
+    // Thread not running (after disconnect or never started) — full reconnect
+    return connect(error_msg);
 }
 
 void WebRtcSignaling::set_offer_callback(OfferCallback cb) {
@@ -404,7 +577,8 @@ bool WebRtcSignaling::send_answer(const std::string& peer_id,
                                   const std::string& sdp_answer) {
     auto logger = spdlog::get("webrtc");
     if (!impl_->connected) {
-        if (logger) logger->warn("Cannot send answer: signaling client not connected");
+        if (logger) logger->warn("Cannot send answer: signaling not connected (disconnects={}, reconnects={})",
+                                  impl_->total_disconnects_, impl_->total_reconnects_);
         return false;
     }
 #ifdef HAVE_KVS_WEBRTC_SDK
@@ -441,7 +615,8 @@ bool WebRtcSignaling::send_ice_candidate(const std::string& peer_id,
                                          const std::string& candidate) {
     auto logger = spdlog::get("webrtc");
     if (!impl_->connected) {
-        if (logger) logger->warn("Cannot send ICE candidate: signaling client not connected");
+        if (logger) logger->warn("Cannot send ICE candidate: signaling not connected (disconnects={}, reconnects={})",
+                                  impl_->total_disconnects_, impl_->total_reconnects_);
         return false;
     }
 #ifdef HAVE_KVS_WEBRTC_SDK
@@ -484,6 +659,18 @@ bool WebRtcSignaling::get_ice_config(uint32_t index,
 void WebRtcSignaling::log_health_status() const {
     auto logger = spdlog::get("webrtc");
     if (!logger) return;
-    logger->warn("Signaling health: connected={}, channel={}",
-                 impl_->connected, impl_->config.channel_name);
+    if (impl_->connected) {
+#ifdef HAVE_KVS_WEBRTC_SDK
+        auto duration = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - impl_->connected_at_).count();
+        logger->debug("Signaling health: connected for {}s, channel={}, disconnects={}, reconnects={}",
+                       duration, impl_->config.channel_name, impl_->total_disconnects_, impl_->total_reconnects_);
+#else
+        logger->debug("Signaling health: connected, channel={}, disconnects={}, reconnects={}",
+                       impl_->config.channel_name, impl_->total_disconnects_, impl_->total_reconnects_);
+#endif
+    } else {
+        logger->warn("Signaling health: NOT connected, channel={}, disconnects={}, reconnects={}",
+                      impl_->config.channel_name, impl_->total_disconnects_, impl_->total_reconnects_);
+    }
 }

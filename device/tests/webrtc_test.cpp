@@ -2,9 +2,11 @@
 // WebRTC signaling tests: 6 example-based + 2 PBT properties.
 #include "webrtc_signaling.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -174,4 +176,154 @@ RC_GTEST_PROP(WebRtcConfigPBT, MissingFieldsDetected, ()) {
     for (const auto& field : removed) {
         RC_ASSERT(err.find(field) != std::string::npos);
     }
+}
+
+// ============================================================
+// Preservation Property Test (spec-13.7)
+// ============================================================
+
+// Property 2: Preservation — 非断连场景行为不变
+// Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
+// 在未修复代码上此测试 MUST PASS — 确认基线行为
+RC_GTEST_PROP(WebRtcSignalingPreservation, ConnectDisconnectSendConsistency, ()) {
+    auto sig = create_test_signaling();
+    if (!sig) RC_DISCARD("Real SDK rejects fake creds");
+
+    // 随机生成操作序列
+    enum class Op { Connect, Disconnect, SendAnswer, SendIce };
+    auto len = *rc::gen::inRange(3, 15);
+    auto ops = *rc::gen::container<std::vector<Op>>(
+        len,
+        rc::gen::element(Op::Connect, Op::Disconnect, Op::SendAnswer, Op::SendIce));
+
+    bool expected_connected = false;
+    std::string err;
+
+    for (auto op : ops) {
+        switch (op) {
+            case Op::Connect:
+                sig->connect(&err);
+                expected_connected = true;
+                break;
+            case Op::Disconnect:
+                sig->disconnect();
+                expected_connected = false;
+                break;
+            case Op::SendAnswer:
+                RC_ASSERT(sig->send_answer("peer1", "sdp") == expected_connected);
+                break;
+            case Op::SendIce:
+                RC_ASSERT(sig->send_ice_candidate("peer1", "ice") == expected_connected);
+                break;
+        }
+        RC_ASSERT(sig->is_connected() == expected_connected);
+    }
+}
+
+// ============================================================
+// Bug Condition Exploration Test (spec-13.7)
+// ============================================================
+
+// Bug Condition Exploration: 意外断连后自动重连恢复
+// Validates: Requirements 1.1, 1.2, 1.4, 2.1, 2.2
+// 在未修复代码上此测试 FAIL（无自动重连机制）
+// 在修复后此测试 PASS（reconnect_loop 自动恢复连接）
+TEST(WebRtcSignalingBugCondition, AutoReconnectAfterUnexpectedDisconnect) {
+    auto sig = create_test_signaling();
+    if (!sig) GTEST_SKIP() << "Real SDK rejects fake creds";
+
+    std::string err;
+    EXPECT_TRUE(sig->connect(&err)) << "connect() failed: " << err;
+    EXPECT_TRUE(sig->is_connected());
+
+    // 模拟意外断连：通过 reconnect() 公共 API 触发 needs_reconnect_
+    // 在真实场景中，SDK 回调 on_signaling_state_changed(DISCONNECTED) 设置此标志
+    // reconnect() 设置 needs_reconnect_=true 并通知 reconnect_loop
+    EXPECT_TRUE(sig->reconnect(&err));
+
+    // 等待 reconnect_loop 处理（stub 使用 100ms 延迟）
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // EXPECTED BEHAVIOR: 断连后 reconnect_loop 自动恢复连接
+    EXPECT_TRUE(sig->is_connected())
+        << "Expected: auto-reconnect restores connection after unexpected disconnect";
+}
+
+// ============================================================
+// Reconnect Unit Tests (spec-13.7, Task 3.6)
+// ============================================================
+
+// Test: reconnect() 触发 reconnect_loop 自动重连
+// Validates: Requirements 2.1, 2.2
+TEST(WebRtcSignalingReconnect, ReconnectTriggersAutoReconnect) {
+    auto sig = create_test_signaling();
+    if (!sig) GTEST_SKIP() << "Real SDK rejects fake creds";
+
+    std::string err;
+    EXPECT_TRUE(sig->connect(&err)) << "connect() failed: " << err;
+    EXPECT_TRUE(sig->is_connected());
+
+    // reconnect() 设置 needs_reconnect_ 并通知 reconnect_loop
+    EXPECT_TRUE(sig->reconnect(&err));
+
+    // 等待 reconnect_loop 处理（stub 使用 100ms 延迟）
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_TRUE(sig->is_connected())
+        << "reconnect() should trigger auto-reconnect via reconnect_loop";
+}
+
+// Test: disconnect() 设置 shutdown_requested_，阻止自动重连
+// Validates: Requirements 2.7
+TEST(WebRtcSignalingReconnect, ShutdownPreventsReconnect) {
+    auto sig = create_test_signaling();
+    if (!sig) GTEST_SKIP() << "Real SDK rejects fake creds";
+
+    std::string err;
+    EXPECT_TRUE(sig->connect(&err));
+    EXPECT_TRUE(sig->is_connected());
+
+    // disconnect() 设置 shutdown_requested_ = true，停止 reconnect 线程
+    sig->disconnect();
+    EXPECT_FALSE(sig->is_connected());
+
+    // 等待确认无自动重连发生
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_FALSE(sig->is_connected())
+        << "disconnect() should prevent auto-reconnect (shutdown_requested)";
+}
+
+// Test: disconnect() 安全停止 reconnect 线程，无崩溃/悬挂
+// Validates: Requirements 2.7, 3.1
+TEST(WebRtcSignalingReconnect, DisconnectSafelyStopsReconnectThread) {
+    auto sig = create_test_signaling();
+    if (!sig) GTEST_SKIP() << "Real SDK rejects fake creds";
+
+    std::string err;
+    EXPECT_TRUE(sig->connect(&err));
+
+    // disconnect 应安全停止 reconnect 线程
+    sig->disconnect();
+    EXPECT_FALSE(sig->is_connected());
+
+    // 析构也应安全（无 double-join）
+    sig.reset();
+    // 到达此处无崩溃/悬挂即通过
+}
+
+// Test: disconnect() 后调用 reconnect() 执行完整重连
+// Validates: Requirements 2.1, 2.2, 3.4
+TEST(WebRtcSignalingReconnect, ReconnectAfterDisconnect) {
+    auto sig = create_test_signaling();
+    if (!sig) GTEST_SKIP() << "Real SDK rejects fake creds";
+
+    std::string err;
+    EXPECT_TRUE(sig->connect(&err));
+    sig->disconnect();
+    EXPECT_FALSE(sig->is_connected());
+
+    // disconnect 后 reconnect 线程已停止，reconnect() 应执行完整 connect
+    EXPECT_TRUE(sig->reconnect(&err));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_TRUE(sig->is_connected())
+        << "reconnect() after disconnect() should restore connection";
 }

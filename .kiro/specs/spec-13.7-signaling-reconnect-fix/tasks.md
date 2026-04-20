@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Write bug condition exploration test
+- [x] 1. Write bug condition exploration test
   - **Property 1: Bug Condition** — Signaling 断连后无自动重连
   - **CRITICAL**: This test MUST FAIL on unfixed code — failure confirms the bug exists
   - **DO NOT attempt to fix the test or the code when it fails**
@@ -17,7 +17,7 @@
   - Mark task complete when test is written, run, and failure is documented
   - _Requirements: 1.1, 1.2, 1.4, 2.1, 2.2_
 
-- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
   - **Property 2: Preservation** — 非断连场景行为不变
   - **IMPORTANT**: Follow observation-first methodology
   - 在 `device/tests/webrtc_test.cpp` 中新增 RC_GTEST_PROP 测试
@@ -35,9 +35,9 @@
   - Mark task complete when tests are written, run, and passing on unfixed code
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
 
-- [ ] 3. Fix: Signaling 断连自动重连
+- [x] 3. Fix: Signaling 断连自动重连
 
-  - [ ] 3.1 修改 macOS stub Impl：新增重连基础设施
+  - [x] 3.1 修改 macOS stub Impl：新增重连基础设施
     - 在 stub `WebRtcSignaling::Impl` 中新增成员：`needs_reconnect_`、`shutdown_requested_`（atomic<bool>）、`reconnect_thread_`、`reconnect_mutex_`、`reconnect_cv_`、`total_disconnects_`、`total_reconnects_`
     - 新增 `reconnect_loop()` stub 版本：检测 `needs_reconnect_` 后短暂等待，设置 `connected = true`，递增 `total_reconnects_`
     - 新增 `simulate_disconnect()` 方法（仅 stub）：设置 `connected = false`，设置 `needs_reconnect_ = true`，递增 `total_disconnects_`，通知 `reconnect_cv_`
@@ -49,7 +49,7 @@
     - SHALL NOT 对含 `std::atomic` 成员的结构体使用 `unordered_map::emplace`（改用 `try_emplace`）
     - SHALL NOT 在 SDK 回调线程中调用 `signalingClientConnectSync`
 
-  - [ ] 3.2 修改公共接口方法：connect/disconnect/reconnect
+  - [x] 3.2 修改公共接口方法：connect/disconnect/reconnect
     - `connect()` 方法：连接成功后启动 `reconnect_thread_`（运行 `reconnect_loop()`）
     - `disconnect()` 方法：设置 `shutdown_requested_ = true` → 通知 `reconnect_cv_` → join `reconnect_thread_`（如果 joinable） → 然后执行原有 `release_signaling_client()`
     - `reconnect()` 公共方法：改为设置 `needs_reconnect_ = true` + 通知 cv（触发自动重连流程），而非直接 release + create_and_connect
@@ -58,7 +58,7 @@
     - _Preservation: connect/disconnect 基本流程不变_
     - _Requirements: 2.6, 2.7, 3.3, 3.4_
 
-  - [ ] 3.3 修改 Linux Impl：新增重连基础设施和 reconnect_loop
+  - [x] 3.3 修改 Linux Impl：新增重连基础设施和 reconnect_loop
     - 在 Linux `WebRtcSignaling::Impl` 中新增成员：`needs_reconnect_`、`shutdown_requested_`（atomic<bool>）、`reconnect_thread_`、`reconnect_mutex_`、`reconnect_cv_`、`connected_at_`、`total_disconnects_`、`total_reconnects_`、`reconnect_attempt_`
     - 新增常量：`kInitialBackoffSec=1`、`kMaxBackoffSec=30`、`kStableConnectionSec=30`、`kHealthCheckIntervalSec=60`
     - 新增 `reconnect_loop()` Linux 版本：
@@ -76,7 +76,7 @@
     - _Requirements: 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
     - SHALL NOT 在 SDK 回调线程中调用 `signalingClientConnectSync`（会死锁）
 
-  - [ ] 3.4 修改 on_signaling_state_changed 回调（Linux Impl）
+  - [x] 3.4 修改 on_signaling_state_changed 回调（Linux Impl）
     - CONNECTED 状态：记录 `connected_at_` 时间戳
     - DISCONNECTED 状态：设置 `needs_reconnect_ = true`，递增 `total_disconnects_`，通知 `reconnect_cv_`，日志打印断连持续时长（`now - connected_at_`）和累计断连次数
     - READY 状态：日志区分首次连接（`total_disconnects_ == 0`）与断连恢复（`total_disconnects_ > 0`）
@@ -84,7 +84,7 @@
     - _Expected_Behavior: DISCONNECTED 设置 needs_reconnect_ 通知重连线程_
     - _Requirements: 2.1, 2.8, 2.9_
 
-  - [ ] 3.5 增强日志可观测性
+  - [x] 3.5 增强日志可观测性
     - `log_health_status()`：正常连接 debug 级别（含连接持续时长、累计断连/重连次数），异常状态 warn 级别
     - `send_answer()` / `send_ice_candidate()`：未连接时打印当前 signaling 状态码（而非仅 "not connected"）
     - 重连尝试日志：打印当前重连次数、退避等待时间（由 reconnect_loop 内部处理）
@@ -92,7 +92,7 @@
     - 所有日志使用 "webrtc" logger
     - _Requirements: 2.8, 2.9, 2.10, 2.11, 2.12, 2.13, 3.7_
 
-  - [ ] 3.6 新增 stub 断连自动重连单元测试
+  - [x] 3.6 新增 stub 断连自动重连单元测试
     - 在 `device/tests/webrtc_test.cpp` 中新增测试：
     - `StubAutoReconnectAfterDisconnect`: connect → simulate_disconnect → sleep 适当时间 → assert is_connected() == true
     - `ShutdownPreventsReconnect`: connect → disconnect()（正常关闭） → sleep → assert is_connected() == false（shutdown 阻止重连）
@@ -102,7 +102,7 @@
     - SHALL NOT 直接运行测试可执行文件，必须通过 `ctest --test-dir device/build --output-on-failure`
     - _Requirements: 2.1, 2.2, 2.3, 2.7, 3.1_
 
-  - [ ] 3.7 Verify bug condition exploration test now passes
+  - [x] 3.7 Verify bug condition exploration test now passes
     - **Property 1: Expected Behavior** — 断连后自动重连恢复 WebSocket
     - **IMPORTANT**: Re-run the SAME test from task 1 — do NOT write a new test
     - The test from task 1 encodes the expected behavior
@@ -111,14 +111,14 @@
     - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
     - _Requirements: 2.1, 2.2, 2.3, 2.5, 2.6_
 
-  - [ ] 3.8 Verify preservation tests still pass
+  - [x] 3.8 Verify preservation tests still pass
     - **Property 2: Preservation** — 非断连场景行为不变
     - **IMPORTANT**: Re-run the SAME tests from task 2 — do NOT write new tests
     - Run preservation property tests from step 2
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - Confirm all tests still pass after fix (no regressions)
 
-- [ ] 4. Checkpoint — Ensure all tests pass
+- [x] 4. Checkpoint — Ensure all tests pass
   - 执行完整构建和测试：`cmake -B device/build -S device -DCMAKE_BUILD_TYPE=Debug && cmake --build device/build && ctest --test-dir device/build --output-on-failure`
   - 确认所有测试通过（包括 exploration test、preservation test、新增单元测试、所有现有测试）
   - 确认无 ASan 报告
