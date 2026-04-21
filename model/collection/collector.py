@@ -18,7 +18,7 @@ from pathlib import Path
 
 import requests
 
-from src.config import DatasetConfig, SpeciesEntry
+from collection.config import DatasetConfig, SpeciesEntry
 
 logger = logging.getLogger(__name__)
 

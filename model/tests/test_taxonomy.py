@@ -14,8 +14,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from model.src.config import DatasetConfig, GlobalConfig, SpeciesEntry
-from model.src.collector import DataCollector
+from model.collection.config import DatasetConfig, GlobalConfig, SpeciesEntry
+from model.collection.collector import DataCollector
 
 
 # ============================================================

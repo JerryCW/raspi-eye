@@ -18,7 +18,7 @@ import imagehash
 import pytest
 from PIL import Image, ImageDraw
 
-from model.src.cleaner import deduplicate, filter_quality, letterbox_resize
+from model.cleaning.cleaner import deduplicate, filter_quality, letterbox_resize
 
 
 # ============================================================

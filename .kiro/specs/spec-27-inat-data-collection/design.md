@@ -56,9 +56,9 @@ flowchart TD
 
 ```mermaid
 graph LR
-    CLI[prepare_dataset.py<br/>CLI 入口] --> COL[collector.py<br/>数据采集]
-    CLI --> CLN[cleaner.py<br/>数据清洗]
-    COL --> CFG[config.py<br/>配置解析]
+    CLI[prepare_dataset.py<br/>CLI 入口] --> COL[collection/collector.py<br/>数据采集]
+    CLI --> CLN[cleaning/cleaner.py<br/>数据清洗]
+    COL --> CFG[collection/config.py<br/>配置解析]
     CLN --> CFG
     COL --> API[iNaturalist API]
     CLN --> PIL[Pillow + imagehash]
@@ -73,10 +73,12 @@ graph LR
 model/
 ├── config/
 │   └── species.yaml          # 物种配置（46 种）
-├── src/
+├── collection/
 │   ├── __init__.py
 │   ├── config.py             # 配置解析与验证
 │   ├── collector.py          # iNaturalist API 采集 + taxonomy 获取
+│   └── verify_taxon_ids.py   # taxon ID 验证工具
+├── cleaning/
 │   └── cleaner.py            # pHash 去重 + 质量过滤 + resize
 ├── tests/
 │   ├── __init__.py

@@ -14,9 +14,9 @@ from pathlib import Path
 # 将代码目录加入 sys.path，使 src.* 可导入（兼容本地和 SageMaker 环境）
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.cleaner import DataCleaner
-from src.collector import DataCollector
-from src.config import load_config
+from cleaning.cleaner import DataCleaner
+from collection.collector import DataCollector
+from collection.config import load_config
 
 
 def main():

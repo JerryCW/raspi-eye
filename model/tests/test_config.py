@@ -7,7 +7,7 @@
 import yaml
 import pytest
 
-from model.src.config import (
+from model.collection.config import (
     DatasetConfig,
     GlobalConfig,
     SpeciesEntry,

@@ -20,8 +20,8 @@
 
 - [x] 1. 项目结构搭建与依赖安装
   - [x] 1.1 创建 `model/` 目录结构与 Python 包初始化
-    - 创建目录：`model/src/`、`model/config/`、`model/tests/`、`model/data/`
-    - 创建 `model/src/__init__.py`、`model/tests/__init__.py`
+    - 创建目录：`model/collection/`、`model/config/`、`model/tests/`、`model/data/`
+    - 创建 `model/collection/__init__.py`、`model/tests/__init__.py`
     - 创建 `model/tests/conftest.py`（pytest fixtures：内存测试图片生成、临时目录等）
     - 更新 `.gitignore` 添加 `model/data/` 排除规则
     - _需求：约束条件（代码目录 model/）_
@@ -32,7 +32,7 @@
     - _需求：约束条件（Python 依赖）_
 
 - [x] 2. 配置解析模块
-  - [x] 2.1 创建 `model/src/config.py` — 配置解析与验证
+  - [x] 2.1 创建 `model/collection/config.py` — 配置解析与验证
     - 实现 `GlobalConfig`、`SpeciesEntry`、`DatasetConfig` 三个 dataclass
     - 实现 `load_config(config_path: str) -> DatasetConfig` 函数
     - 文件不存在时 raise `FileNotFoundError`，格式无效时 raise `ValueError`
@@ -57,7 +57,7 @@
     - _需求：1.1, 1.2, 1.3, 1.4, 1.5, 8.1_
 
 - [x] 3. 数据清洗模块
-  - [x] 3.1 创建 `model/src/cleaner.py` — 去重 + 质量过滤 + resize
+  - [x] 3.1 创建 `model/cleaning/cleaner.py` — 去重 + 质量过滤 + resize
     - 实现 `CleanStats` dataclass（species、input_count、after_dedup、removed_corrupt、removed_small、removed_lowvar、after_filter、output_count）
     - 实现 `deduplicate(image_paths, threshold) -> list[str]`：pHash 去重，重复组保留文件尺寸最大的一张
     - 实现 `filter_quality(image_paths) -> tuple[list[str], dict]`：损坏/短边<800/灰度低方差 过滤
@@ -104,7 +104,7 @@
   - 如有问题，询问用户
 
 - [x] 5. 数据采集模块
-  - [x] 5.1 创建 `model/src/collector.py` — iNaturalist API 采集 + taxonomy 获取
+  - [x] 5.1 创建 `model/collection/collector.py` — iNaturalist API 采集 + taxonomy 获取
     - 实现 `CollectStats` dataclass（species、target、downloaded、skipped、failed）
     - 实现 `DataCollector` 类：
       - `__init__(config, output_dir="model/data/raw")`
@@ -153,7 +153,7 @@
 
 ## 备注
 
-- 新建文件：`model/src/__init__.py`、`model/src/config.py`、`model/src/collector.py`、`model/src/cleaner.py`、`model/tests/__init__.py`、`model/tests/conftest.py`、`model/tests/test_config.py`、`model/tests/test_cleaner.py`、`model/tests/test_taxonomy.py`、`model/config/species.yaml`、`model/prepare_dataset.py`
+- 新建文件：`model/collection/__init__.py`、`model/collection/config.py`、`model/collection/collector.py`、`model/cleaning/cleaner.py`、`model/tests/__init__.py`、`model/tests/conftest.py`、`model/tests/test_config.py`、`model/tests/test_cleaner.py`、`model/tests/test_taxonomy.py`、`model/config/species.yaml`、`model/prepare_dataset.py`
 - 修改文件：`.gitignore`、`requirements.txt`
 - 所有测试离线可运行：iNaturalist API 使用 `unittest.mock.patch` mock，图片使用 `Image.new()` 内存生成，文件系统使用 `tmp_path` fixture
 - PBT 覆盖全部 4 个正确性属性（属性 1-4），分布在 `test_cleaner.py`（属性 1, 2, 3）和 `test_taxonomy.py`（属性 4）

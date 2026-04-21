@@ -35,7 +35,7 @@
 | 语言 | Python ≥ 3.11 |
 | 环境管理 | venv（`.venv-raspi-eye/`），所有命令必须先 `source .venv-raspi-eye/bin/activate` |
 | 测试框架 | pytest |
-| 代码目录 | `model/` |
+| 代码目录 | `model/collection/`（采集模块）、`model/config/`（配置） |
 | 脚本入口 | `model/collect_data.py`（采集）、`model/clean_data.py`（清洗）或合并为 `model/prepare_dataset.py` |
 | 物种配置 | YAML 格式，路径 `model/config/species.yaml` |
 | 输出数据集目录 | `model/data/cleaned/`（按物种分目录，供 Spec 28 进一步处理） |

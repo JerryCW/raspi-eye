@@ -6,7 +6,7 @@
 import sys
 from pathlib import Path
 
-# 将项目根目录加入 sys.path，使 model.src.* 可导入
+# 将项目根目录加入 sys.path，使 model.collection.* 可导入
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import pytest
