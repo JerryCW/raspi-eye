@@ -187,6 +187,7 @@ def predict_single(
     class_names: list[str],
     device: torch.device,
     top_k: int,
+    pre_cropped_img: "Image.Image | None" = None,
 ) -> list[dict[str, object]] | None:
     """对单张图片执行推理。
 
@@ -197,12 +198,16 @@ def predict_single(
         class_names: 类别名列表
         device: 推理设备
         top_k: 输出 top-k 预测
+        pre_cropped_img: 预裁切的 PIL Image（YOLO 裁切后），None 时从文件加载原图
 
     Returns:
         top-k 预测列表 [{species, confidence}, ...]，图片损坏时返回 None
     """
     try:
-        img = Image.open(image_path).convert("RGB")
+        if pre_cropped_img is not None:
+            img = pre_cropped_img.convert("RGB")
+        else:
+            img = Image.open(image_path).convert("RGB")
     except Exception as e:
         print(f"[推理] 警告: 无法打开图片 {image_path}: {e}")
         return None
@@ -235,6 +240,8 @@ def run_prediction(
     images_path: str,
     top_k: int,
     output_path: str | None,
+    crop: bool = False,
+    yolo_model_name: str = "yolo11n.pt",
 ) -> None:
     """执行批量推理。
 
@@ -250,6 +257,20 @@ def run_prediction(
     class_names = metadata["class_names"]
     transform = get_val_transform(input_size)
 
+    # 加载学名 → 中文名映射
+    cn_names = _load_species_names()
+
+    # 可选：YOLO 裁切
+    yolo = None
+    if crop:
+        try:
+            from ultralytics import YOLO
+            yolo = YOLO(yolo_model_name)
+            print(f"[推理] YOLO 裁切已启用: {yolo_model_name}")
+        except ImportError:
+            print("[推理] 警告: ultralytics 未安装，跳过 YOLO 裁切")
+            print("[推理] 安装: pip install ultralytics")
+
     # 收集图片
     images = collect_images(images_path)
     if not images:
@@ -264,7 +285,23 @@ def run_prediction(
     skipped = 0
 
     for img_path in images:
-        preds = predict_single(model, img_path, transform, class_names, device, top_k)
+        # 可选 YOLO 裁切
+        crop_img = None
+        if yolo is not None:
+            try:
+                from model.cleaning.cropper import crop_bird
+            except ModuleNotFoundError:
+                from cleaning.cropper import crop_bird
+            crop_img = crop_bird(str(img_path), yolo)
+            if crop_img is None:
+                print(f"  {img_path.name}: [YOLO 未检测到鸟体，跳过]")
+                skipped += 1
+                continue
+
+        preds = predict_single(
+            model, img_path, transform, class_names, device, top_k,
+            pre_cropped_img=crop_img,
+        )
         if preds is None:
             skipped += 1
             continue
@@ -275,7 +312,9 @@ def run_prediction(
 
         print(f"  {img_path.name}:")
         for p in preds:
-            print(f"    {p['species']:40s}  {p['confidence']:.4f}")
+            cn = cn_names.get(p['species'], '')
+            label = f"{p['species']} ({cn})" if cn else p['species']
+            print(f"    {label:50s}  {p['confidence']:.4f}")
         print()
 
     # 统计
@@ -357,6 +396,40 @@ def _save_results(all_results: dict[str, list[dict]], output_path: str) -> None:
     print(f"[推理] 结果已保存: {out}")
 
 
+def _load_species_names(config_path: str | None = None) -> dict[str, str]:
+    """从 species.yaml 加载学名 → 中文名映射。
+
+    Args:
+        config_path: species.yaml 路径，None 时自动查找 model/config/species.yaml
+
+    Returns:
+        {scientific_name: common_name_cn} 映射，找不到文件时返回空 dict
+    """
+    if config_path is None:
+        # 自动查找：相对于 predict.py 的位置
+        candidates = [
+            _this_dir / "config" / "species.yaml",
+            _this_dir.parent / "model" / "config" / "species.yaml",
+        ]
+        for c in candidates:
+            if c.is_file():
+                config_path = str(c)
+                break
+    if not config_path or not Path(config_path).is_file():
+        return {}
+    try:
+        import yaml
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        return {
+            sp["scientific_name"]: sp.get("common_name_cn", "")
+            for sp in cfg.get("species", [])
+            if "scientific_name" in sp
+        }
+    except Exception:
+        return {}
+
+
 def parse_args() -> argparse.Namespace:
     """解析命令行参数。"""
     parser = argparse.ArgumentParser(
@@ -383,6 +456,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="可选：JSON 输出路径",
     )
+    parser.add_argument(
+        "--crop",
+        action="store_true",
+        help="推理前先用 YOLO 裁切鸟体区域（模拟实际部署链路）",
+    )
+    parser.add_argument(
+        "--yolo-model",
+        default="yolo11n.pt",
+        help="YOLO 模型名称（默认 yolo11n.pt，可选 yolo11x.pt）",
+    )
     return parser.parse_args()
 
 
@@ -401,6 +484,8 @@ def main() -> None:
         images_path=args.images,
         top_k=args.top_k,
         output_path=args.output,
+        crop=args.crop,
+        yolo_model_name=args.yolo_model,
     )
 
 

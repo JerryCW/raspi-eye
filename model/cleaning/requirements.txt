@@ -5,3 +5,4 @@ imagehash>=4.3
 Pillow>=10.0
 PyYAML>=6.0
 ultralytics>=8.0
+transformers>=4.56
