@@ -1,8 +1,10 @@
 # model/config/species.yaml
-# 46 种目标鸟类配置 — iNaturalist 数据采集
-# A 类（地狱级难度）max_images: 2000
-# B 类（常见多样性高）max_images: 1500
-# C 类（家养鹦鹉与稀有种）max_images: 800
+# 64 种目标鸟类配置 — iNaturalist 数据采集
+#
+# 分类说明：
+#   A 类（易混淆种对）max_images: 2000, min_bbox_ratio: 5%
+#   B 类（常见野鸟）max_images: 1500, min_bbox_ratio: 3%
+#   C 类（家养鹦鹉与稀有种）max_images: 800
 
 global:
   image_size: 518
@@ -12,7 +14,11 @@ global:
   download_threads: 10
 
 species:
-  # --- A 类（地狱级难度）max_images: 2000, min_bbox_ratio: 5% ---
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # A 类：易混淆种对（噪鹛/画眉/鹎/鸦雀）— max_images: 2000
+  # ═══════════════════════════════════════════════════════════════════════
+
   - taxon_id: 1289401
     scientific_name: "Pterorhinus sannio"
     common_name_cn: "白颊噪鹛"
@@ -49,7 +55,10 @@ species:
     max_images: 2000
     min_bbox_ratio: 0.05
 
-  # --- B 类（常见多样性高）max_images: 1500, min_bbox_ratio: 3% ---
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：鹎科 / 相思鸟 / 绣眼 / 太阳鸟 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
+
   - taxon_id: 15560
     scientific_name: "Leiothrix lutea"
     common_name_cn: "红嘴相思鸟"
@@ -67,6 +76,26 @@ species:
     common_name_cn: "红耳鹎"
     max_images: 1500
     min_bbox_ratio: 0.03
+
+  - taxon_id: 980257
+    scientific_name: "Zosterops simplex"
+    common_name_cn: "暗绿绣眼鸟"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
+  - taxon_id: 6945
+    scientific_name: "Aethopyga christinae"
+    common_name_cn: "叉尾太阳鸟"
+    max_images: 1500
+
+  - taxon_id: 71624
+    scientific_name: "Orthotomus sutorius"
+    common_name_cn: "长尾缝叶莺"
+    max_images: 1500
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：山雀科 / 长尾山雀 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
 
   - taxon_id: 339691
     scientific_name: "Parus minor"
@@ -86,6 +115,20 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
+  - taxon_id: 339689
+    scientific_name: "Pardaliparus venustulus"
+    common_name_cn: "黄腹山雀"
+    max_images: 800
+
+  - taxon_id: 144815
+    scientific_name: "Parus monticolus"
+    common_name_cn: "绿背山雀"
+    max_images: 1500
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：鸦科（鹊 / 鸦 / 松鸦 / 黄鹂）— max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
+
   - taxon_id: 495200
     scientific_name: "Urocissa erythroryncha"
     common_name_cn: "红嘴蓝鹊"
@@ -98,11 +141,41 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
+  - taxon_id: 72785
+    scientific_name: "Cyanopica cyanus"
+    common_name_cn: "灰喜鹊"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
   - taxon_id: 8306
     scientific_name: "Dendrocitta formosae"
     common_name_cn: "灰树鹊"
     max_images: 1500
     min_bbox_ratio: 0.03
+
+  - taxon_id: 8251
+    scientific_name: "Garrulus glandarius"
+    common_name_cn: "松鸦"
+    max_images: 1500
+
+  - taxon_id: 8229
+    scientific_name: "Cyanocitta cristata"
+    common_name_cn: "冠蓝鸦"
+    max_images: 1500
+
+  - taxon_id: 8269
+    scientific_name: "Corvus macrorhynchos"
+    common_name_cn: "大嘴乌鸦"
+    max_images: 1500
+
+  - taxon_id: 7868
+    scientific_name: "Oriolus chinensis"
+    common_name_cn: "黑枕黄鹂"
+    max_images: 1500
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：鸫科 / 鹟科 / 鹊鸲 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
 
   - taxon_id: 472778
     scientific_name: "Turdus mandarinus"
@@ -116,6 +189,55 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
+  - taxon_id: 12993
+    scientific_name: "Phoenicurus auroreus"
+    common_name_cn: "北红尾鸲"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
+  - taxon_id: 13003
+    scientific_name: "Phoenicurus frontalis"
+    common_name_cn: "蓝额红尾鸲"
+    max_images: 1500
+
+  - taxon_id: 792988
+    scientific_name: "Phoenicurus fuliginosus"
+    common_name_cn: "红尾水鸲"
+    max_images: 1500
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：椋鸟科 / 八哥 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
+
+  - taxon_id: 547178
+    scientific_name: "Spodiopsar sericeus"
+    common_name_cn: "丝光椋鸟"
+    max_images: 1500
+
+  - taxon_id: 547177
+    scientific_name: "Spodiopsar cineraceus"
+    common_name_cn: "灰椋鸟"
+    max_images: 1500
+
+  - taxon_id: 8010
+    scientific_name: "Gracupica nigricollis"
+    common_name_cn: "黑领椋鸟"
+    max_images: 1500
+
+  - taxon_id: 18736
+    scientific_name: "Acridotheres tristis"
+    common_name_cn: "家八哥"
+    max_images: 1500
+
+  - taxon_id: 18735
+    scientific_name: "Acridotheres cristatellus"
+    common_name_cn: "八哥"
+    max_images: 1500
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：鸠鸽科 / 麻雀 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
+
   - taxon_id: 1455918
     scientific_name: "Spilopelia chinensis"
     common_name_cn: "珠颈斑鸠"
@@ -128,23 +250,43 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
+  - taxon_id: 3017
+    scientific_name: "Columba livia"
+    common_name_cn: "家鸽/岩鸽"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
   - taxon_id: 13851
     scientific_name: "Passer montanus"
     common_name_cn: "树麻雀"
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 980257
-    scientific_name: "Zosterops simplex"
-    common_name_cn: "暗绿绣眼鸟"
-    max_images: 1500
-    min_bbox_ratio: 0.03
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：伯劳科 / 卷尾 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
 
   - taxon_id: 12035
     scientific_name: "Lanius schach"
     common_name_cn: "棕背伯劳"
     max_images: 1500
     min_bbox_ratio: 0.03
+
+  - taxon_id: 12021
+    scientific_name: "Lanius cristatus"
+    common_name_cn: "红尾伯劳"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
+  - taxon_id: 8277
+    scientific_name: "Dicrurus macrocercus"
+    common_name_cn: "黑卷尾"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：燕科 / 鹡鸰 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
 
   - taxon_id: 11901
     scientific_name: "Hirundo rustica"
@@ -158,11 +300,37 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 12993
-    scientific_name: "Phoenicurus auroreus"
-    common_name_cn: "北红尾鸲"
+  - taxon_id: 13695
+    scientific_name: "Motacilla alba"
+    common_name_cn: "白鹡鸰"
     max_images: 1500
     min_bbox_ratio: 0.03
+
+  - taxon_id: 13688
+    scientific_name: "Motacilla cinerea"
+    common_name_cn: "灰鹡鸰"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：翠鸟 / 佛法僧 / 戴胜 / 啄木鸟 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
+
+  - taxon_id: 2599
+    scientific_name: "Alcedo atthis"
+    common_name_cn: "普通翠鸟"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
+  - taxon_id: 2603
+    scientific_name: "Halcyon smyrnensis"
+    common_name_cn: "白胸翡翠"
+    max_images: 1500
+
+  - taxon_id: 2547
+    scientific_name: "Coracias benghalensis"
+    common_name_cn: "棕胸佛法僧"
+    max_images: 1500
 
   - taxon_id: 20969
     scientific_name: "Upupa epops"
@@ -170,11 +338,14 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 2599
-    scientific_name: "Alcedo atthis"
-    common_name_cn: "普通翠鸟"
+  - taxon_id: 17871
+    scientific_name: "Yungipicus canicapillus"
+    common_name_cn: "星头啄木鸟"
     max_images: 1500
-    min_bbox_ratio: 0.03
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # B 类：鹭科 / 水鸟 / 鸥 — max_images: 1500
+  # ═══════════════════════════════════════════════════════════════════════
 
   - taxon_id: 4943
     scientific_name: "Egretta garzetta"
@@ -194,6 +365,12 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
+  - taxon_id: 4954
+    scientific_name: "Ardea cinerea"
+    common_name_cn: "苍鹭"
+    max_images: 1500
+    min_bbox_ratio: 0.03
+
   - taxon_id: 201282
     scientific_name: "Gallinula chloropus"
     common_name_cn: "黑水鸡"
@@ -206,49 +383,15 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 4954
-    scientific_name: "Ardea cinerea"
-    common_name_cn: "苍鹭"
+  - taxon_id: 144315
+    scientific_name: "Chroicocephalus ridibundus"
+    common_name_cn: "红嘴鸥"
     max_images: 1500
-    min_bbox_ratio: 0.03
 
-  - taxon_id: 13695
-    scientific_name: "Motacilla alba"
-    common_name_cn: "白鹡鸰"
-    max_images: 1500
-    min_bbox_ratio: 0.03
+  # ═══════════════════════════════════════════════════════════════════════
+  # C 类：家养鹦鹉 — max_images: 800
+  # ═══════════════════════════════════════════════════════════════════════
 
-  - taxon_id: 13688
-    scientific_name: "Motacilla cinerea"
-    common_name_cn: "灰鹡鸰"
-    max_images: 1500
-    min_bbox_ratio: 0.03
-
-  - taxon_id: 8277
-    scientific_name: "Dicrurus macrocercus"
-    common_name_cn: "黑卷尾"
-    max_images: 1500
-    min_bbox_ratio: 0.03
-
-  - taxon_id: 12021
-    scientific_name: "Lanius cristatus"
-    common_name_cn: "红尾伯劳"
-    max_images: 1500
-    min_bbox_ratio: 0.03
-
-  - taxon_id: 72785
-    scientific_name: "Cyanopica cyanus"
-    common_name_cn: "灰喜鹊"
-    max_images: 1500
-    min_bbox_ratio: 0.03
-
-  - taxon_id: 3017
-    scientific_name: "Columba livia"
-    common_name_cn: "家鸽/岩鸽"
-    max_images: 1500
-    min_bbox_ratio: 0.03
-
-  # --- C 类（家养鹦鹉与稀有种）max_images: 800 ---
   - taxon_id: 19339
     scientific_name: "Melopsittacus undulatus"
     common_name_cn: "虎皮鹦鹉"
@@ -277,9 +420,4 @@ species:
   - taxon_id: 19066
     scientific_name: "Forpus coelestis"
     common_name_cn: "太平洋鹦鹉"
-    max_images: 800
-
-  - taxon_id: 339689
-    scientific_name: "Pardaliparus venustulus"
-    common_name_cn: "黄腹山雀"
     max_images: 800

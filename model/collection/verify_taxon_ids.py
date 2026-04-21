@@ -25,15 +25,30 @@ import yaml
 INAT_API_BASE = "https://api.inaturalist.org/v1"
 
 
+def _request_with_backoff(url: str, params: dict, max_retries: int = 5) -> requests.Response:
+    """带 exponential backoff 的 HTTP GET 请求。"""
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            return resp
+        except (requests.exceptions.RequestException, requests.exceptions.ConnectionError) as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = 2 ** attempt  # 1, 2, 4, 8, 16 秒
+            print(f"  ⚠️ 请求失败 ({e.__class__.__name__})，{wait}s 后重试...")
+            time.sleep(wait)
+    raise RuntimeError("不应到达此处")
+
+
 def search_taxon_id(scientific_name: str) -> tuple[int | None, str]:
     """按学名搜索 iNaturalist taxon_id。
 
     返回 (taxon_id, matched_name)。找不到返回 (None, "")。
     """
-    resp = requests.get(
+    resp = _request_with_backoff(
         f"{INAT_API_BASE}/taxa",
         params={"q": scientific_name, "rank": "species", "per_page": 5},
-        timeout=30,
     )
     resp.raise_for_status()
     results = resp.json().get("results", [])
@@ -52,10 +67,9 @@ def search_taxon_id(scientific_name: str) -> tuple[int | None, str]:
 
 def count_observations(taxon_id: int) -> int:
     """查询某 taxon_id 的 research grade 观察数量。"""
-    resp = requests.get(
+    resp = _request_with_backoff(
         f"{INAT_API_BASE}/observations",
         params={"taxon_id": taxon_id, "quality_grade": "research", "per_page": 1},
-        timeout=30,
     )
     resp.raise_for_status()
     return resp.json().get("total_results", 0)
