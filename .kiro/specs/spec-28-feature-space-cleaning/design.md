@@ -29,7 +29,7 @@
 
 - **输入**：Spec 27 产出的 `model/data/cleaned/{species}/*.jpg`（518×518）和 `model/data/taxonomy.json`（只读）
 - **输出**：`model/data/train/{species}/*.jpg` + `model/data/val/{species}/*.jpg`（ImageFolder 格式）
-- **复用**：Spec 27 的 `letterbox_resize` 函数（`model/src/cleaner.py`）
+- **复用**：Spec 27 的 `letterbox_resize` 函数（`model/cleaning/cleaner.py`）
 
 ### 禁止项（Design 层）
 

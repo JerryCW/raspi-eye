@@ -29,12 +29,12 @@
     - _需求：约束条件（数据集不提交 git）_
 
 - [x] 2. config.py 扩展与 YOLO 裁切模块
-  - [x] 2.1 扩展 `model/src/config.py` — SpeciesEntry 增加 outlier_alpha 字段
+  - [x] 2.1 扩展 `model/collection/config.py` — SpeciesEntry 增加 outlier_alpha 字段
     - 在 `SpeciesEntry` dataclass 中增加 `outlier_alpha: float | None = None`
     - `load_config` 函数无需修改（已有的 `**{k: v ...}` 模式自动处理新字段）
     - _需求：3.7_
 
-  - [x] 2.2 创建 `model/src/cropper.py` — YOLO 鸟体裁切模块
+  - [x] 2.2 创建 `model/cleaning/cropper.py` — YOLO 鸟体裁切模块
     - 实现 `CropStats` dataclass（species、total、cropped、discarded）
     - 实现 `crop_bird(image_path, model, conf_threshold=0.3, padding=0.2) -> Image | None`：
       - 加载图片，YOLO 推理，筛选 class=14（bird）且 conf ≥ 0.3 的 box
@@ -68,7 +68,7 @@
   - 如有问题，询问用户
 
 - [x] 4. 特征提取模块
-  - [x] 4.1 创建 `model/src/feature_extractor.py` — DINOv3 特征提取
+  - [x] 4.1 创建 `model/cleaning/feature_extractor.py` — DINOv3 特征提取
     - 实现 `ExtractStats` dataclass（species、num_images、feature_dim、device）
     - 实现 `FeatureExtractor` 类：
       - `__init__(repo_dir, weights_path, batch_size=32, num_workers=4)`
@@ -87,7 +87,7 @@
     - 标签：`# Feature: feature-space-cleaning, Property 2: 特征向量 .npy 保存/加载 round trip`
 
 - [x] 5. 离群点检测与语义去重模块
-  - [x] 5.1 创建 `model/src/outlier_detector.py` — Mahalanobis 离群点检测
+  - [x] 5.1 创建 `model/cleaning/outlier_detector.py` — Mahalanobis 离群点检测
     - 实现 `OutlierStats` dataclass（species、input_count、removed_count、kept_count、used_pca、used_cosine_fallback、mean_distance、removal_ratio）
     - 实现 `detect_outliers(features, alpha=0.975) -> np.ndarray`：
       - N < 10：余弦距离 + IQR 回退
@@ -98,7 +98,7 @@
     - 返回布尔数组（True = 正常，False = 离群点）
     - _需求：3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
 
-  - [x] 5.2 创建 `model/src/semantic_dedup.py` — 余弦相似度语义去重
+  - [x] 5.2 创建 `model/cleaning/semantic_dedup.py` — 余弦相似度语义去重
     - 实现 `DedupStats` dataclass（species、input_count、removed_count、kept_count）
     - 实现 `semantic_deduplicate(features, paths, threshold=0.95) -> tuple[np.ndarray, list[str]]`：
       - 计算余弦相似度矩阵
@@ -136,7 +136,7 @@
   - 如有问题，询问用户
 
 - [x] 7. Train/Val 划分模块
-  - [x] 7.1 创建 `model/src/splitter.py` — 分层随机划分
+  - [x] 7.1 创建 `model/cleaning/splitter.py` — 分层随机划分
     - 实现 `SplitStats` dataclass（species、total、train_count、val_count）
     - 实现 `split_dataset(image_paths, test_size=0.2, random_state=42) -> tuple[list[str], list[str]]`：
       - 图片数 < 5 时全部放入 train，val 为空
@@ -202,9 +202,9 @@
 
 ## 备注
 
-- 新建文件：`model/src/cropper.py`、`model/src/feature_extractor.py`、`model/src/outlier_detector.py`、`model/src/semantic_dedup.py`、`model/src/splitter.py`、`model/tests/test_cropper.py`、`model/tests/test_feature_cleaning.py`、`model/clean_features.py`、`model/launch_processing.py`、`scripts/create-sagemaker-role.sh`
-- 修改文件：`model/src/config.py`（SpeciesEntry 增加 outlier_alpha）、`requirements.txt`、`.gitignore`
-- 复用 Spec 27 的 `letterbox_resize`（`model/src/cleaner.py`）
+- 新建文件：`model/cleaning/cropper.py`、`model/cleaning/feature_extractor.py`、`model/cleaning/outlier_detector.py`、`model/cleaning/semantic_dedup.py`、`model/cleaning/splitter.py`、`model/tests/test_cropper.py`、`model/tests/test_feature_cleaning.py`、`model/clean_features.py`、`model/launch_processing.py`、`scripts/create-sagemaker-role.sh`
+- 修改文件：`model/collection/config.py`（SpeciesEntry 增加 outlier_alpha）、`requirements.txt`、`.gitignore`
+- 复用 Spec 27 的 `letterbox_resize`（`model/cleaning/cleaner.py`）
 - 所有测试离线可运行：YOLO 模型使用 mock，DINOv3 模型使用 mock，特征向量使用 numpy 合成，文件系统使用 `tmp_path` fixture，SageMaker 路径使用 `monkeypatch` mock
 - PBT 覆盖全部 6 个正确性属性（属性 1-6），分布在 `test_cropper.py`（属性 1）和 `test_feature_cleaning.py`（属性 2, 3, 4, 5, 6）
 - 标记 `*` 的子任务为可选（PBT 属性测试），可跳过以加速 MVP

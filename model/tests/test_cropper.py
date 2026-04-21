@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 
-from model.src.cropper import BIRD_CLASS_ID, CropStats, crop_bird, crop_species
+from model.cleaning.cropper import BIRD_CLASS_ID, CropStats, crop_bird, crop_species
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ class TestCropSpecies:
 from hypothesis import given, settings
 from hypothesis.strategies import floats, integers, tuples
 
-from model.src.cleaner import letterbox_resize
+from model.cleaning.cleaner import letterbox_resize
 
 
 # Feature: feature-space-cleaning, Property 1: YOLO 裁切 padding 边界安全 + 输出尺寸不变量

@@ -37,8 +37,8 @@ def test_npy_round_trip(n, d):
 # ---------------------------------------------------------------------------
 from sklearn.metrics.pairwise import cosine_similarity
 
-from model.src.outlier_detector import OutlierStats, detect_outliers
-from model.src.semantic_dedup import DedupStats, semantic_deduplicate
+from model.cleaning.outlier_detector import OutlierStats, detect_outliers
+from model.cleaning.semantic_dedup import DedupStats, semantic_deduplicate
 
 
 class TestDetectOutliers:
@@ -238,7 +238,7 @@ def test_semantic_dedup_cosine_invariant(n, d):
 # Feature: feature-space-cleaning, Property 5: Train/Val 划分无交集 + 比例约束
 # **Validates: Requirements 5.1, 5.6, 5.7**
 # ---------------------------------------------------------------------------
-from model.src.splitter import split_dataset
+from model.cleaning.splitter import split_dataset
 
 
 @given(n=integers(min_value=12, max_value=200))

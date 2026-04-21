@@ -33,7 +33,7 @@
 | 语言 | Python ≥ 3.11 |
 | 环境管理 | venv（`.venv-raspi-eye/`），所有命令必须先 `source .venv-raspi-eye/bin/activate` |
 | 测试框架 | pytest + Hypothesis（PBT） |
-| 代码目录 | `model/` |
+| 代码目录 | `model/cleaning/`（清洗模块） |
 | 脚本入口 | `model/clean_features.py` |
 | DINOv3 模型 | `torch.hub.load('facebookresearch/dinov3', 'dinov3_vitl16')`，ViT-L/16，patch size 16 |
 | DINOv3 使用方式 | frozen backbone，仅提取 class token 特征向量，不做任何参数更新 |

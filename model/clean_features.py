@@ -85,7 +85,7 @@ def main():
     paths = detect_paths()
     config_path = paths["config_path"] or args.config
 
-    from src.config import load_config
+    from collection.config import load_config
     config = load_config(config_path)
 
     # 筛选物种
@@ -120,7 +120,7 @@ def main():
         print("阶段 1: YOLO 鸟体裁切")
         print("=" * 60)
         from ultralytics import YOLO
-        from src.cropper import crop_species
+        from cleaning.cropper import crop_species
         import shutil
 
         yolo_model = None  # 延迟加载，只在需要裁切时才下载模型
@@ -178,7 +178,7 @@ def main():
         print("=" * 60)
         print("阶段 2: DINOv3 特征提取")
         print("=" * 60)
-        from src.feature_extractor import FeatureExtractor
+        from cleaning.feature_extractor import FeatureExtractor
 
         extractor = FeatureExtractor(
             repo_dir=args.dinov3_repo,
@@ -195,9 +195,9 @@ def main():
     print("=" * 60)
     print("阶段 3: 离群点检测 + 语义去重 + Train/Val 划分")
     print("=" * 60)
-    from src.outlier_detector import detect_outliers
-    from src.semantic_dedup import semantic_deduplicate
-    from src.splitter import split_and_copy
+    from cleaning.outlier_detector import detect_outliers
+    from cleaning.semantic_dedup import semantic_deduplicate
+    from cleaning.splitter import split_and_copy
 
     for entry in species_list:
         sp_name = entry.scientific_name
