@@ -34,7 +34,7 @@
 | 环境管理 | venv（`.venv-raspi-eye/`），所有命令必须先 `source .venv-raspi-eye/bin/activate` |
 | 测试框架 | pytest + Hypothesis（PBT） |
 | 代码目录 | `model/cleaning/`（清洗模块） |
-| 脚本入口 | `model/clean_features.py` |
+| 脚本入口 | `model/cleaning/clean_features.py`（SageMaker 容器内执行），`model/launch_processing.py`（用户执行） |
 | DINOv3 模型 | `torch.hub.load('facebookresearch/dinov3', 'dinov3_vitl16')`，ViT-L/16，patch size 16 |
 | DINOv3 使用方式 | frozen backbone，仅提取 class token 特征向量，不做任何参数更新 |
 | YOLO 模型 | ultralytics YOLOv11（`yolo11x.pt`），COCO 预训练，class 14 = bird |
@@ -167,9 +167,9 @@
 
 #### 验收标准
 
-1. THE Deployment_Script SHALL 提供 Python 脚本 `model/launch_processing.py`，使用 SageMaker Python SDK 创建并启动 Processing Job
-2. THE Deployment_Script SHALL 使用 `PyTorchProcessor`（或 `ScriptProcessor` + 自定义容器），指定 GPU 实例类型（默认 `ml.g4dn.xlarge`，通过 CLI 参数可覆盖）
-3. THE Deployment_Script SHALL 配置 S3 输入通道：`/opt/ml/processing/input/cleaned/` ← S3 上的 cleaned 数据集，`/opt/ml/processing/input/config/` ← species.yaml 配置文件
+1. THE Deployment_Script SHALL 提供 Python 脚本 `model/launch_processing.py`，使用 boto3 原生 API 创建并启动 Processing Job
+2. THE Deployment_Script SHALL 自动将 `model/` 目录打包为 `sourcedir.tar.gz` 上传到 S3，通过 Processing Job 的 code 输入通道下载到容器内，不再需要手动 `aws s3 sync` 同步代码
+3. THE Deployment_Script SHALL 使用 GPU 实例类型（默认 `ml.g4dn.xlarge`，通过 CLI 参数可覆盖）
 4. THE Deployment_Script SHALL 配置 S3 输出通道：`/opt/ml/processing/output/train/` → S3 上的 train 数据集，`/opt/ml/processing/output/val/` → S3 上的 val 数据集，`/opt/ml/processing/output/features/` → 特征向量 .npy 文件，`/opt/ml/processing/output/report/` → 清洗统计报告
 5. THE Deployment_Script SHALL 支持 `--s3-bucket` 参数指定 S3 桶名，`--s3-prefix` 参数指定数据路径前缀
 6. THE Deployment_Script SHALL 在提交 Job 后打印 Job 名称和 CloudWatch Logs 链接，便于监控
@@ -432,16 +432,22 @@ source .venv-raspi-eye/bin/activate
 pytest model/tests/ -v
 
 # 端到端清洗（需要 GPU，在 EC2 上运行）
-python model/clean_features.py --config model/config/species.yaml
+python model/cleaning/clean_features.py --config model/config/species.yaml
 
 # 跳过 YOLO 裁切（直接使用 cleaned/ 原图）
-python model/clean_features.py --config model/config/species.yaml --skip-crop
+python model/cleaning/clean_features.py --config model/config/species.yaml --skip-crop
 
 # 跳过特征提取（复用已有 .npy 文件）
-python model/clean_features.py --config model/config/species.yaml --skip-extract
+python model/cleaning/clean_features.py --config model/config/species.yaml --skip-extract
 
 # 单物种调试
-python model/clean_features.py --config model/config/species.yaml --species "Passer montanus"
+python model/cleaning/clean_features.py --config model/config/species.yaml --species "Passer montanus"
+
+# 提交 SageMaker Processing Job（自动打包代码，无需手动 sync）
+python model/launch_processing.py \
+    --s3-bucket raspi-eye-model-data \
+    --role arn:aws:iam::014498626607:role/raspi-eye-sagemaker-processing-role \
+    --wait
 ```
 
 预期结果：单元测试全部通过（离线）；端到端执行后 `model/data/train/{species}/*.jpg` 和 `model/data/val/{species}/*.jpg` 按 ImageFolder 格式生成，每物种 train:val ≈ 80:20。

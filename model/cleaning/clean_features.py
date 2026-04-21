@@ -12,22 +12,17 @@ SageMaker Processing Job 中自动检测 /opt/ml/processing/ 路径。
 import argparse
 import json
 import os
-import subprocess
 import sys
 
-# SageMaker Processing Job 容器中缺少部分依赖，启动时自动安装
-_sagemaker_base = "/opt/ml/processing"
-if os.path.isdir(_sagemaker_base):
-    _req_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requirements.txt")
-    if os.path.isfile(_req_file):
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", _req_file])
-
-# SageMaker 容器中代码在 /opt/ml/processing/input/code/，
-# 本地运行时在项目根目录。统一将代码目录加入 sys.path，
-# 使 `from src.xxx import yyy` 在两种环境下都能工作。
-_code_dir = os.path.dirname(os.path.abspath(__file__))
-if _code_dir not in sys.path:
-    sys.path.insert(0, _code_dir)
+# SageMaker 容器中代码由 launch_processing.py 解压到 /opt/ml/code/，
+# 依赖由 ContainerEntrypoint 统一 pip install。
+# 本地运行时在项目根目录。统一将代码目录和父目录加入 sys.path，
+# 使 `from collection.config import ...` 和 `from cleaning.xxx import ...` 都能工作。
+_code_dir = os.path.dirname(os.path.abspath(__file__))       # cleaning/
+_parent_dir = os.path.dirname(_code_dir)                      # model/ 或 /opt/ml/code/
+for _p in (_code_dir, _parent_dir):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 import time
 from pathlib import Path
 
@@ -38,13 +33,20 @@ def detect_paths() -> dict:
     """自动检测运行环境，返回输入/输出路径字典。
 
     SageMaker 模式：/opt/ml/processing/ 存在时使用 SageMaker 路径。
+    config_path 优先使用代码包中的 config/species.yaml（随 sourcedir.tar.gz 打包），
+    回退到 S3 输入通道的 /opt/ml/processing/input/config/species.yaml。
     本地模式：使用 model/data/ 下的相对路径。
     """
     sagemaker_base = "/opt/ml/processing"
     if os.path.isdir(sagemaker_base):
+        # 优先用代码包里的 config（随 sourcedir.tar.gz 自动打包，始终与代码同步）
+        code_config = os.path.join(_parent_dir, "config", "species.yaml")
+        if not os.path.isfile(code_config):
+            # 回退到 S3 输入通道（兼容旧的部署方式）
+            code_config = f"{sagemaker_base}/input/config/species.yaml"
         return {
             "cleaned_dir": f"{sagemaker_base}/input/cleaned",
-            "config_path": f"{sagemaker_base}/input/config/species.yaml",
+            "config_path": code_config,
             "cropped_input_dir": f"{sagemaker_base}/input/cropped",
             "cropped_dir": f"{sagemaker_base}/output/cropped",
             "features_dir": f"{sagemaker_base}/output/features",

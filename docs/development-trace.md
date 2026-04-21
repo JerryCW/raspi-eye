@@ -4972,3 +4972,25 @@ model/tests/test_training.py::test_export_roundtrip PASSED
 **涉及文件：** model/launch_training.py（重写）, model/training/train.py（从 model/train.py 移入，更新 sys.path）, model/cleaning/clean_features.py（从 model/clean_features.py 移入）, model/training/requirements.txt（新建）, model/cleaning/requirements.txt（从 model/requirements.txt 移入）, model/launch_processing.py（更新 ContainerEntrypoint 路径）, model/tests/test_training.py（更新 import 路径）, model/run_training.sh（删除）, .kiro/specs/spec-29-bird-classifier-training/requirements.md（更新路径）, .kiro/specs/spec-29-bird-classifier-training/design.md（更新路径）, .kiro/specs/spec-29-bird-classifier-training/tasks.md（更新路径）, .kiro/steering/structure.md（更新目录结构）
 
 ---
+
+### 2026-04-21 — Spec: spec-28-feature-space-cleaning / launch_processing.py 自动打包改造
+
+**完成概要：** 将 `launch_processing.py` 从手动 `aws s3 sync` 代码同步模式改为自动打包模式（与 `launch_training.py` 一致）。运行时自动将 `model/` 打包为 `sourcedir.tar.gz` 上传到 S3，通过 Processing Job 的 code 输入通道下载到容器，`ContainerEntrypoint` 解压后 pip install 依赖再执行清洗脚本。同时清理了 `clean_features.py` 中重复的自动 pip install 逻辑。
+
+**测试状态：** 未运行（SageMaker 部署改造）— 无新增测试，待用户提交 Processing Job 验证
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | launch_processing.py 每次改代码都要手动 `aws s3 sync`，容易忘 | Spec 不够精确 | 用户反馈：想要和 launch_training.py 一样的自动打包方式 | 新增 `pack_sourcedir()` + `_tar_filter()`，自动打包 model/ 为 tar.gz 上传 S3，通过 code 输入通道下载到容器 | 已修复 |
+| 2 | clean_features.py 开头有自动 pip install 逻辑，与 ContainerEntrypoint 中的 pip install 重复 | Context 太多 | 容器启动时 pip install 执行两次（entrypoint 一次 + clean_features.py 开头一次） | 删除 clean_features.py 中的自动 pip install，统一由 entrypoint 处理 | 已修复 |
+| 3 | clean_features.py 的 sys.path 只加了 `_code_dir`（cleaning/），缺少父目录导致 `from collection.config import` 在容器内可能失败 | Spec 缺少信息 | 代码解压到 `/opt/ml/code/` 后，`cleaning/clean_features.py` 需要 import `collection/config.py`，但 `collection/` 在父目录 | 同时将 `_code_dir` 和 `_parent_dir` 加入 sys.path | 已修复 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/launch_processing.py（重写为自动打包模式）, model/cleaning/clean_features.py（删除重复 pip install、修正 sys.path）, .kiro/specs/spec-28-feature-space-cleaning/requirements.md（反向更新）, .kiro/specs/spec-28-feature-space-cleaning/design.md（反向更新）, .kiro/specs/spec-28-feature-space-cleaning/tasks.md（反向更新）
+
+---

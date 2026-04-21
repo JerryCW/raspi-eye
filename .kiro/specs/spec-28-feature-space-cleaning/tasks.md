@@ -161,7 +161,7 @@
     - 标签：`# Feature: feature-space-cleaning, Property 6: Train/Val 划分可复现`
 
 - [x] 8. CLI 入口与 SageMaker 部署脚本
-  - [x] 8.1 创建 `model/clean_features.py` — 端到端清洗 CLI 入口
+  - [x] 8.1 创建 `model/cleaning/clean_features.py` — 端到端清洗 CLI 入口
     - 实现 `detect_paths() -> dict`：自动检测 SageMaker（`/opt/ml/processing/`）或本地路径
     - 实现 argparse 参数解析：`--config`（必填）、`--skip-crop`、`--skip-extract`、`--species`、`--dinov3-repo`、`--dinov3-weights`、`--batch-size`、`--cosine-threshold`
     - 流程：加载配置 → YOLO 裁切（除非 --skip-crop）→ DINOv3 特征提取（除非 --skip-extract）→ 离群点检测 → 语义去重 → Train/Val 划分 → 打印统计报告
@@ -170,14 +170,19 @@
     - 某物种清洗后图片数 < 20 时打印警告但继续处理
     - _需求：6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9_
 
-  - [x] 8.2 创建 `model/launch_processing.py` — SageMaker Processing Job 启动脚本
-    - 实现 argparse 参数解析：`--s3-bucket`（必填）、`--s3-prefix`、`--role`、`--instance-type`、`--wait`
-    - 使用 `PyTorchProcessor` 创建 Processing Job
-    - 配置 S3 输入通道（cleaned/ + species.yaml）和输出通道（train/ + val/ + features/ + report/）
+  - [x] 8.2 创建 `model/launch_processing.py` — SageMaker Processing Job 启动脚本（自动打包代码）
+    - 实现 `pack_sourcedir(model_dir)` 和 `_tar_filter()`：自动打包 `model/` 为 `sourcedir.tar.gz`（排除 data/tests/models/samples/output/ 等），将 `cleaning/requirements.txt` 额外添加到根目录
+    - 上传 tar.gz 到 S3 `pipeline/sourcedir-processing-{timestamp}.tar.gz`
+    - 通过 Processing Job 的 code 输入通道将 tar.gz 下载到容器
+    - `ContainerEntrypoint`：解压 tar → pip install requirements.txt → 执行 `cleaning/clean_features.py`
+    - 从 Secrets Manager 获取 HF_TOKEN 传给容器 Environment
+    - 实现 argparse 参数解析：`--s3-bucket`（必填）、`--role`、`--instance-type`、`--region`、`--wait`、`--species`
+    - 配置 S3 输入通道（cleaned/ + config/ + code tar.gz）和输出通道（train/ + val/ + features/ + report/ + cropped/）
+    - 检查 S3 是否已有 cropped 数据（断点续传）
     - 提交 Job 后打印 Job 名称 + CloudWatch Logs 链接
     - `--wait` 时等待 Job 完成并打印最终状态和耗时
     - Role ARN 从 `--role` 或 `SAGEMAKER_ROLE_ARN` 环境变量获取，都没有则报错退出
-    - _需求：7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9_
+    - _需求：7.1, 7.2, 7.3, 7.5, 7.6, 7.7, 7.8, 7.9_
 
   - [x] 8.3 创建 `scripts/create-sagemaker-role.sh` — IAM Role 创建脚本
     - 创建信任策略（`sagemaker.amazonaws.com` AssumeRole）

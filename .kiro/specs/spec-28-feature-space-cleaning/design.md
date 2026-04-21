@@ -109,8 +109,8 @@ model/
 │   ├── test_cropper.py           # 新增：裁切逻辑测试
 │   ├── test_feature_cleaning.py  # 新增：离群点 + 语义去重 + 划分 PBT
 │   └── ...                       # 已有测试不修改
-├── clean_features.py             # 新增：端到端清洗 CLI 入口
-├── launch_processing.py          # 新增：SageMaker Processing Job 启动脚本
+├── clean_features.py             # 端到端清洗 CLI 入口（SageMaker 容器内执行）
+├── launch_processing.py          # SageMaker Processing Job 启动脚本（自动打包代码）
 └── data/                         # 数据目录（.gitignore 排除）
     ├── cleaned/                  # Spec 27 产出（只读输入）
     ├── cropped/                  # YOLO 裁切后（中间产物）
@@ -455,7 +455,12 @@ def main():
 
 ```python
 """
-SageMaker Processing Job 启动脚本。
+SageMaker Processing Job 启动脚本（自动打包代码）。
+
+自动将 model/ 目录打包为 sourcedir.tar.gz 上传到 S3，
+通过 Processing Job 的 code 输入通道下载到容器内，
+ContainerEntrypoint 解压后安装依赖并执行清洗脚本。
+不再需要手动 aws s3 sync 同步代码。
 
 用法：
     python model/launch_processing.py \
@@ -464,6 +469,12 @@ SageMaker Processing Job 启动脚本。
 """
 import argparse
 import os
+import tarfile
+import tempfile
+
+def pack_sourcedir(model_dir: str) -> str:
+    """将 model/ 目录打包为 sourcedir.tar.gz（排除 data/tests/models/ 等）。"""
+    ...
 
 def main():
     parser = argparse.ArgumentParser(description="启动 SageMaker Processing Job")
@@ -471,6 +482,7 @@ def main():
     parser.add_argument("--role", type=str, help="SageMaker Execution Role ARN")
     parser.add_argument("--instance-type", default="ml.g4dn.xlarge", help="GPU 实例类型")
     parser.add_argument("--wait", action="store_true", help="等待 Job 完成")
+    parser.add_argument("--species", type=str, help="指定单个物种（用于测试）")
     args = parser.parse_args()
     
     role = args.role or os.environ.get("SAGEMAKER_ROLE_ARN")
@@ -478,9 +490,11 @@ def main():
         print("错误: 必须通过 --role 或 SAGEMAKER_ROLE_ARN 环境变量指定 Role ARN")
         sys.exit(1)
     
-    # 使用 PyTorchProcessor 创建 Processing Job
-    # 配置 S3 输入/输出通道
-    # 提交 Job 并打印 Job 名称 + CloudWatch Logs 链接
+    # 1. 打包 model/ 为 sourcedir.tar.gz 并上传到 S3
+    # 2. 从 Secrets Manager 获取 HF_TOKEN
+    # 3. 配置 S3 输入通道（cleaned/ + config/ + code tar.gz）和输出通道
+    # 4. ContainerEntrypoint: 解压 tar → pip install → 执行 clean_features.py
+    # 5. 提交 Job 并打印 Job 名称 + CloudWatch Logs 链接
 ```
 
 ### scripts/create-sagemaker-role.sh — IAM Role 创建脚本
@@ -826,7 +840,7 @@ python model/clean_features.py --config model/config/species.yaml \
     --dinov3-repo third_party/dinov3 \
     --dinov3-weights path/to/weights.pth
 
-# 提交 SageMaker Processing Job
+# 提交 SageMaker Processing Job（自动打包代码，无需手动 sync）
 python model/launch_processing.py \
     --s3-bucket my-bucket \
     --role arn:aws:iam::xxx:role/SageMakerRole \
@@ -860,6 +874,6 @@ python model/launch_processing.py \
 
 10. **S3 桶**：`raspi-eye-model-data`（us-east-1），不带 region 后缀
 
-11. **代码部署方式**：通过 `aws s3 sync model/ s3://raspi-eye-model-data/pipeline/code/` 上传代码到 S3，容器从 S3 code 输入通道读取
+11. **代码部署方式**：自动将 `model/` 目录打包为 `sourcedir.tar.gz` 上传到 S3，通过 Processing Job 的 code 输入通道下载到容器内，`ContainerEntrypoint` 解压后执行。不再需要手动 `aws s3 sync` 同步代码（与 `launch_training.py` 的 script mode 保持一致的自动打包理念）
 
-12. **S3 目录重组**：从平铺的 `bird-data/*` 重组为分层结构：`bird-data/`（源数据：cleaned + config）、`pipeline/`（清洗管道：code + cropped + features + report）、`dataset/`（训练就绪：train + val），便于后续 Spec 29 训练 job 直接指向 `dataset/`
+12. **S3 目录重组**：从平铺的 `bird-data/*` 重组为分层结构：`bird-data/`（源数据：cleaned + config）、`pipeline/`（清洗管道：sourcedir + cropped + features + report）、`dataset/`（训练就绪：train + val），便于后续 Spec 29 训练 job 直接指向 `dataset/`
