@@ -83,12 +83,12 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 6945
+  - taxon_id: 13428
     scientific_name: "Aethopyga christinae"
     common_name_cn: "叉尾太阳鸟"
     max_images: 1500
 
-  - taxon_id: 71624
+  - taxon_id: 15347
     scientific_name: "Orthotomus sutorius"
     common_name_cn: "长尾缝叶莺"
     max_images: 1500
@@ -120,7 +120,7 @@ species:
     common_name_cn: "黄腹山雀"
     max_images: 800
 
-  - taxon_id: 144815
+  - taxon_id: 13596
     scientific_name: "Parus monticolus"
     common_name_cn: "绿背山雀"
     max_images: 1500
@@ -153,7 +153,7 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 8251
+  - taxon_id: 8088
     scientific_name: "Garrulus glandarius"
     common_name_cn: "松鸦"
     max_images: 1500
@@ -163,12 +163,12 @@ species:
     common_name_cn: "冠蓝鸦"
     max_images: 1500
 
-  - taxon_id: 8269
+  - taxon_id: 8026
     scientific_name: "Corvus macrorhynchos"
     common_name_cn: "大嘴乌鸦"
     max_images: 1500
 
-  - taxon_id: 7868
+  - taxon_id: 7867
     scientific_name: "Oriolus chinensis"
     common_name_cn: "黑枕黄鹂"
     max_images: 1500
@@ -195,12 +195,12 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 13003
+  - taxon_id: 12996
     scientific_name: "Phoenicurus frontalis"
     common_name_cn: "蓝额红尾鸲"
     max_images: 1500
 
-  - taxon_id: 792988
+  - taxon_id: 145068
     scientific_name: "Phoenicurus fuliginosus"
     common_name_cn: "红尾水鸲"
     max_images: 1500
@@ -214,22 +214,22 @@ species:
     common_name_cn: "丝光椋鸟"
     max_images: 1500
 
-  - taxon_id: 547177
+  - taxon_id: 547179
     scientific_name: "Spodiopsar cineraceus"
     common_name_cn: "灰椋鸟"
     max_images: 1500
 
-  - taxon_id: 8010
+  - taxon_id: 145098
     scientific_name: "Gracupica nigricollis"
     common_name_cn: "黑领椋鸟"
     max_images: 1500
 
-  - taxon_id: 18736
+  - taxon_id: 204454
     scientific_name: "Acridotheres tristis"
     common_name_cn: "家八哥"
     max_images: 1500
 
-  - taxon_id: 18735
+  - taxon_id: 14872
     scientific_name: "Acridotheres cristatellus"
     common_name_cn: "八哥"
     max_images: 1500
@@ -322,12 +322,12 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 2603
+  - taxon_id: 204519
     scientific_name: "Halcyon smyrnensis"
     common_name_cn: "白胸翡翠"
     max_images: 1500
 
-  - taxon_id: 2547
+  - taxon_id: 979665
     scientific_name: "Coracias benghalensis"
     common_name_cn: "棕胸佛法僧"
     max_images: 1500
@@ -338,7 +338,7 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 17871
+  - taxon_id: 792951
     scientific_name: "Yungipicus canicapillus"
     common_name_cn: "星头啄木鸟"
     max_images: 1500
@@ -383,7 +383,7 @@ species:
     max_images: 1500
     min_bbox_ratio: 0.03
 
-  - taxon_id: 144315
+  - taxon_id: 144510
     scientific_name: "Chroicocephalus ridibundus"
     common_name_cn: "红嘴鸥"
     max_images: 1500
