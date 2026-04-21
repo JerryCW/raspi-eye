@@ -41,7 +41,34 @@ raspi-eye/
 │   └── steering/        # Steering 规则
 ├── .gitignore
 ├── viewer/              # 前端（待创建，部署到 AWS）
-├── model/               # ML 全链路（待创建）
+├── model/               # ML 全链路
+│   ├── collection/      # Spec 27: iNaturalist 数据采集
+│   │   ├── collector.py
+│   │   ├── config.py
+│   │   └── verify_taxon_ids.py
+│   ├── cleaning/        # Spec 28: 特征空间清洗
+│   │   ├── cleaner.py
+│   │   ├── cropper.py
+│   │   ├── feature_extractor.py
+│   │   ├── outlier_detector.py
+│   │   ├── semantic_dedup.py
+│   │   ├── splitter.py
+│   │   └── clean_features.py  # Spec 28 清洗入口（SageMaker 容器内执行）
+│   ├── training/        # Spec 29: 模型训练
+│   │   ├── backbone_registry.py
+│   │   ├── classifier.py
+│   │   ├── augmentation.py
+│   │   ├── evaluator.py
+│   │   ├── exporter.py
+│   │   ├── train.py         # Spec 29 训练入口（SageMaker 容器内执行）
+│   │   └── requirements.txt # 训练依赖（打包进 sourcedir.tar.gz）
+│   ├── config/
+│   │   └── species.yaml
+│   ├── tests/
+│   ├── prepare_dataset.py   # Spec 27 入口（用户执行）
+│   ├── predict.py           # Spec 29 推理（用户执行）
+│   ├── launch_processing.py # Spec 28 SageMaker 启动（用户执行）
+│   └── launch_training.py   # Spec 29 SageMaker 启动（用户执行）
 └── infra/               # 基础设施 IaC（待创建）
 ```
 
@@ -53,5 +80,5 @@ raspi-eye/
 | scripts | Bash | macOS / Pi 5 | 构建脚本、双平台验证 | 已有 |
 | docs | Markdown | — | 开发文档、环境配置、Spec 路线图 | 已有 |
 | viewer | 待定 | AWS（ECS/S3） | 实时视频观看、事件浏览 | 待创建 |
-| model | Python | SageMaker | 模型训练、推理 endpoint、Lambda 触发器 | 待创建 |
+| model | Python ≥ 3.11 | SageMaker | 数据采集（collection）、清洗（cleaning）、训练（training） | 开发中 |
 | infra | 待定 | AWS | IAM、S3、DynamoDB、SageMaker 等资源定义 | 待创建 |

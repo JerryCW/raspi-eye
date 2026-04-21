@@ -1,10 +1,10 @@
 """端到端特征空间清洗管道。
 
 用法：
-    python model/clean_features.py --config model/config/species.yaml
-    python model/clean_features.py --config model/config/species.yaml --skip-crop
-    python model/clean_features.py --config model/config/species.yaml --skip-extract
-    python model/clean_features.py --config model/config/species.yaml --species "Passer montanus"
+    python model/cleaning/clean_features.py --config model/config/species.yaml
+    python model/cleaning/clean_features.py --config model/config/species.yaml --skip-crop
+    python model/cleaning/clean_features.py --config model/config/species.yaml --skip-extract
+    python model/cleaning/clean_features.py --config model/config/species.yaml --species "Passer montanus"
 
 SageMaker Processing Job 中自动检测 /opt/ml/processing/ 路径。
 """

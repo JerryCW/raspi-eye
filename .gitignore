@@ -78,3 +78,5 @@ model/data/
 
 # Model output (training artifacts, exported models)
 model/output/
+model/models/
+!model/models/.gitkeep

@@ -4688,3 +4688,287 @@ _从反复出现的失败模式中提炼，直接复制到下一轮 Spec。_
 - gated model 的 token 管理需要在 job 提交前解决，不能依赖容器内认证
 - 每次改代码后必须 `aws s3 sync` 到 S3 code 路径，否则容器跑的是旧代码
 - 长时间运行的 Processing Job 应该用 Continuous 上传模式保存中间产物，防止失败后全部丢失
+
+
+### 2025-07-27 — Spec: spec-29-bird-classifier-training / 任务: 1.1, 1.2, 1.3
+
+**完成概要：** 实现 Backbone Registry（backbone_registry.py）、BirdClassifier（classifier.py）和 Property 1 属性测试（模型构建不变量）。
+
+**测试状态：** 全部通过（4 tests, 1.48s）— 新增 1 个 PBT 测试（100 examples）+ 3 个单元测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** `model/src/backbone_registry.py`（新增）、`model/src/classifier.py`（新增）、`model/tests/test_training.py`（新增）
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 1. 实现 Backbone Registry 和 BirdClassifier 核心模块
+
+**完成概要：** 创建 backbone_registry.py（BackboneConfig dataclass + 4 个内置 backbone + get_backbone 查找）、classifier.py（BirdClassifier frozen backbone + linear head）、test_training.py（Property 1 PBT 100 examples + 3 个单元测试），全部通过。
+
+**测试状态：** 全部通过（4/4，1.48s）— 新增 4 个测试（1 PBT + 3 单元测试）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/backbone_registry.py, model/src/classifier.py, model/tests/test_training.py
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 2.1 创建 augmentation.py + 2.2 PBT 数据增强输出尺寸不变量
+
+**完成概要：** 实现数据增强模块（训练增强 + 验证预处理）并编写 Property 2 属性测试验证输出尺寸不变量。
+
+**测试状态：** 全部通过（5 passed in 4.04s） — 新增 1 个 PBT 测试（test_augmentation_output_shape_invariant, max_examples=100）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/augmentation.py, model/tests/test_training.py
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 2. 实现数据增强模块
+
+**完成概要：** 创建 augmentation.py（get_train_transform + get_val_transform，torchvision.transforms.v2），追加 Property 2 PBT 到 test_training.py，全部通过。
+
+**测试状态：** 全部通过（5/5，4.04s）— 新增 1 个 PBT 测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/augmentation.py, model/tests/test_training.py
+
+---
+
+### 2025-07-27 — Spec: spec-29-bird-classifier-training / 任务: 3.1 + 3.2 + 3.3（评估模块）
+
+**完成概要：** 创建 evaluator.py（EvaluationReport、evaluate、evaluate_from_logits、compute_confusion_matrix、find_top_confused_pairs、save_evaluation_report），编写 Property 3（评估指标数学不变量）和 Property 4（混淆矩阵正确性）属性测试。
+
+**测试状态：** 全部通过（7/7）— 新增 2 个 PBT 测试（test_evaluation_metrics_math_invariants、test_confusion_matrix_correctness），各 100 次迭代
+
+**Trace 记录：**
+
+无异常，任务顺利完成。一次通过，无编译/运行时错误。
+
+```
+pytest output:
+model/tests/test_training.py::test_model_construction_invariants PASSED
+model/tests/test_training.py::test_get_backbone_registered_names PASSED
+model/tests/test_training.py::test_get_backbone_unknown_raises_valueerror PASSED
+model/tests/test_training.py::test_bird_classifier_forward_shape PASSED
+model/tests/test_training.py::test_augmentation_output_shape_invariant PASSED
+model/tests/test_training.py::test_evaluation_metrics_math_invariants PASSED
+model/tests/test_training.py::test_confusion_matrix_correctness PASSED
+7 passed in 4.45s
+```
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/evaluator.py, model/tests/test_training.py
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 5.1 + 5.2（模型导出 + round-trip 属性测试）
+
+**完成概要：** 前置清理（移除 ResNet50/EfficientNet-B0、添加 LoRA 支持、更新 backbone 测试）+ 创建 exporter.py（export_pytorch/export_class_names/export_onnx）+ Property 5 导出 round-trip PBT 测试。
+
+**测试状态：** 全部通过（8/8）— 新增 1 个 PBT 测试（test_export_roundtrip, max_examples=100）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+完整测试输出：
+```
+model/tests/test_training.py::test_model_construction_invariants PASSED
+model/tests/test_training.py::test_get_backbone_registered_names PASSED
+model/tests/test_training.py::test_get_backbone_unknown_raises_valueerror PASSED
+model/tests/test_training.py::test_bird_classifier_forward_shape PASSED
+model/tests/test_training.py::test_augmentation_output_shape_invariant PASSED
+model/tests/test_training.py::test_evaluation_metrics_math_invariants PASSED
+model/tests/test_training.py::test_confusion_matrix_correctness PASSED
+model/tests/test_training.py::test_export_roundtrip PASSED
+8 passed in 4.17s
+```
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/backbone_registry.py, model/src/classifier.py, model/src/exporter.py, model/tests/test_training.py
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 5. 实现模型导出模块 + 代码清理
+
+**完成概要：** 移除 ResNet50/EfficientNet-B0，classifier.py 添加 LoRA 支持（lora/lora_rank/merge_lora），创建 exporter.py（export_pytorch/export_class_names/export_onnx），Property 5 导出 round-trip PBT，8/8 测试通过。
+
+**测试状态：** 全部通过（8/8）— 新增 1 个 PBT 测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/src/backbone_registry.py, model/src/classifier.py, model/src/exporter.py, model/tests/test_training.py
+
+---
+
+### 2025-07-27 — Spec: spec-29-bird-classifier-training / 任务: 6.1 创建 model/train.py + 6.2 编写训练循环单元测试
+
+**完成概要：** 创建训练入口脚本 `model/train.py`（超参数解析、数据加载、训练循环、评估、导出），并编写合成数据集训练循环单元测试。
+
+**测试状态：** 全部通过（9/9）— 新增 1 个单元测试（test_training_loop_synthetic）
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | 合成随机数据 + frozen random backbone 导致 loss 不下降（epoch 2 loss 0.7100 > epoch 0 loss 0.6490） | 模型能力边界 | `AssertionError: epoch 2 的 loss (0.7100) 应 < epoch 0 的 loss (0.6490)` — 随机 backbone 产生随机特征，线性 head 无法可靠分离 | 使用不同亮度的合成图片（类 0: 0-55，类 1: 200-255）确保特征可分离，固定 seed=42，增加到 10 epochs + lr=0.1 | 测试中使用可分离的合成数据 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Tasks 层：** SHALL NOT 在训练循环测试中使用完全随机的合成数据配合 frozen random backbone（随机特征不可分离，loss 不会下降）。应使用不同亮度/颜色的合成图片确保类间可分离性。
+
+**涉及文件：** model/train.py（新增）, model/tests/test_training.py（追加）
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 6. 实现训练入口脚本
+
+**完成概要：** 创建 train.py（超参数解析 + GPU/CPU 自动检测 + ImageFolder 数据加载 + 训练循环 + 评估 + LoRA merge + 导出），训练循环单元测试（合成 2 类可分离数据，10 epoch），9/9 测试通过。
+
+**测试状态：** 全部通过（9/9，4.33s）— 新增 1 个单元测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/train.py, model/tests/test_training.py
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 7. 实现 SageMaker Training Job 启动脚本
+
+**完成概要：** 创建 launch_training.py（boto3 create_training_job，Job 命名 bird-v1-{backbone}-{timestamp}，S3 三通道输入，Secrets Manager HF_TOKEN，--wait 模式复制模型产物，LoRA 目录加 -lora 后缀），py_compile 语法检查通过。
+
+**测试状态：** 未运行（SageMaker 启动脚本，不在本地测试）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/launch_training.py
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 8. 实现离线推理验证脚本
+
+**完成概要：** 创建 predict.py（加载 .pt 模型 + 元数据恢复 BirdClassifier + get_val_transform 预处理 + GPU/CPU 自动检测 + top-k 推理 + 物种子目录自动 accuracy + JSON 输出），语法检查通过。
+
+**测试状态：** 未运行（离线推理脚本，需要真实模型文件）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/predict.py
+
+---
+
+### 2026-04-20 — Spec: spec-29-bird-classifier-training / 任务: 9. 最终检查点
+
+**完成概要：** 最终全量验证通过，9/9 测试全部通过（4.47s），包含 4 个 PBT 属性测试（各 100 examples）+ 5 个单元测试。
+
+**测试状态：** 全部通过（9/9，4.47s）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** 无文件变更（纯验证）
+
+---
+
+### 2026-04-21 — Spec: spec-29-bird-classifier-training / SageMaker Training Job 调试
+
+**完成概要：** Training Job 提交成功但 CloudWatch Logs 完全缺失（log group 不存在），根因是 `ContainerEntrypoint` 覆盖了 SageMaker 预构建容器的默认入口脚本，导致日志管道未初始化。
+
+**测试状态：** 未运行（SageMaker 部署调试）— 无新增测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | Training Job 无 CloudWatch Logs，log group `/aws/sagemaker/TrainingJobs` 不存在 | Spec 缺少信息 | `ResourceNotFoundException: The specified log group does not exist` | 不使用 ContainerEntrypoint，改用 SageMaker script mode（HyperParameters 中的 sagemaker_program） | 加入 Design 层禁止项 + shall-not.md |
+| 2 | 容器内 `from model.src.xxx` 报 ModuleNotFoundError | Spec 缺少信息 | `ModuleNotFoundError: No module named 'model'`，容器内代码在 `/opt/ml/input/data/code/` 而非 `model/` | train.py/predict.py/classifier.py/exporter.py 添加 try/except 双路径 import | 加参考代码到 design.md |
+| 3 | ContainerEntrypoint 单元素超 256 字符限制 | Spec 缺少信息 | `ValidationException: Member must have length less than or equal to 256` | 使用 wrapper 脚本 run_training.sh 缩短命令 | 加约束到 shall-not.md |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 使用 `ContainerEntrypoint` 覆盖 SageMaker 预构建容器的默认入口脚本——覆盖会导致 CloudWatch Logs 日志管道断裂
+
+**涉及文件：** model/launch_training.py, model/run_training.sh, model/train.py, model/predict.py, model/src/classifier.py, model/src/exporter.py
+
+---
+
+### 2026-04-21 — Spec: spec-29-bird-classifier-training / 任务: 7.1 重写 launch_training.py + model/ 目录结构整理
+
+**完成概要：** 重写 launch_training.py 为 SageMaker script mode（不再使用 ContainerEntrypoint + wrapper 脚本），整理 model/ 目录结构（train.py → training/train.py, clean_features.py → cleaning/clean_features.py, 删除 run_training.sh）。
+
+**测试状态：** 全部通过（9/9）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。已有的 `SHALL NOT 使用 ContainerEntrypoint 覆盖 SageMaker 预构建容器的默认入口脚本` 在本次任务中得到修复。
+
+**涉及文件：** model/launch_training.py（重写）, model/training/train.py（从 model/train.py 移入，更新 sys.path）, model/cleaning/clean_features.py（从 model/clean_features.py 移入）, model/training/requirements.txt（新建）, model/cleaning/requirements.txt（从 model/requirements.txt 移入）, model/launch_processing.py（更新 ContainerEntrypoint 路径）, model/tests/test_training.py（更新 import 路径）, model/run_training.sh（删除）, .kiro/specs/spec-29-bird-classifier-training/requirements.md（更新路径）, .kiro/specs/spec-29-bird-classifier-training/design.md（更新路径）, .kiro/specs/spec-29-bird-classifier-training/tasks.md（更新路径）, .kiro/steering/structure.md（更新目录结构）
+
+---

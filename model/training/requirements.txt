@@ -1,0 +1,5 @@
+# SageMaker Training Job 容器内额外依赖
+# PyTorch 预构建容器已包含 torch/torchvision/numpy/scipy/scikit-learn
+# 以下是训练脚本需要但容器中缺少的包
+peft>=0.15
+transformers>=4.56

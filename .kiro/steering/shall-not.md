@@ -29,6 +29,10 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
 
 - SHALL NOT 在日志或错误输出中打印密钥、证书内容、token 等敏感信息（来源：安全基线）
 
+- SHALL NOT 使用 `ContainerEntrypoint` 覆盖 SageMaker 预构建容器的默认入口脚本（来源：spec-29 Training Job 无 CloudWatch Logs）
+  - 原因：覆盖默认入口会导致 SageMaker 的 CloudWatch 日志管道不初始化，训练过程无法在 CloudWatch 控制台监控
+  - 建议：使用 SageMaker Python SDK 的 script mode（`sagemaker_program` + `sagemaker_submit_directory`）或 `source_dir` 方式指定训练脚本
+
 - SHALL NOT 在非 pipeline 模块中使用 `spdlog::get("pipeline")` logger（来源：spec-12/13 Pi 5 生产日志审查）
   - 原因：所有模块共用 pipeline logger 导致日志无法按模块过滤，生产环境排查困难
   - 建议：每个模块使用与其功能对应的 logger 名称（webrtc、ai、s3、kvs 等），在 Spec tasks.md 中明确指定

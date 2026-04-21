@@ -189,7 +189,7 @@ def main():
             "ContainerEntrypoint": [
                 "bash", "-c",
                 "pip install ultralytics scikit-learn scipy imagehash 'transformers>=4.56' && "
-                f"python3 /opt/ml/processing/input/code/clean_features.py {clean_args}"
+                f"python3 /opt/ml/processing/input/code/cleaning/clean_features.py {clean_args}"
             ],
         },
         Environment={

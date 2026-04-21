@@ -64,7 +64,10 @@ POLICY_DOC=$(cat <<-POLICY
         "logs:CreateLogStream",
         "logs:PutLogEvents"
       ],
-      "Resource": "arn:aws:logs:*:*:log-group:/aws/sagemaker/ProcessingJobs*"
+      "Resource": [
+        "arn:aws:logs:*:*:log-group:/aws/sagemaker/ProcessingJobs*",
+        "arn:aws:logs:*:*:log-group:/aws/sagemaker/TrainingJobs*"
+      ]
     },
     {
       "Sid": "ECRPullImage",
@@ -75,6 +78,14 @@ POLICY_DOC=$(cat <<-POLICY
         "ecr:GetDownloadUrlForLayer"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "SecretsManagerRead",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": "arn:aws:secretsmanager:*:*:secret:raspi-eye/*"
     }
   ]
 }

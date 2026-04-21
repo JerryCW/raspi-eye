@@ -173,6 +173,8 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 
 - **KVS 弱网优化**：Pi 5 到 KVS ap-southeast-1 的实际上传速度仅 211 KB/s（1.7 Mbps），远低于到 Cloudflare 的 1.4 MB/s（11 Mbps），导致 2.5 Mbps 编码码率持续积压、putMedia 连接反复断开重建（30 分钟内 10000+ 条 latency pressure）。需要：(1) kvssink 属性调优（avg-bandwidth-bps 匹配实际码率）；(2) 降低默认码率到上传速度以下（~1200 kbps）；(3) 评估换 region（东京/香港）是否改善路由；(4) 考虑 KVS_ONLY 模式下进一步降码率。（来源：spec-25 Pi 5 生产日志排查）
 
+- **model/ 目录重组**：当前 `model/src/` 把采集（Spec 27）、清洗（Spec 28）、训练（Spec 29）的代码全混在一起。需要按数据流水线阶段重组为 `model/collection/`、`model/cleaning/`、`model/training/` 三个子目录，更新所有 import 路径、测试、S3 同步命令和 SageMaker 容器内路径。等 Spec 29 训练跑通后开独立 Spec 执行。（来源：spec-29 代码审查）
+
 - **main.cpp 三路集成**：KVS（spec-8）、WebRTC（spec-12+13）、AI（spec-10）三路分支的模块都已就绪，但 main.cpp 仍使用 fakesink 占位。需要一个独立 Spec 统一修改 main.cpp：读取 config.toml → 构建各模块配置 → 创建 WebRtcSignaling/WebRtcMediaManager → 注册回调 → 传入 build_tee_pipeline。依赖 spec-8 + spec-13 + spec-10 全部完成。（来源：spec-13 review）→ **已纳入 Spec 13.5（main-integration），先集成 KVS + WebRTC 两路，AI 分支后续 spec-10 完成后再接入**
 
 ---
