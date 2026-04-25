@@ -4994,3 +4994,57 @@ model/tests/test_training.py::test_export_roundtrip PASSED
 **涉及文件：** model/launch_processing.py（重写为自动打包模式）, model/cleaning/clean_features.py（删除重复 pip install、修正 sys.path）, .kiro/specs/spec-28-feature-space-cleaning/requirements.md（反向更新）, .kiro/specs/spec-28-feature-space-cleaning/design.md（反向更新）, .kiro/specs/spec-28-feature-space-cleaning/tasks.md（反向更新）
 
 ---
+
+### 2026-04-25 — Spec: spec-17-sagemaker-endpoint / 任务: 1+2+3（推理脚本 + 打包 + 检查点）
+
+**完成概要：** 实现 inference.py（四个 SageMaker 钩子函数）、requirements.txt、packager.py（model.tar.gz 打包），编写 3 个 PBT 属性测试 + 5 个单元测试，检查点 8/8 通过（8.40s）。
+
+**测试状态：** 全部通过（8/8，8.40s）— 新增 8 个测试（3 PBT + 5 单元）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/endpoint/__init__.py, model/endpoint/inference.py, model/endpoint/requirements.txt, model/endpoint/packager.py, model/tests/test_endpoint.py
+
+---
+
+### 2026-04-25 — Spec: spec-17-sagemaker-endpoint / 任务: 4+5（Lambda 函数 + 检查点）
+
+**完成概要：** 实现 handler.py（handler、parse_event_json、build_snapshot_keys、select_best_prediction），编写 2 个 PBT 属性测试 + 6 个单元测试，检查点 8/8 通过（2.78s）。
+
+**测试状态：** 全部通过（8/8，2.78s）— 新增 8 个测试（2 PBT + 6 单元）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。注意：`lambda` 是 Python 关键字，测试中使用 `importlib.import_module("model.lambda.handler")` 导入，mock 使用 `patch.object` 而非 `@patch("model.lambda.handler.xxx")`。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/lambda/__init__.py, model/lambda/handler.py, model/tests/test_lambda.py
+
+---
+
+### 2026-04-25 — Spec: spec-17-sagemaker-endpoint / 任务: 6+7+8（部署脚本 + 一键部署 + 最终检查点）
+
+**完成概要：** 实现 deploy_endpoint.py（boto3 三步部署 + update/delete/wait/test 模式）、deploy-inference-pipeline.sh（5 步部署 + 逆序删除 + e2e-test），最终检查点 16/16 通过（14.86s）。
+
+**测试状态：** 全部通过（16/16，14.86s）— 无新增测试（部署脚本不需要单元测试）
+
+**Trace 记录：**
+
+无异常，全部 8 个 task 顺利完成，零失败零重试。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/deploy_endpoint.py, scripts/deploy-inference-pipeline.sh
+
+---

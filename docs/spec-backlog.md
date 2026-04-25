@@ -107,11 +107,11 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
-| 27 | inat-data-collection | iNaturalist 鸟类图片采集 + 数据清洗（去重、质量过滤、统一 resize）→ 按物种分目录的训练数据集 | 无 | model | ⬜ |
-| 28 | feature-space-cleaning | DINOv3 特征空间深度清洗：YOLO 鸟体裁切 + DINOv3 特征提取（frozen backbone）+ Mahalanobis 离群点检测 + 余弦相似度语义去重 + train/val 分层划分 → ImageFolder 格式数据集 | spec-27 | model | ⬜ |
-| 29 | bird-classifier-training | DINOv3-ViT-L/16 backbone（frozen）+ linear head fine-tuning + 数据增强 → 鸟类分类模型训练 + 评估 + 导出 | spec-28 | model | ⬜ |
-| 17 | sagemaker-endpoint | SageMaker Serverless 推理 endpoint（部署 spec-29 产出的模型） | spec-29 | model + infra | ⬜ |
-| 18 | lambda-trigger | S3 事件触发 Lambda → 调用 SageMaker → 结果写 DynamoDB | spec-17 | model + infra | ⬜ |
+| 27 | inat-data-collection | iNaturalist 鸟类图片采集 + 数据清洗（去重、质量过滤、统一 resize）→ 按物种分目录的训练数据集 | 无 | model | ✅ |
+| 28 | feature-space-cleaning | DINOv3 特征空间深度清洗：YOLO 鸟体裁切 + DINOv3 特征提取（frozen backbone）+ Mahalanobis 离群点检测 + 余弦相似度语义去重 + train/val 分层划分 → ImageFolder 格式数据集 | spec-27 | model | ✅ |
+| 29 | bird-classifier-training | DINOv3-ViT-L/16 backbone（frozen）+ linear head fine-tuning + 数据增强 → 鸟类分类模型训练 + 评估 + 导出 | spec-28 | model | ✅ |
+| 17 | sagemaker-endpoint | SageMaker Endpoint 部署（Serverless + Real-time 双模式）+ Lambda 触发 + DynamoDB 写回 raspi-eye-events 表 | spec-29 | model + infra | ✅ |
+| 18 | lambda-trigger | （已合并到 spec-17） | spec-17 | model + infra | ✅ |
 
 ## 阶段六：部署运维
 
@@ -186,4 +186,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ~ spec-16 ✅（含 spec-4.5 ⬜、spec-13.6 ✅、spec-15.5 ✅）, spec-19 ~ spec-26 ✅（含 spec-21 ⬜、spec-23 ✅、spec-24 ✅、spec-25 ✅、spec-26 ✅）。设备端功能开发完成。下一步：spec-17（SageMaker endpoint）→ spec-18（Lambda + DynamoDB）→ spec-21（前端 viewer）
+当前进度：spec-0 ~ spec-16 ✅（含 spec-4.5 ⬜、spec-13.6 ✅、spec-15.5 ✅）, spec-17 ~ spec-18 ✅（合并为 spec-17）, spec-19 ~ spec-29 ✅（含 spec-21 ⬜）。设备端 + ML 管线 + 云端推理链路开发完成。下一步：spec-21（前端 viewer）
