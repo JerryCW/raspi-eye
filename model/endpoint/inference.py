@@ -4,6 +4,7 @@
 完全自包含，不依赖外部 training 模块（容器内没有这些文件）。
 """
 
+import base64
 import io
 import json
 import logging
@@ -26,6 +27,8 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 # 模块级变量，供 input_fn 使用（model_fn 加载后设置）
 _input_size = 518
+_yolo_model = None
+BIRD_CLASS_ID = 14  # COCO class 14 = bird
 
 
 def _get_val_transform(input_size: int) -> v2.Compose:
@@ -37,6 +40,43 @@ def _get_val_transform(input_size: int) -> v2.Compose:
         v2.ToDtype(torch.float32, scale=True),
         v2.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ])
+
+
+def _letterbox_resize(image: Image.Image, target_size: int) -> Image.Image:
+    """Letterbox resize：等比缩放 + 黑色填充到 target_size × target_size。
+
+    与 cleaning/cleaner.py 中的 letterbox_resize 行为等效（内联实现，不依赖 cleaning 模块）。
+    """
+    w, h = image.size
+    scale = target_size / max(w, h)
+    new_w = max(1, min(int(w * scale), target_size))
+    new_h = max(1, min(int(h * scale), target_size))
+    resized = image.resize((new_w, new_h), Image.LANCZOS)
+    canvas = Image.new("RGB", (target_size, target_size), color=(0, 0, 0))
+    paste_x = (target_size - new_w) // 2
+    paste_y = (target_size - new_h) // 2
+    canvas.paste(resized, (paste_x, paste_y))
+    return canvas
+
+
+def _yolo_crop(image: Image.Image, yolo_model, conf_threshold: float = 0.3, padding: float = 0.2) -> Image.Image | None:
+    """YOLO 鸟体裁切。返回 letterbox resize 后的 PIL Image，未检测到鸟体时返回 None。"""
+    results = yolo_model(image, verbose=False)
+    bird_boxes = [
+        box for box in results[0].boxes
+        if int(box.cls) == BIRD_CLASS_ID and float(box.conf) >= conf_threshold
+    ]
+    if not bird_boxes:
+        return None
+    best = max(bird_boxes, key=lambda b: float(b.conf))
+    x1, y1, x2, y2 = best.xyxy[0].tolist()
+    w, h = x2 - x1, y2 - y1
+    x1 = max(0, x1 - w * padding)
+    y1 = max(0, y1 - h * padding)
+    x2 = min(image.width, x2 + w * padding)
+    y2 = min(image.height, y2 + h * padding)
+    cropped = image.crop((int(x1), int(y1), int(x2), int(y2)))
+    return _letterbox_resize(cropped, _input_size)
 
 
 class _BirdClassifier(nn.Module):
@@ -114,16 +154,28 @@ def model_fn(model_dir: str) -> dict:
     logger.info("模型加载完成: backbone=%s, num_classes=%d, input_size=%d",
                 backbone_name, num_classes, input_size)
 
+    # 加载 YOLO 模型（可选）
+    global _yolo_model
+    yolo_path = os.path.join(model_dir, "yolo11s.pt")
+    if os.path.exists(yolo_path):
+        from ultralytics import YOLO
+        _yolo_model = YOLO(yolo_path)
+        logger.info("YOLO 模型加载完成: %s", yolo_path)
+    else:
+        _yolo_model = None
+        logger.warning("未找到 YOLO 模型: %s，将使用原始预处理流程", yolo_path)
+
     return {
         "model": model,
         "transform": val_transform,
         "class_names": class_names,
         "metadata": metadata,
+        "yolo_model": _yolo_model,
     }
 
 
-def input_fn(request_body: bytes, content_type: str) -> torch.Tensor:
-    """反序列化输入：JPEG 二进制 → 预处理后的张量。"""
+def input_fn(request_body: bytes, content_type: str) -> dict:
+    """反序列化输入：JPEG 二进制 → dict(tensor, cropped_image)。"""
     if content_type not in SUPPORTED_CONTENT_TYPES:
         raise ValueError(f"不支持的 content_type: '{content_type}'。支持: {sorted(SUPPORTED_CONTENT_TYPES)}")
 
@@ -132,19 +184,40 @@ def input_fn(request_body: bytes, content_type: str) -> torch.Tensor:
     except Exception as e:
         raise ValueError(f"无法解码图片数据: {e}") from e
 
-    transform = _get_val_transform(_input_size)
-    tensor = transform(image)
-    return tensor.unsqueeze(0)
+    cropped_image = None
+    if _yolo_model is not None:
+        try:
+            cropped_image = _yolo_crop(image, _yolo_model)
+        except Exception as e:
+            logger.warning("YOLO 推理异常，回退到原始预处理流程: %s", e)
+            cropped_image = None
+
+    if cropped_image is not None:
+        # YOLO crop 路径：letterbox resize 后的图片 → ToImage → ToDtype → Normalize
+        normalize = v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ])
+        tensor = normalize(cropped_image).unsqueeze(0)
+    else:
+        # 回退路径：原来的 Resize + CenterCrop + Normalize
+        transform = _get_val_transform(_input_size)
+        tensor = transform(image).unsqueeze(0)
+
+    return {"tensor": tensor, "cropped_image": cropped_image}
 
 
-def predict_fn(input_data: torch.Tensor, model_dict: dict) -> dict:
-    """执行推理：模型前向传播 → softmax → top-5。"""
+def predict_fn(input_data: dict, model_dict: dict) -> dict:
+    """执行推理：模型前向传播 → softmax → top-5，透传 cropped_image。"""
+    tensor = input_data["tensor"]
+    cropped_image = input_data["cropped_image"]
     model = model_dict["model"]
     class_names = model_dict["class_names"]
     metadata = model_dict["metadata"]
 
     with torch.no_grad():
-        logits = model(input_data)
+        logits = model(tensor)
         probabilities = F.softmax(logits, dim=1)
 
     top_k = min(5, probabilities.shape[1])
@@ -163,9 +236,21 @@ def predict_fn(input_data: torch.Tensor, model_dict: dict) -> dict:
             "backbone": metadata["backbone_name"],
             "num_classes": metadata["num_classes"],
         },
+        "cropped_image": cropped_image,
     }
 
 
 def output_fn(prediction: dict, accept: str) -> tuple[str, str]:
-    """序列化输出：prediction dict → JSON 字符串。"""
+    """序列化输出：prediction dict → JSON（含 cropped_image_b64）。"""
+    cropped_image = prediction.pop("cropped_image", None)
+    cropped_b64 = None
+    if cropped_image is not None:
+        try:
+            buf = io.BytesIO()
+            cropped_image.save(buf, format="JPEG", quality=95)
+            cropped_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception as e:
+            logger.warning("crop 图片 base64 编码失败: %s", e)
+            cropped_b64 = None
+    prediction["cropped_image_b64"] = cropped_b64
     return json.dumps(prediction, ensure_ascii=False), "application/json"

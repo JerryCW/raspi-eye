@@ -73,6 +73,14 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
   - 原因：tee 无法同时输出两种格式，caps 协商冲突导致 pipeline 崩溃重建
   - 建议：tee 前统一为一种格式（byte-stream），各分支按需转换
 
+- SHALL NOT 在 Lambda handler 中将 JSON 解析出的 float 直接写入 DynamoDB（来源：spec-30 部署验证）
+  - 原因：DynamoDB 不支持 Python float 类型，写入时报 `Float types are not supported. Use Decimal types instead`
+  - 建议：所有写入 DynamoDB 的数值必须先转为 `Decimal(str(round(value, 6)))`，包括嵌套在列表/字典中的数值
+
+- SHALL NOT 假设 S3 bucket 和 SageMaker endpoint 在同一 AWS region（来源：spec-30 部署验证）
+  - 原因：SageMaker CreateModel 要求 model.tar.gz 与 endpoint 在同一 region，跨 region 报 `Could not access model data`
+  - 建议：部署前验证 bucket region（`aws s3api get-bucket-location`），model.tar.gz 必须上传到 endpoint 所在 region 的 bucket
+
 ---
 
 ## Tasks 层

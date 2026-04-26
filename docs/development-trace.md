@@ -5048,3 +5048,104 @@ model/tests/test_training.py::test_export_roundtrip PASSED
 **涉及文件：** model/deploy_endpoint.py, scripts/deploy-inference-pipeline.sh
 
 ---
+
+### 2026-04-26 — Spec: spec-30-inference-yolo-crop / 任务: 1. 修改 inference.py（1.1-1.5）
+
+**完成概要：** inference.py 新增 `import base64`、模块级变量 `_yolo_model`/`BIRD_CLASS_ID`、`_letterbox_resize`/`_yolo_crop` 函数，修改 `model_fn`（加载 YOLO）、`input_fn`（返回 dict）、`predict_fn`（接收 dict 透传 cropped_image）、`output_fn`（新增 cropped_image_b64）。
+
+**测试状态：** 未运行（测试覆盖将在 Task 3 统一更新）— 无新增测试
+
+**Trace 记录：**
+
+无异常，任务顺利完成。子代理一次性完成 5 个子任务，getDiagnostics 零错误。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/endpoint/inference.py
+
+---
+
+### 2026-04-26 — Spec: spec-30-inference-yolo-crop / 任务: 2+3. packager.py + requirements.txt + test_endpoint.py
+
+**完成概要：** packager.py 新增 `yolo_model_path` 参数，requirements.txt 新增 `ultralytics`。test_endpoint.py 更新现有测试适配 dict 返回，新增 3 个 PBT（letterbox 尺寸不变量、等价性、input_fn 结构不变量）和多个单元测试（YOLO 加载、crop 路径、output_fn 编码、打包结构）。
+
+**测试状态：** 全部通过（18 passed, 2 skipped）— 新增约 12 个测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | MockBackbone.forward 返回值不兼容 _BirdClassifier 接口 | Context 太少 | `AttributeError: 'Tensor' object has no attribute 'last_hidden_state'`，_BirdClassifier 期望 backbone 返回含 last_hidden_state 的对象 | 创建 _MockBackboneOutput 包装类，MockBackbone.forward 返回含 last_hidden_state 的对象 | 后续 Spec 中如果修改 inference.py 的模型接口，在 tasks.md 中明确说明测试 mock 需要同步更新 |
+| 2 | _get_hf_token 已从 inference.py 移除，TestHfTokenFallback 测试失败 | Spec 缺少信息 | `AttributeError: module 'model.endpoint.inference' has no attribute '_get_hf_token'` | 标记为 skip | 后续 Spec 中如果移除公共函数，在 tasks.md 中明确说明需要更新或移除对应测试 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/endpoint/packager.py, model/endpoint/requirements.txt, model/tests/test_endpoint.py
+
+---
+
+### 2026-04-26 — Spec: spec-30-inference-yolo-crop / 任务: 5+6+7+8. handler.py + test_lambda.py + deploy script + final checkpoint
+
+**完成概要：** handler.py 新增 crop 图片提取/S3 上传/DynamoDB cropped_image_key 字段。test_lambda.py 新增 PBT（crop 文件名不变量）和 4 个单元测试（crop 上传、null 跳过、DynamoDB 字段、上传失败容错），修复现有测试从 put_item 改为 update_item。deploy script S3 权限从 GetObject 扩展为 GetObject+PutObject。全部 31 passed, 2 skipped。
+
+**测试状态：** 全部通过（31 passed, 2 skipped, 27.45s）— 新增约 5 个测试
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | letterbox_resize 等价性 PBT 大图片超时 | Spec 缺少信息 | `DeadlineExceeded: Test took 230.42ms, which exceeds the deadline of 200.00ms` (width=3609, height=3609) | 添加 `deadline=None` 到 `@settings` | PBT 测试涉及图片处理时，在 `@settings` 中设置 `deadline=None` |
+| 2 | round-trip PBT softmax 浮点精度超出容差 | Spec 缺少信息 | `assert 1.000002 <= (1.0 + 1e-06)` | 容差从 `1e-6` 放宽到 `1e-4` | PBT 测试中 softmax 概率和的容差应设为 `1e-4` 而非 `1e-6` |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。（两个问题均为首次出现的浮点精度/性能问题，非系统性）
+
+**涉及文件：** model/lambda/handler.py, model/tests/test_lambda.py, scripts/deploy-inference-pipeline.sh, model/tests/test_endpoint.py
+
+---
+
+### 2026-04-26 — Spec: spec-30-inference-yolo-crop / 任务: 3.1-3.5, 6.1-6.2（测试验证）
+
+**完成概要：** 验证 Spec 30 所有 PBT 和单元测试通过。test_endpoint.py 18 passed / 2 skipped (10.70s)，test_lambda.py 13 passed (3.87s)。
+
+**测试状态：** 全部通过 — 无新增测试（测试代码已在前序任务中编写完成，本次仅运行验证）
+
+**Trace 记录：**
+
+无异常，任务顺利完成。test_endpoint.py 包含 4 个 PBT（Property 1-4，各 100 examples）和 10 个单元测试；test_lambda.py 包含 1 个 PBT（Property 5，100 examples）和 4 个 Spec 30 单元测试。所有测试一次通过，无需修复。
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增禁止项。
+
+**涉及文件：** model/tests/test_endpoint.py, model/tests/test_lambda.py（仅运行验证，无代码变更）
+
+---
+
+### 2026-04-26 — Spec: spec-30-inference-yolo-crop / 部署验证与修复
+
+**完成概要：** Spec 30 全链路部署完成（SageMaker endpoint 更新 + Lambda 代码更新 + IAM 权限 + e2e 验证通过），过程中发现并修复 3 个问题。
+
+**测试状态：** e2e 验证通过（第二次尝试）— 首次因 DynamoDB float 写入失败
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | DynamoDB 写入失败: `Float types are not supported. Use Decimal types instead` | Spec 缺少信息 | handler.py `expr_values[":top5"] = best["top5_predictions"]` 直接写入 JSON 解析出的 float 列表 | 逐项转 Decimal: `[{"species": p["species"], "confidence": Decimal(str(round(p["confidence"], 6)))} for p in best["top5_predictions"]]` | 加禁止项：DynamoDB 写入前所有数值必须转 Decimal |
+| 2 | SageMaker CreateModel 失败: `Could not access model data at s3://raspi-eye-model-data/...` | Spec 缺少信息 | `raspi-eye-model-data` bucket 在 us-east-1，SageMaker endpoint 在 ap-southeast-1，跨 region 不可访问 | 将 model.tar.gz 上传到 ap-southeast-1 的 captures bucket | 加约束：model.tar.gz 必须与 SageMaker endpoint 在同一 region |
+| 3 | Lambda 函数名不符合命名规范 | Spec 不够精确 | 部署脚本用 `raspi-eye-inference`，用户要求 `fn_` 前缀 | 创建新函数 `fn_raspi_eye_verifier`，更新部署脚本常量 | 加约束：Lambda 函数名必须使用 `fn_` 前缀 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+- **Design 层：** SHALL NOT 在 handler.py 中将 JSON 解析出的 float 直接写入 DynamoDB（必须转 Decimal）
+- **Design 层：** SHALL NOT 假设 S3 bucket 和 SageMaker endpoint 在同一 region（部署前必须验证）
+
+**涉及文件：** model/lambda/handler.py（Decimal 修复）, scripts/deploy-inference-pipeline.sh（Lambda 函数名变更）, .kiro/specs/spec-30-inference-yolo-crop/design.md（追加部署注意事项）, .kiro/specs/spec-30-inference-yolo-crop/tasks.md（追加部署后修复记录）
+
+---

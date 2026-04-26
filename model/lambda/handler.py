@@ -5,6 +5,7 @@
 - TABLE_NAME: DynamoDB 表名
 """
 
+import base64
 import json
 import logging
 import os
@@ -163,10 +164,29 @@ def handler(event: dict, context) -> dict:
                 latency_ms = (time.time() - start) * 1000
                 result_body = json.loads(response["Body"].read())
 
+                # 提取并上传 crop 图片
+                cropped_b64 = result_body.get("cropped_image_b64")
+                cropped_s3_key = None
+                if cropped_b64:
+                    base_name = jpg_key.rsplit(".", 1)[0]
+                    cropped_s3_key = base_name + "_cropped.jpg"
+                    try:
+                        cropped_bytes = base64.b64decode(cropped_b64)
+                        s3_client.put_object(
+                            Bucket=bucket,
+                            Key=cropped_s3_key,
+                            Body=cropped_bytes,
+                            ContentType="image/jpeg",
+                        )
+                    except Exception as e:
+                        logger.warning("crop 图片上传失败 %s: %s", cropped_s3_key, e)
+                        cropped_s3_key = None
+
                 inference_results.append({
                     "image_key": jpg_key,
                     "predictions": result_body["predictions"],
                     "latency_ms": latency_ms,
+                    "cropped_s3_key": cropped_s3_key,
                 })
             except Exception as e:
                 logger.error("SageMaker 推理失败 %s: %s", jpg_key, e)
@@ -187,12 +207,23 @@ def handler(event: dict, context) -> dict:
                 "inference_image_key = :image_key",
                 "inference_top5 = :top5",
                 "inference_latency_ms = :latency_ms",
+                "inference_cropped_image_key = :cropped_key",
             ])
             expr_values[":species"] = best["species"]
             expr_values[":confidence"] = Decimal(str(round(best["confidence"], 6)))
             expr_values[":image_key"] = best["image_key"]
-            expr_values[":top5"] = best["top5_predictions"]
+            expr_values[":top5"] = [
+                {"species": p["species"], "confidence": Decimal(str(round(p["confidence"], 6)))}
+                for p in best["top5_predictions"]
+            ]
             expr_values[":latency_ms"] = Decimal(str(round(best["latency_ms"], 1)))
+            # 找到最佳预测对应的 cropped_s3_key
+            best_cropped_key = None
+            for r in inference_results:
+                if r["image_key"] == best["image_key"]:
+                    best_cropped_key = r.get("cropped_s3_key")
+                    break
+            expr_values[":cropped_key"] = best_cropped_key
 
         if errors:
             update_expr_parts.append("inference_error = :error")

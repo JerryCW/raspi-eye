@@ -22,6 +22,7 @@ def package_model(
     output_dir: str,
     s3_bucket: str | None = None,
     backbone_name: str = "dinov3-vitl16",
+    yolo_model_path: str | None = None,
 ) -> str:
     """打包 model.tar.gz 并可选上传到 S3。
 
@@ -31,6 +32,7 @@ def package_model(
         output_dir: 本地输出目录
         s3_bucket: 上传目标 bucket（None 则不上传）
         backbone_name: backbone 名称（决定 S3 路径）
+        yolo_model_path: YOLO 模型文件路径（本地或 S3 URI，None 则不打包）
 
     Returns:
         S3 URI（如果上传）或本地 tar.gz 路径
@@ -54,6 +56,10 @@ def package_model(
             tar.add(local_class_names_path, arcname="class_names.json")
             tar.add(inference_py, arcname="code/inference.py")
             tar.add(requirements_txt, arcname="code/requirements.txt")
+            # 打包 YOLO 模型（可选）
+            if yolo_model_path:
+                local_yolo_path = _resolve_path(yolo_model_path, staging_dir, "yolo11s.pt")
+                tar.add(local_yolo_path, arcname="yolo11s.pt")
 
     tar_size = os.path.getsize(tar_path)
     print(f"model.tar.gz 大小: {tar_size / 1024 / 1024:.1f} MB")

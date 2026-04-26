@@ -25,8 +25,8 @@ REGION="ap-southeast-1"
 ACCOUNT_ID="014498626607"
 S3_CAPTURES_BUCKET="raspi-eye-captures-${ACCOUNT_ID}-${REGION}-an"
 DYNAMODB_TABLE="raspi-eye-events"
-LAMBDA_FUNCTION="raspi-eye-inference"
-LAMBDA_ROLE_NAME="raspi-eye-inference-lambda-role"
+LAMBDA_FUNCTION="fn_raspi_eye_verifier"
+LAMBDA_ROLE_NAME="fn_raspi_eye_verifier-role"
 LAMBDA_RUNTIME="python3.12"
 LAMBDA_MEMORY=256
 LAMBDA_TIMEOUT=120
@@ -182,7 +182,7 @@ _put_lambda_policy() {
             "Statement": [
                 {
                     "Effect": "Allow",
-                    "Action": "s3:GetObject",
+                    "Action": ["s3:GetObject", "s3:PutObject"],
                     "Resource": "arn:aws:s3:::'"${S3_CAPTURES_BUCKET}"'/*"
                 },
                 {

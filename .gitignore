@@ -80,3 +80,8 @@ model/data/
 model/output/
 model/models/
 !model/models/.gitkeep
+
+# YOLO model weights (downloaded, not tracked)
+yolo11s.pt
+yolo11s.torchscript
+*.torchscript
