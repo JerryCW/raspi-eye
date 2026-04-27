@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import time
+from collections import Counter
 from decimal import Decimal
 
 import boto3
@@ -19,6 +20,7 @@ logger.setLevel(logging.INFO)
 
 ENDPOINT_NAME = os.environ.get("ENDPOINT_NAME", "raspi-eye-bird-classifier")
 TABLE_NAME = os.environ.get("TABLE_NAME", "raspi-eye-events")
+CONFIDENCE_THRESHOLD = 0.5
 
 s3_client = boto3.client("s3")
 sm_runtime = boto3.client("sagemaker-runtime")
@@ -64,30 +66,95 @@ def build_snapshot_keys(event_key: str, snapshots: list[str]) -> list[str]:
     return [prefix + fname for fname in snapshots]
 
 
-def select_best_prediction(results: list[dict]) -> dict:
-    """从多张图片的推理结果中选取最高置信度预测。
-
-    Args:
-        results: 推理结果列表，每项包含:
-            - image_key: S3 图片 key
-            - predictions: top-5 预测列表 [{"species": str, "confidence": float}, ...]
-            - latency_ms: 推理耗时（毫秒）
-
-    Returns:
-        最高置信度预测，包含 species、confidence、image_key、top5_predictions、latency_ms
-    """
-    best = None
+def _max_confidence_for_species(results: list[dict], species: str) -> float:
+    """返回指定 species 在 results 所有预测中的最高 confidence。"""
+    max_conf = 0.0
     for result in results:
         for pred in result["predictions"]:
-            if best is None or pred["confidence"] > best["confidence"]:
-                best = {
-                    "species": pred["species"],
-                    "confidence": pred["confidence"],
-                    "image_key": result["image_key"],
-                    "top5_predictions": result["predictions"],
-                    "latency_ms": result["latency_ms"],
-                }
-    return best
+            if pred["species"] == species and pred["confidence"] > max_conf:
+                max_conf = pred["confidence"]
+    return max_conf
+
+
+def _find_best_result_for_species(results: list[dict], species: str) -> dict:
+    """找到给出指定 species 最高 confidence 的那张图片的 result。"""
+    best_result = None
+    best_conf = -1.0
+    for result in results:
+        for pred in result["predictions"]:
+            if pred["species"] == species and pred["confidence"] > best_conf:
+                best_conf = pred["confidence"]
+                best_result = result
+    return best_result
+
+
+def select_best_prediction(results: list[dict]) -> dict:
+    """从多张图片的推理结果中选取最佳预测（多数投票 + 回退）。
+
+    投票逻辑：
+    1. 每张图片取 top-1（confidence 最高）预测的 species 作为投票
+    2. 统计每个 species 的票数，选最高票数的 species
+    3. 平票时选全局最高 confidence 的 species 打破平票
+    4. 票数不足 2 时回退到全局最高 confidence
+
+    Args:
+        results: 推理结果列表（仅包含 has_bird=True 的图片），每项包含:
+            - image_key: S3 图片 key
+            - predictions: top-5 预测列表
+            - latency_ms: 推理耗时
+
+    Returns:
+        最佳预测 dict，包含:
+            species, confidence, image_key, top5_predictions, latency_ms, vote_count
+    """
+    # Step 1: 每张图片取 top-1 species
+    votes = []
+    for result in results:
+        top1 = max(result["predictions"], key=lambda p: p["confidence"])
+        votes.append(top1["species"])
+
+    # Step 2: 统计票数
+    vote_counts = Counter(votes)
+    max_count = max(vote_counts.values())
+
+    # Step 3: 判断是否启用投票
+    if max_count >= 2:
+        # 投票生效：取最高票数的 species
+        candidates = [sp for sp, cnt in vote_counts.items() if cnt == max_count]
+        if len(candidates) == 1:
+            winner = candidates[0]
+        else:
+            # 平票：每个 candidate 取其在 results 所有预测中的最高 confidence，选最大的
+            winner = max(candidates, key=lambda sp: _max_confidence_for_species(results, sp))
+
+        best_confidence = _max_confidence_for_species(results, winner)
+        vote_count = vote_counts[winner]
+
+        # 从给出最高 confidence 的那张图片取 image_key、top5_predictions、latency_ms
+        best_result = _find_best_result_for_species(results, winner)
+        return {
+            "species": winner,
+            "confidence": best_confidence,
+            "image_key": best_result["image_key"],
+            "top5_predictions": best_result["predictions"],
+            "latency_ms": best_result["latency_ms"],
+            "vote_count": vote_count,
+        }
+    else:
+        # 回退：全局最高 confidence
+        best = None
+        for result in results:
+            for pred in result["predictions"]:
+                if best is None or pred["confidence"] > best["confidence"]:
+                    best = {
+                        "species": pred["species"],
+                        "confidence": pred["confidence"],
+                        "image_key": result["image_key"],
+                        "top5_predictions": result["predictions"],
+                        "latency_ms": result["latency_ms"],
+                        "vote_count": 1,
+                    }
+        return best
 
 
 def handler(event: dict, context) -> dict:
@@ -182,18 +249,21 @@ def handler(event: dict, context) -> dict:
                         logger.warning("crop 图片上传失败 %s: %s", cropped_s3_key, e)
                         cropped_s3_key = None
 
+                has_bird = cropped_b64 is not None
                 inference_results.append({
                     "image_key": jpg_key,
                     "predictions": result_body["predictions"],
                     "latency_ms": latency_ms,
                     "cropped_s3_key": cropped_s3_key,
+                    "has_bird": has_bird,
                 })
             except Exception as e:
                 logger.error("SageMaker 推理失败 %s: %s", jpg_key, e)
                 errors.append(f"{jpg_key}: {e}")
 
-        # 选取最佳预测
-        best = select_best_prediction(inference_results) if inference_results else None
+        # 投票前过滤：仅 has_bird=True 的图片参与投票
+        votable_results = [r for r in inference_results if r.get("has_bird", False)]
+        best = select_best_prediction(votable_results) if votable_results else None
 
         # 用 update_item 把推理结果写回已有的事件记录
         # raspi-eye-events 表 PK: device_id (HASH) + start_time (RANGE)
@@ -201,6 +271,17 @@ def handler(event: dict, context) -> dict:
         expr_values = {}
 
         if best:
+            species = best["species"]
+            confidence = best["confidence"]
+            vote_count = best["vote_count"]
+
+            # 置信度门槛判断
+            if confidence >= CONFIDENCE_THRESHOLD:
+                reliable = True
+            else:
+                species = "uncertain"
+                reliable = False
+
             update_expr_parts.extend([
                 "inference_species = :species",
                 "inference_confidence = :confidence",
@@ -208,9 +289,11 @@ def handler(event: dict, context) -> dict:
                 "inference_top5 = :top5",
                 "inference_latency_ms = :latency_ms",
                 "inference_cropped_image_key = :cropped_key",
+                "inference_reliable = :reliable",
+                "inference_vote_count = :vote_count",
             ])
-            expr_values[":species"] = best["species"]
-            expr_values[":confidence"] = Decimal(str(round(best["confidence"], 6)))
+            expr_values[":species"] = species
+            expr_values[":confidence"] = Decimal(str(round(confidence, 6)))
             expr_values[":image_key"] = best["image_key"]
             expr_values[":top5"] = [
                 {"species": p["species"], "confidence": Decimal(str(round(p["confidence"], 6)))}
@@ -224,6 +307,22 @@ def handler(event: dict, context) -> dict:
                     best_cropped_key = r.get("cropped_s3_key")
                     break
             expr_values[":cropped_key"] = best_cropped_key
+            expr_values[":reliable"] = reliable
+            expr_values[":vote_count"] = Decimal(str(vote_count))
+        elif inference_results:
+            # 所有图片云端 YOLO 均未检测到鸟
+            update_expr_parts.extend([
+                "inference_species = :species",
+                "inference_confidence = :confidence",
+                "inference_image_key = :image_key",
+                "inference_reliable = :reliable",
+                "inference_vote_count = :vote_count",
+            ])
+            expr_values[":species"] = "no_bird_detected"
+            expr_values[":confidence"] = Decimal("0")
+            expr_values[":image_key"] = "N/A"
+            expr_values[":reliable"] = False
+            expr_values[":vote_count"] = Decimal("0")
 
         if errors:
             update_expr_parts.append("inference_error = :error")

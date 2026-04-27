@@ -5,18 +5,23 @@
 # 部署顺序：
 # 1. SageMaker Endpoint（调用 deploy_endpoint.py）
 # 2. Lambda IAM 角色（aws iam create-role + put-role-policy）
-# 3. Lambda 函数（zip handler.py → aws lambda create-function）
+# 3. Lambda 函数（zip handler.py → aws lambda create-function / update-function-code）
 # 4. S3 事件通知（aws lambda add-permission + s3api put-bucket-notification-configuration）
 #
-# 注意：DynamoDB 使用已有的 raspi-eye-events 表（由设备端创建），
-# Lambda 通过 update_item 写回推理结果，不创建新表。
+# 跨 region 模型部署：
+#   训练产物在 us-east-1 的 raspi-eye-model-data bucket
+#   endpoint 在 ap-southeast-1，model.tar.gz 必须上传到同 region 的 captures bucket
+#   使用 --deploy-bucket 指定上传目标 bucket（与 endpoint 同 region）
 #
 # 支持参数：
-# --skip-endpoint  跳过 SageMaker endpoint 部署
-# --delete         逆序删除所有资源
-# --e2e-test       端到端验证
-# --role           SageMaker 执行角色 ARN（部署时必需）
-# --s3-bucket      S3 bucket 名称（默认 raspi-eye-model-data）
+#   --skip-endpoint       跳过 SageMaker endpoint 部署
+#   --delete              逆序删除所有资源
+#   --e2e-test            端到端验证
+#   --role ARN            SageMaker 执行角色 ARN（部署时必需）
+#   --s3-bucket NAME      训练产物 bucket（默认 raspi-eye-model-data，us-east-1）
+#   --deploy-bucket NAME  model.tar.gz 上传目标 bucket（必须与 endpoint 同 region）
+#   --yolo-model-path PATH  YOLO 模型本地路径（如 ./yolo11x.pt）
+#   --update-lambda       更新已有 Lambda 函数代码
 
 set -euo pipefail
 
@@ -40,6 +45,10 @@ DELETE_MODE=false
 E2E_TEST=false
 ROLE_ARN=""
 S3_BUCKET="raspi-eye-model-data"
+DEPLOY_BUCKET=""
+YOLO_MODEL_PATH=""
+UPDATE_LAMBDA=false
+BACKBONE="dinov3-vitl16-lora"
 
 # ─── 颜色输出 ───────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -58,44 +67,31 @@ usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --skip-endpoint   跳过 SageMaker endpoint 部署"
-    echo "  --delete          按逆序删除所有资源"
-    echo "  --e2e-test        端到端验证"
-    echo "  --role ARN        SageMaker 执行角色 ARN（部署时必需）"
-    echo "  --s3-bucket NAME  S3 bucket 名称（默认 raspi-eye-model-data）"
-    echo "  -h, --help        显示帮助信息"
+    echo "  --skip-endpoint       跳过 SageMaker endpoint 部署"
+    echo "  --delete              按逆序删除所有资源"
+    echo "  --e2e-test            端到端验证"
+    echo "  --role ARN            SageMaker 执行角色 ARN（部署时必需）"
+    echo "  --s3-bucket NAME      训练产物 bucket（默认 raspi-eye-model-data，us-east-1）"
+    echo "  --deploy-bucket NAME  model.tar.gz 上传目标 bucket（必须与 endpoint 同 region）"
+    echo "  --yolo-model-path PATH  YOLO 模型本地路径（如 ./yolo11x.pt）"
+    echo "  --update-lambda       更新已有 Lambda 函数代码（而非创建新函数）"
+    echo "  -h, --help            显示帮助信息"
     exit 1
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --skip-endpoint)
-            SKIP_ENDPOINT=true
-            shift
-            ;;
-        --delete)
-            DELETE_MODE=true
-            shift
-            ;;
-        --e2e-test)
-            E2E_TEST=true
-            shift
-            ;;
-        --role)
-            ROLE_ARN="$2"
-            shift 2
-            ;;
-        --s3-bucket)
-            S3_BUCKET="$2"
-            shift 2
-            ;;
-        -h|--help)
-            usage
-            ;;
-        *)
-            error "未知参数: $1"
-            usage
-            ;;
+        --skip-endpoint)  SKIP_ENDPOINT=true; shift ;;
+        --delete)         DELETE_MODE=true; shift ;;
+        --e2e-test)       E2E_TEST=true; shift ;;
+        --role)           ROLE_ARN="$2"; shift 2 ;;
+        --s3-bucket)      S3_BUCKET="$2"; shift 2 ;;
+        --deploy-bucket)  DEPLOY_BUCKET="$2"; shift 2 ;;
+        --yolo-model-path) YOLO_MODEL_PATH="$2"; shift 2 ;;
+        --update-lambda)  UPDATE_LAMBDA=true; shift ;;
+        --backbone)       BACKBONE="$2"; shift 2 ;;
+        -h|--help)        usage ;;
+        *)                error "未知参数: $1"; usage ;;
     esac
 done
 
@@ -125,12 +121,26 @@ deploy_endpoint() {
     fi
 
     source "${PROJECT_ROOT}/.venv-raspi-eye/bin/activate"
-    python "${PROJECT_ROOT}/model/deploy_endpoint.py" \
-        --role "${ROLE_ARN}" \
-        --s3-bucket "${S3_BUCKET}" \
-        --region "${REGION}" \
-        --endpoint-name "${ENDPOINT_NAME}" \
+
+    local deploy_args=(
+        --role "${ROLE_ARN}"
+        --s3-bucket "${S3_BUCKET}"
+        --backbone "${BACKBONE}"
+        --region "${REGION}"
+        --endpoint-name "${ENDPOINT_NAME}"
         --wait
+    )
+
+    # 跨 region 部署：训练产物在 us-east-1，endpoint 在 ap-southeast-1
+    if [[ -n "${DEPLOY_BUCKET}" ]]; then
+        deploy_args+=(--deploy-bucket "${DEPLOY_BUCKET}")
+    fi
+
+    if [[ -n "${YOLO_MODEL_PATH}" ]]; then
+        deploy_args+=(--yolo-model-path "${YOLO_MODEL_PATH}")
+    fi
+
+    python "${PROJECT_ROOT}/model/deploy_endpoint.py" "${deploy_args[@]}"
 
     info "SageMaker Endpoint 部署完成: ${ENDPOINT_NAME}"
 }
@@ -144,12 +154,10 @@ deploy_lambda_role() {
         --role-name "${LAMBDA_ROLE_NAME}" \
         --output text > /dev/null 2>&1; then
         warn "IAM 角色已存在: ${LAMBDA_ROLE_NAME}，跳过创建"
-        # 更新内联策略（确保权限最新）
         _put_lambda_policy
         return 0
     fi
 
-    # 创建角色（信任策略允许 Lambda 服务承担）
     aws iam create-role \
         --role-name "${LAMBDA_ROLE_NAME}" \
         --assume-role-policy-document '{
@@ -163,10 +171,8 @@ deploy_lambda_role() {
         --region "${REGION}" \
         --output text > /dev/null
 
-    # 附加内联策略
     _put_lambda_policy
 
-    # 等待角色传播（IAM 最终一致性）
     info "等待 IAM 角色传播（10 秒）..."
     sleep 10
 
@@ -209,21 +215,39 @@ _put_lambda_policy() {
 
 # ─── Step 3: Lambda 函数 ────────────────────────────────────────────────────────
 deploy_lambda() {
-    step "3/4 创建 Lambda 函数..."
+    step "3/4 创建/更新 Lambda 函数..."
+
+    local tmp_zip="/tmp/lambda-deploy-$$.zip"
+    rm -f "${tmp_zip}"
+    (cd "${PROJECT_ROOT}/model/lambda" && zip -j "${tmp_zip}" handler.py > /dev/null)
 
     # 检查函数是否已存在
     if aws lambda get-function \
         --function-name "${LAMBDA_FUNCTION}" \
         --region "${REGION}" \
         --output text > /dev/null 2>&1; then
-        warn "Lambda 函数已存在: ${LAMBDA_FUNCTION}，跳过创建"
+
+        if [[ "${UPDATE_LAMBDA}" == "true" ]]; then
+            info "更新 Lambda 函数代码: ${LAMBDA_FUNCTION}"
+            aws lambda update-function-code \
+                --function-name "${LAMBDA_FUNCTION}" \
+                --zip-file "fileb://${tmp_zip}" \
+                --region "${REGION}" \
+                --output text > /dev/null
+
+            aws lambda wait function-updated-v2 \
+                --function-name "${LAMBDA_FUNCTION}" \
+                --region "${REGION}"
+
+            rm -f "${tmp_zip}"
+            info "Lambda 函数代码更新完成: ${LAMBDA_FUNCTION}"
+            return 0
+        fi
+
+        warn "Lambda 函数已存在: ${LAMBDA_FUNCTION}，跳过创建（使用 --update-lambda 更新代码）"
+        rm -f "${tmp_zip}"
         return 0
     fi
-
-    # 打包 handler.py 为 zip
-    local tmp_zip="/tmp/lambda-deploy-$$.zip"
-    rm -f "${tmp_zip}"
-    (cd "${PROJECT_ROOT}/model/lambda" && zip -j "${tmp_zip}" handler.py > /dev/null)
 
     aws lambda create-function \
         --function-name "${LAMBDA_FUNCTION}" \
@@ -239,7 +263,6 @@ deploy_lambda() {
 
     rm -f "${tmp_zip}"
 
-    # 等待函数变为 Active
     aws lambda wait function-active-v2 \
         --function-name "${LAMBDA_FUNCTION}" \
         --region "${REGION}"
@@ -251,8 +274,6 @@ deploy_lambda() {
 deploy_s3_notification() {
     step "4/4 配置 S3 事件通知..."
 
-    # 添加 Lambda resource-based policy（允许 S3 调用）
-    # 先尝试移除旧的 permission（忽略错误）
     aws lambda remove-permission \
         --function-name "${LAMBDA_FUNCTION}" \
         --statement-id "s3-invoke-${LAMBDA_FUNCTION}" \
@@ -269,7 +290,6 @@ deploy_s3_notification() {
         --region "${REGION}" \
         --output text > /dev/null
 
-    # 配置 S3 事件通知
     aws s3api put-bucket-notification-configuration \
         --bucket "${S3_CAPTURES_BUCKET}" \
         --notification-configuration '{
@@ -296,60 +316,46 @@ deploy_s3_notification() {
 
 delete_s3_notification() {
     step "1/4 移除 S3 事件通知..."
-
-    # 清空通知配置
     aws s3api put-bucket-notification-configuration \
         --bucket "${S3_CAPTURES_BUCKET}" \
         --notification-configuration '{}' \
         --region "${REGION}" 2>/dev/null || true
-
-    # 移除 Lambda permission
     aws lambda remove-permission \
         --function-name "${LAMBDA_FUNCTION}" \
         --statement-id "s3-invoke-${LAMBDA_FUNCTION}" \
         --region "${REGION}" \
         --output text > /dev/null 2>&1 || true
-
     info "S3 事件通知已移除"
 }
 
 delete_lambda() {
     step "2/4 删除 Lambda 函数..."
-
     aws lambda delete-function \
         --function-name "${LAMBDA_FUNCTION}" \
         --region "${REGION}" \
         --output text > /dev/null 2>&1 || true
-
     info "Lambda 函数已删除: ${LAMBDA_FUNCTION}"
 }
 
 delete_lambda_role() {
     step "3/4 删除 Lambda IAM 角色..."
-
-    # 先删除内联策略
     aws iam delete-role-policy \
         --role-name "${LAMBDA_ROLE_NAME}" \
         --policy-name "raspi-eye-inference-lambda-policy" \
         --output text > /dev/null 2>&1 || true
-
-    # 再删除角色
     aws iam delete-role \
         --role-name "${LAMBDA_ROLE_NAME}" \
         --output text > /dev/null 2>&1 || true
-
     info "Lambda IAM 角色已删除: ${LAMBDA_ROLE_NAME}"
 }
 
 delete_endpoint() {
     step "4/4 删除 SageMaker Endpoint..."
-
     source "${PROJECT_ROOT}/.venv-raspi-eye/bin/activate"
     python "${PROJECT_ROOT}/model/deploy_endpoint.py" \
         --endpoint-name "${ENDPOINT_NAME}" \
         --region "${REGION}" \
         --delete 2>/dev/null || true
-
     info "SageMaker Endpoint 已删除: ${ENDPOINT_NAME}"
 }
 
@@ -365,58 +371,53 @@ run_e2e_test() {
     local test_event_id="e2e_test_${test_timestamp}"
     local test_device_id="e2e-test-device"
     local test_prefix="${test_device_id}/$(date +%Y-%m-%d)/${test_event_id}"
-    local test_jpg_name="test_${test_timestamp}.jpg"
 
-    # 生成一个最小的合法 JPEG 测试图片（1x1 像素红色）
-    local tmp_jpg
-    tmp_jpg=$(mktemp /tmp/test-XXXXXX.jpg)
-    # 最小合法 JPEG: 1x1 红色像素
-    printf '\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00' > "${tmp_jpg}"
-    printf '\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t' >> "${tmp_jpg}"
-    printf '\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a' >> "${tmp_jpg}"
-    printf '\x1f\x1e\x1d\x1a\x1c\x1c $.\x27 ",#\x1c\x1c(7),01444\x1f\x27444' >> "${tmp_jpg}"
+    # 使用真实鸟照片（3 张，验证投票逻辑）
+    local samples_dir="${PROJECT_ROOT}/model/samples"
+    local snap_files=("bird-sample3.jpg" "bird-sample4.jpg" "bird-sample5.jpg")
 
-    # 使用 Python 生成合法测试 JPEG（更可靠）
-    source "${PROJECT_ROOT}/.venv-raspi-eye/bin/activate"
-    python -c "
-from PIL import Image
-import io, sys
-img = Image.new('RGB', (224, 224), color=(255, 0, 0))
-img.save(sys.argv[1], 'JPEG')
-" "${tmp_jpg}"
+    for f in "${snap_files[@]}"; do
+        if [[ ! -f "${samples_dir}/${f}" ]]; then
+            error "样本图片不存在: ${samples_dir}/${f}"
+            exit 1
+        fi
+    done
+
+    # 上传 3 张图片
+    for f in "${snap_files[@]}"; do
+        info "上传: s3://${S3_CAPTURES_BUCKET}/${test_prefix}/${f}"
+        aws s3 cp "${samples_dir}/${f}" "s3://${S3_CAPTURES_BUCKET}/${test_prefix}/${f}" \
+            --region "${REGION}" --quiet
+    done
 
     # 构造 event.json
     local tmp_event
     tmp_event=$(mktemp /tmp/event-XXXXXX.json)
     local test_start_time_val
     test_start_time_val=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    source "${PROJECT_ROOT}/.venv-raspi-eye/bin/activate"
     python -c "
 import json, sys
 event = {
     'event_id': sys.argv[1],
     'device_id': sys.argv[2],
-    'start_time': sys.argv[4],
-    'end_time': sys.argv[4],
-    'frame_count': 1,
-    'detections_summary': {'bird': {'count': 1, 'max_confidence': 0.95}},
-    'snapshots': [sys.argv[3]]
+    'start_time': sys.argv[3],
+    'end_time': sys.argv[3],
+    'frame_count': 3,
+    'detections_summary': {'bird': {'count': 3, 'max_confidence': 0.95}},
+    'snapshots': ['bird-sample3.jpg', 'bird-sample4.jpg', 'bird-sample5.jpg']
 }
-with open(sys.argv[5], 'w') as f:
+with open(sys.argv[4], 'w') as f:
     json.dump(event, f)
-" "${test_event_id}" "${test_device_id}" "${test_jpg_name}" "${test_start_time_val}" "${tmp_event}"
+" "${test_event_id}" "${test_device_id}" "${test_start_time_val}" "${tmp_event}"
 
-    info "上传测试图片: s3://${S3_CAPTURES_BUCKET}/${test_prefix}/${test_jpg_name}"
-    aws s3 cp "${tmp_jpg}" "s3://${S3_CAPTURES_BUCKET}/${test_prefix}/${test_jpg_name}" \
-        --region "${REGION}" --quiet
-
-    info "上传测试 event.json: s3://${S3_CAPTURES_BUCKET}/${test_prefix}/event.json"
+    info "上传 event.json: s3://${S3_CAPTURES_BUCKET}/${test_prefix}/event.json"
     aws s3 cp "${tmp_event}" "s3://${S3_CAPTURES_BUCKET}/${test_prefix}/event.json" \
         --region "${REGION}" --quiet
 
-    rm -f "${tmp_jpg}" "${tmp_event}"
+    rm -f "${tmp_event}"
 
-    # 轮询 DynamoDB（最多 180 秒）
-    # raspi-eye-events 表 PK: device_id (HASH) + start_time (RANGE)
     info "等待 DynamoDB 记录（最多 180 秒，含 SageMaker 冷启动）..."
     local elapsed=0
     local poll_interval=10
@@ -435,7 +436,6 @@ with open(sys.argv[5], 'w') as f:
 import sys, json
 d = json.load(sys.stdin)
 item = d.get('Item', {})
-# 检查推理结果字段是否已写入
 sys.exit(0 if 'inference_species' in item or 'inference_error' in item else 1)
 " 2>/dev/null; then
             found=true
@@ -451,7 +451,6 @@ sys.exit(0 if 'inference_species' in item or 'inference_error' in item else 1)
     if [[ "${found}" == "true" ]]; then
         info "端到端验证通过！DynamoDB 推理结果已写入。"
 
-        # 打印推理结果（字段带 inference_ 前缀）
         aws dynamodb get-item \
             --table-name "${DYNAMODB_TABLE}" \
             --key "{\"device_id\": {\"S\": \"${test_device_id}\"}, \"start_time\": {\"S\": \"${test_start_time_val}\"}}" \
@@ -464,6 +463,8 @@ print('  device_id:', item.get('device_id', {}).get('S', 'N/A'))
 print('  start_time:', item.get('start_time', {}).get('S', 'N/A'))
 print('  inference_species:', item.get('inference_species', {}).get('S', 'N/A'))
 print('  inference_confidence:', item.get('inference_confidence', {}).get('N', 'N/A'))
+print('  inference_reliable:', item.get('inference_reliable', {}).get('BOOL', 'N/A'))
+print('  inference_vote_count:', item.get('inference_vote_count', {}).get('N', 'N/A'))
 print('  inference_latency_ms:', item.get('inference_latency_ms', {}).get('N', 'N/A'))
 print('  inference_error:', item.get('inference_error', {}).get('S', 'None'))
 "
@@ -475,20 +476,14 @@ print('  inference_error:', item.get('inference_error', {}).get('S', 'None'))
         echo ""
     fi
 
-    # 清理测试数据
     info "清理测试数据..."
     aws s3 rm "s3://${S3_CAPTURES_BUCKET}/${test_prefix}/" \
         --recursive --region "${REGION}" --quiet 2>/dev/null || true
-    # raspi-eye-events 表 PK: device_id + start_time
-    # 注意：e2e 测试写入的是 Lambda 通过 update_item 追加的字段，
-    # 不删除整条记录（因为记录可能不是 e2e 测试创建的）
-    # 如果需要清理，使用 delete-item
     aws dynamodb delete-item \
         --table-name "${DYNAMODB_TABLE}" \
         --key "{\"device_id\": {\"S\": \"${test_device_id}\"}, \"start_time\": {\"S\": \"${test_start_time_val}\"}}" \
         --region "${REGION}" \
         --output text > /dev/null 2>&1 || true
-
     info "测试数据已清理"
 
     if [[ "${found}" != "true" ]]; then

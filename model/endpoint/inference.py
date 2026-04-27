@@ -59,7 +59,7 @@ def _letterbox_resize(image: Image.Image, target_size: int) -> Image.Image:
     return canvas
 
 
-def _yolo_crop(image: Image.Image, yolo_model, conf_threshold: float = 0.3, padding: float = 0.2) -> Image.Image | None:
+def _yolo_crop(image: Image.Image, yolo_model, conf_threshold: float = 0.4, padding: float = 0.2) -> Image.Image | None:
     """YOLO 鸟体裁切。返回 letterbox resize 后的 PIL Image，未检测到鸟体时返回 None。"""
     results = yolo_model(image, verbose=False)
     bird_boxes = [
@@ -154,16 +154,18 @@ def model_fn(model_dir: str) -> dict:
     logger.info("模型加载完成: backbone=%s, num_classes=%d, input_size=%d",
                 backbone_name, num_classes, input_size)
 
-    # 加载 YOLO 模型（可选）
+    # 加载 YOLO 模型：优先 yolo11x.pt，回退 yolo11s.pt
     global _yolo_model
-    yolo_path = os.path.join(model_dir, "yolo11s.pt")
+    yolo_path = os.path.join(model_dir, "yolo11x.pt")
+    if not os.path.exists(yolo_path):
+        yolo_path = os.path.join(model_dir, "yolo11s.pt")
     if os.path.exists(yolo_path):
         from ultralytics import YOLO
         _yolo_model = YOLO(yolo_path)
         logger.info("YOLO 模型加载完成: %s", yolo_path)
     else:
         _yolo_model = None
-        logger.warning("未找到 YOLO 模型: %s，将使用原始预处理流程", yolo_path)
+        logger.warning("未找到 YOLO 模型，将使用原始预处理流程")
 
     return {
         "model": model,

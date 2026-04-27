@@ -95,23 +95,54 @@ _inference_result = st.fixed_dictionaries({
 
 
 class TestSelectBestPredictionInvariant:
-    """**Validates: Requirements 6.5, 12.6**"""
+    """**Validates: Requirements 1.1, 1.5, 5.2, 5.4**
+
+    Spec 31 更新：拆分为投票路径和回退路径两个断言。
+    """
 
     @settings(max_examples=100)
     @given(results=st.lists(_inference_result, min_size=1, max_size=10))
     def test_select_best_prediction_invariant(self, results):
-        """选出的 confidence 恒等于所有图片所有预测中的最大值。"""
+        """投票路径：vote_count >= 2 + species 票数最高；回退路径：confidence == 全局最大值 + vote_count == 1。"""
+        from collections import Counter
+
         best = select_best_prediction(results)
-
-        # 计算全局最大 confidence
-        global_max = max(
-            pred["confidence"]
-            for result in results
-            for pred in result["predictions"]
-        )
-
         assert best is not None
-        assert best["confidence"] == global_max
+        assert "vote_count" in best
+
+        # 计算每张图片的 top-1 species 投票
+        votes = []
+        for result in results:
+            top1 = max(result["predictions"], key=lambda p: p["confidence"])
+            votes.append(top1["species"])
+        vote_counts = Counter(votes)
+        max_count = max(vote_counts.values())
+
+        if max_count >= 2:
+            # 投票路径
+            assert best["vote_count"] >= 2
+            # 胜出 species 的票数 >= 所有其他 species 的票数
+            winner_count = vote_counts[best["species"]]
+            assert winner_count == best["vote_count"]
+            for sp, cnt in vote_counts.items():
+                assert winner_count >= cnt
+            # confidence 是该 species 在所有预测中的最高 confidence
+            max_conf_for_winner = max(
+                pred["confidence"]
+                for result in results
+                for pred in result["predictions"]
+                if pred["species"] == best["species"]
+            )
+            assert best["confidence"] == max_conf_for_winner
+        else:
+            # 回退路径
+            assert best["vote_count"] == 1
+            global_max = max(
+                pred["confidence"]
+                for result in results
+                for pred in result["predictions"]
+            )
+            assert best["confidence"] == global_max
 
 
 # ── Task 4.4: 单元测试 — Lambda 事件处理 + mock AWS 服务 ─────────────────────
@@ -476,7 +507,11 @@ class TestCropNullSkip:
     """crop 为 null 跳过测试。**Validates: Requirements 9.2**"""
 
     def test_no_put_object_when_cropped_image_null(self):
-        """endpoint 响应 cropped_image_b64 为 null → 不调用 s3_client.put_object。"""
+        """endpoint 响应 cropped_image_b64 为 null → 不调用 s3_client.put_object。
+
+        Spec 31 更新：所有图片 cropped_image_b64=null 时走 no_bird_detected 路径，
+        不再包含 :cropped_key 字段。
+        """
         sm_response_no_crop = {
             **SAMPLE_SM_RESPONSE,
             "cropped_image_b64": None,
@@ -495,11 +530,11 @@ class TestCropNullSkip:
             # cropped_image_b64 为 null → 不应调用 put_object
             mock_s3.put_object.assert_not_called()
 
-            # DynamoDB 仍然写入，inference_cropped_image_key 为 None
+            # DynamoDB 仍然写入（Spec 31: no_bird_detected 路径）
             mock_table.update_item.assert_called_once()
             call_kwargs = mock_table.update_item.call_args.kwargs
             expr_values = call_kwargs["ExpressionAttributeValues"]
-            assert expr_values[":cropped_key"] is None
+            assert expr_values[":species"] == "no_bird_detected"
 
 
 class TestDynamoDBCroppedImageKey:
@@ -565,3 +600,434 @@ class TestCropUploadFailureTolerance:
             update_expr = call_kwargs["UpdateExpression"]
             assert "inference_species" in update_expr
             assert "inference_confidence" in update_expr
+
+
+# ── Spec 31 Task 6.2: Property 1 — 投票胜出不变量 (PBT) ─────────────────────
+
+
+class TestVotingWinnerInvariant:
+    """Feature: inference-voting-threshold, Property 1: 投票胜出不变量
+
+    **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 5.2, 5.3**
+    """
+
+    @settings(max_examples=100)
+    @given(results=st.lists(_inference_result, min_size=2, max_size=10))
+    def test_voting_winner_invariant(self, results):
+        """当存在 species 票数 >= 2 时，投票胜出不变量成立。"""
+        from collections import Counter
+        from hypothesis import assume
+
+        # 计算每张图片的 top-1 species 投票
+        votes = []
+        for result in results:
+            top1 = max(result["predictions"], key=lambda p: p["confidence"])
+            votes.append(top1["species"])
+        vote_counts = Counter(votes)
+        max_count = max(vote_counts.values())
+
+        # 仅测试投票生效的情况
+        assume(max_count >= 2)
+
+        best = select_best_prediction(results)
+        assert best is not None
+
+        # 1. 返回的 species 票数 >= 所有其他 species 票数
+        winner_count = vote_counts[best["species"]]
+        for sp, cnt in vote_counts.items():
+            assert winner_count >= cnt
+
+        # 2. confidence 等于该 species 在所有预测中的最高 confidence
+        max_conf_for_winner = max(
+            pred["confidence"]
+            for result in results
+            for pred in result["predictions"]
+            if pred["species"] == best["species"]
+        )
+        assert best["confidence"] == max_conf_for_winner
+
+        # 3. vote_count 等于实际票数
+        assert best["vote_count"] == winner_count
+
+
+# ── Spec 31 Task 6.3: Property 2 — 回退不变量 (PBT) ─────────────────────────
+
+
+class TestFallbackInvariant:
+    """Feature: inference-voting-threshold, Property 2: 回退不变量
+
+    **Validates: Requirements 1.5, 1.6, 3.3, 5.4**
+    """
+
+    @settings(max_examples=100)
+    @given(results=st.lists(_inference_result, min_size=1, max_size=10))
+    def test_fallback_invariant(self, results):
+        """当无 species 票数 >= 2 时，回退不变量成立。"""
+        from collections import Counter
+        from hypothesis import assume
+
+        # 计算每张图片的 top-1 species 投票
+        votes = []
+        for result in results:
+            top1 = max(result["predictions"], key=lambda p: p["confidence"])
+            votes.append(top1["species"])
+        vote_counts = Counter(votes)
+        max_count = max(vote_counts.values())
+
+        # 仅测试回退的情况
+        assume(max_count < 2)
+
+        best = select_best_prediction(results)
+        assert best is not None
+
+        # 1. confidence 等于全局最高 confidence
+        global_max = max(
+            pred["confidence"]
+            for result in results
+            for pred in result["predictions"]
+        )
+        assert best["confidence"] == global_max
+
+        # 2. species 等于全局最高 confidence 对应的 species
+        global_best_pred = max(
+            (pred for result in results for pred in result["predictions"]),
+            key=lambda p: p["confidence"],
+        )
+        assert best["species"] == global_best_pred["species"]
+
+        # 3. vote_count == 1
+        assert best["vote_count"] == 1
+
+
+# ── Spec 31 Task 6.4: 单元测试 — 投票场景（12 个测试） ───────────────────────
+
+
+class TestVotingScenarios:
+    """Spec 31 投票逻辑单元测试。
+
+    **Validates: Requirements 1.1, 1.2, 1.3, 1.5, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.3, 5.5, 7.1, 7.2**
+    """
+
+    # ── 1. 投票场景 — 3 张图片中 2 张 top-1 为同一 species ──
+
+    def test_voting_two_out_of_three(self):
+        """3 张图片中 2 张 top-1 为 Passer montanus → 返回该 species，vote_count=2。"""
+        results = [
+            {
+                "image_key": "dev/001.jpg",
+                "predictions": [
+                    {"species": "Passer montanus", "confidence": 0.85},
+                    {"species": "Pycnonotus sinensis", "confidence": 0.10},
+                ],
+                "latency_ms": 100.0,
+            },
+            {
+                "image_key": "dev/002.jpg",
+                "predictions": [
+                    {"species": "Passer montanus", "confidence": 0.90},
+                    {"species": "Zosterops japonicus", "confidence": 0.05},
+                ],
+                "latency_ms": 110.0,
+            },
+            {
+                "image_key": "dev/003.jpg",
+                "predictions": [
+                    {"species": "Zosterops japonicus", "confidence": 0.80},
+                    {"species": "Passer montanus", "confidence": 0.15},
+                ],
+                "latency_ms": 120.0,
+            },
+        ]
+        best = select_best_prediction(results)
+        assert best["species"] == "Passer montanus"
+        assert best["vote_count"] == 2
+        assert best["confidence"] == 0.90  # 该 species 在所有预测中的最高 confidence
+
+    # ── 2. 平票场景 — 2 个 species 各 2 票 ──
+
+    def test_voting_tie_break_by_confidence(self):
+        """4 张图片，A 和 B 各 2 票 → 选全局最高 confidence 的 species。"""
+        results = [
+            {
+                "image_key": "dev/001.jpg",
+                "predictions": [
+                    {"species": "Species_A", "confidence": 0.70},
+                ],
+                "latency_ms": 100.0,
+            },
+            {
+                "image_key": "dev/002.jpg",
+                "predictions": [
+                    {"species": "Species_A", "confidence": 0.75},
+                ],
+                "latency_ms": 110.0,
+            },
+            {
+                "image_key": "dev/003.jpg",
+                "predictions": [
+                    {"species": "Species_B", "confidence": 0.95},
+                ],
+                "latency_ms": 120.0,
+            },
+            {
+                "image_key": "dev/004.jpg",
+                "predictions": [
+                    {"species": "Species_B", "confidence": 0.60},
+                ],
+                "latency_ms": 130.0,
+            },
+        ]
+        best = select_best_prediction(results)
+        # Species_B 的最高 confidence 0.95 > Species_A 的 0.75 → 选 Species_B
+        assert best["species"] == "Species_B"
+        assert best["vote_count"] == 2
+        assert best["confidence"] == 0.95
+
+    # ── 3. 回退场景 — 3 张图片 top-1 各不同 ──
+
+    def test_fallback_all_different_species(self):
+        """3 张图片 top-1 各不同 → 回退到全局最高 confidence，vote_count=1。"""
+        results = [
+            {
+                "image_key": "dev/001.jpg",
+                "predictions": [
+                    {"species": "Species_A", "confidence": 0.60},
+                ],
+                "latency_ms": 100.0,
+            },
+            {
+                "image_key": "dev/002.jpg",
+                "predictions": [
+                    {"species": "Species_B", "confidence": 0.88},
+                ],
+                "latency_ms": 110.0,
+            },
+            {
+                "image_key": "dev/003.jpg",
+                "predictions": [
+                    {"species": "Species_C", "confidence": 0.72},
+                ],
+                "latency_ms": 120.0,
+            },
+        ]
+        best = select_best_prediction(results)
+        assert best["species"] == "Species_B"
+        assert best["confidence"] == 0.88
+        assert best["vote_count"] == 1
+
+    # ── 4. 单图场景 — 仅 1 张图片 ──
+
+    def test_single_image_fallback(self):
+        """仅 1 张图片 → 回退逻辑，vote_count=1。"""
+        results = [
+            {
+                "image_key": "dev/001.jpg",
+                "predictions": [
+                    {"species": "Passer montanus", "confidence": 0.92},
+                    {"species": "Pycnonotus sinensis", "confidence": 0.05},
+                ],
+                "latency_ms": 100.0,
+            },
+        ]
+        best = select_best_prediction(results)
+        assert best["species"] == "Passer montanus"
+        assert best["confidence"] == 0.92
+        assert best["vote_count"] == 1
+
+    # ── 5. 置信度门槛 — confidence >= 0.5 ──
+
+    def test_threshold_above_reliable_true(self):
+        """confidence >= 0.5 → DynamoDB 写入 species 不变，reliable=true。"""
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+            _setup_sm_response(mock_sm)  # SAMPLE_SM_RESPONSE confidence=0.92
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            expr_values = call_kwargs["ExpressionAttributeValues"]
+            assert expr_values[":species"] == "Passer montanus"
+            assert expr_values[":reliable"] is True
+
+    # ── 6. 置信度门槛 — confidence < 0.5 ──
+
+    def test_threshold_below_uncertain(self):
+        """confidence < 0.5 → DynamoDB 写入 'uncertain'，reliable=false。"""
+        low_conf_response = {
+            "predictions": [
+                {"species": "Passer montanus", "confidence": 0.35},
+                {"species": "Pycnonotus sinensis", "confidence": 0.10},
+            ],
+            "model_metadata": {"backbone": "dinov3-vitl16", "num_classes": 46},
+            "cropped_image_b64": _make_cropped_image_b64(),
+        }
+
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+            _setup_sm_response(mock_sm, low_conf_response)
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            expr_values = call_kwargs["ExpressionAttributeValues"]
+            assert expr_values[":species"] == "uncertain"
+            assert expr_values[":reliable"] is False
+
+    # ── 7. DynamoDB 字段完整性 ──
+
+    def test_dynamodb_update_expression_has_new_fields(self):
+        """验证 UpdateExpression 包含 inference_reliable 和 inference_vote_count。"""
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+            _setup_sm_response(mock_sm)
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            update_expr = call_kwargs["UpdateExpression"]
+            assert "inference_reliable" in update_expr
+            assert "inference_vote_count" in update_expr
+
+    # ── 8. DynamoDB 类型正确性 ──
+
+    def test_dynamodb_field_types(self):
+        """验证 :reliable 为 bool，:vote_count 为 Decimal。"""
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+            _setup_sm_response(mock_sm)
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            expr_values = call_kwargs["ExpressionAttributeValues"]
+            assert isinstance(expr_values[":reliable"], bool)
+            assert isinstance(expr_values[":vote_count"], Decimal)
+
+    # ── 9. 向后兼容 — 推理失败 ──
+
+    def test_backward_compat_inference_error(self):
+        """SageMaker 调用失败 → inference_error 写入逻辑不变。"""
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+            mock_sm.invoke_endpoint.side_effect = Exception("Endpoint timeout")
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            update_expr = call_kwargs["UpdateExpression"]
+            assert "inference_error" in update_expr
+            expr_values = call_kwargs["ExpressionAttributeValues"]
+            assert "Endpoint timeout" in expr_values[":error"]
+
+    # ── 10. 向后兼容 — 现有字段保留 ──
+
+    def test_backward_compat_existing_fields_preserved(self):
+        """验证所有 Spec 17/30 定义的字段仍存在。"""
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+            _setup_sm_response(mock_sm)
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            update_expr = call_kwargs["UpdateExpression"]
+            # Spec 17 字段
+            assert "inference_species" in update_expr
+            assert "inference_confidence" in update_expr
+            assert "inference_image_key" in update_expr
+            assert "inference_top5" in update_expr
+            assert "inference_latency_ms" in update_expr
+            # Spec 30 字段
+            assert "inference_cropped_image_key" in update_expr
+            # Spec 31 新增字段
+            assert "inference_reliable" in update_expr
+            assert "inference_vote_count" in update_expr
+
+    # ── 11. has_bird 过滤 — 部分图片无鸟 ──
+
+    def test_has_bird_filter_partial(self):
+        """部分图片无鸟（cropped_image_b64=null）→ 仅 has_bird=True 的图片参与投票。"""
+        # 第一张图片有鸟，第二张无鸟
+        sm_responses = [
+            SAMPLE_SM_RESPONSE,  # has_bird=True (cropped_image_b64 非 null)
+            {**SAMPLE_SM_RESPONSE, "cropped_image_b64": None},  # has_bird=False
+        ]
+        call_idx = {"i": 0}
+
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+
+            def sm_invoke_side_effect(**kwargs):
+                idx = call_idx["i"]
+                call_idx["i"] += 1
+                resp = sm_responses[idx] if idx < len(sm_responses) else SAMPLE_SM_RESPONSE
+                return {"Body": _make_body_stream(json.dumps(resp).encode())}
+
+            mock_sm.invoke_endpoint.side_effect = sm_invoke_side_effect
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            # DynamoDB 仍然写入
+            mock_table.update_item.assert_called_once()
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            expr_values = call_kwargs["ExpressionAttributeValues"]
+            # 仅 1 张有鸟的图片参与投票 → 回退逻辑，vote_count=1
+            assert expr_values[":vote_count"] == Decimal("1")
+            # species 应为有鸟图片的 top-1
+            assert expr_values[":species"] == "Passer montanus"
+
+    # ── 12. no_bird_detected — 所有图片无鸟 ──
+
+    def test_no_bird_detected_all_images(self):
+        """所有图片无鸟 → DynamoDB 写入 no_bird_detected、reliable=false、vote_count=0。"""
+        no_bird_response = {
+            **SAMPLE_SM_RESPONSE,
+            "cropped_image_b64": None,
+        }
+
+        with _patch_handler_attr("table") as mock_table, \
+             _patch_handler_attr("sm_runtime") as mock_sm, \
+             _patch_handler_attr("s3_client") as mock_s3:
+
+            handler = _handler_module.handler
+            _setup_s3_get(mock_s3)
+            _setup_sm_response(mock_sm, no_bird_response)
+
+            handler(SAMPLE_S3_EVENT, None)
+
+            mock_table.update_item.assert_called_once()
+            call_kwargs = mock_table.update_item.call_args.kwargs
+            expr_values = call_kwargs["ExpressionAttributeValues"]
+            assert expr_values[":species"] == "no_bird_detected"
+            assert expr_values[":reliable"] is False
+            assert expr_values[":vote_count"] == Decimal("0")
+            assert expr_values[":confidence"] == Decimal("0")
+            assert expr_values[":image_key"] == "N/A"

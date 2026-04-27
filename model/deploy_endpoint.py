@@ -378,7 +378,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--s3-bucket", default="raspi-eye-model-data",
-        help="S3 bucket 名称 (默认: raspi-eye-model-data)",
+        help="训练产物所在的 S3 bucket（us-east-1，默认: raspi-eye-model-data）",
+    )
+    parser.add_argument(
+        "--deploy-bucket", default=None,
+        help="model.tar.gz 上传目标 bucket（必须与 endpoint 同 region）。"
+             "不指定时使用 --s3-bucket",
+    )
+    parser.add_argument(
+        "--yolo-model-path", default=None,
+        help="YOLO 模型本地路径（如 ./yolo11x.pt），打包进 model.tar.gz",
     )
     parser.add_argument(
         "--role", required="--delete" not in sys.argv and "--test" not in sys.argv,
@@ -459,14 +468,16 @@ def main() -> None:
         test_endpoint(sm_runtime, args.endpoint_name, samples_dir)
         return
 
-    # 模型数据 S3 URI
-    model_data_url = f"s3://{args.s3_bucket}/endpoint/{args.backbone}/model.tar.gz"
+    # 模型数据 S3 URI — 目标 bucket（与 endpoint 同 region）
+    deploy_bucket = args.deploy_bucket or args.s3_bucket
+    model_data_url = f"s3://{deploy_bucket}/endpoint/{args.backbone}/model.tar.gz"
 
     # 打包并上传 model.tar.gz
     if not args.skip_package:
         # 延迟导入，避免在 --delete/--test 模式下依赖 packager
         from endpoint.packager import package_model
 
+        # 训练产物从源 bucket（可能在不同 region）下载
         model_s3_path = (
             f"s3://{args.s3_bucket}/training/models/{args.backbone}/bird_classifier.pt"
         )
@@ -476,12 +487,15 @@ def main() -> None:
         output_dir = os.path.join(os.path.dirname(__file__), "output")
 
         print(f"打包模型: backbone={args.backbone}")
+        print(f"  训练产物源: s3://{args.s3_bucket}/training/models/{args.backbone}/")
+        print(f"  上传目标:   s3://{deploy_bucket}/endpoint/{args.backbone}/")
         model_data_url = package_model(
             model_path=model_s3_path,
             class_names_path=class_names_s3_path,
             output_dir=output_dir,
-            s3_bucket=args.s3_bucket,
+            s3_bucket=deploy_bucket,
             backbone_name=args.backbone,
+            yolo_model_path=args.yolo_model_path,
         )
 
     # --update 模式

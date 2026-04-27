@@ -58,8 +58,9 @@ def package_model(
             tar.add(requirements_txt, arcname="code/requirements.txt")
             # 打包 YOLO 模型（可选）
             if yolo_model_path:
-                local_yolo_path = _resolve_path(yolo_model_path, staging_dir, "yolo11s.pt")
-                tar.add(local_yolo_path, arcname="yolo11s.pt")
+                yolo_filename = os.path.basename(yolo_model_path)
+                local_yolo_path = _resolve_path(yolo_model_path, staging_dir, yolo_filename)
+                tar.add(local_yolo_path, arcname=yolo_filename)
 
     tar_size = os.path.getsize(tar_path)
     print(f"model.tar.gz 大小: {tar_size / 1024 / 1024:.1f} MB")
@@ -78,15 +79,31 @@ def package_model(
 
 
 def _resolve_path(path: str, staging_dir: str, filename: str) -> str:
-    """解析路径：如果是 S3 URI 则下载到临时目录，否则返回本地路径。"""
+    """解析路径：如果是 S3 URI 则下载到临时目录，否则返回本地路径。
+
+    自动检测 bucket 所在 region，避免跨 region 403 错误。
+    """
     if path.startswith("s3://"):
         local_path = os.path.join(staging_dir, filename)
         bucket, key = _parse_s3_uri(path)
-        s3_client = boto3.client("s3")
-        print(f"从 S3 下载: {path} -> {local_path}")
+        # 检测 bucket region，用对应 region 的 client 下载
+        region = _get_bucket_region(bucket)
+        s3_client = boto3.client("s3", region_name=region)
+        print(f"从 S3 下载: {path} -> {local_path} (region={region})")
         s3_client.download_file(bucket, key, local_path)
         return local_path
     return path
+
+
+def _get_bucket_region(bucket: str) -> str:
+    """获取 S3 bucket 所在 region。"""
+    s3_client = boto3.client("s3")
+    try:
+        resp = s3_client.get_bucket_location(Bucket=bucket)
+        # us-east-1 返回 None
+        return resp["LocationConstraint"] or "us-east-1"
+    except Exception:
+        return "us-east-1"
 
 
 def _parse_s3_uri(uri: str) -> tuple[str, str]:

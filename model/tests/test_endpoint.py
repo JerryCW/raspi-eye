@@ -715,3 +715,186 @@ class TestPackageModelWithYolo:
         assert (extract_dir / "bird_classifier.pt").exists()
         assert (extract_dir / "class_names.json").exists()
         assert (extract_dir / "code" / "inference.py").exists()
+
+
+# ── Spec 31 Task 3.1: 单元测试 — model_fn YOLO 回退加载 ─────────────────────
+
+
+class TestModelFnYoloFallbackLoading:
+    """Spec 31 单元测试：model_fn YOLO 回退加载逻辑（Requirements 6.1, 6.4）。
+
+    验证优先级：yolo11x.pt > yolo11s.pt > None
+    """
+
+    def test_model_fn_loads_yolo11s_when_no_yolo11x(self, mock_model_dir):
+        """model_dir 中无 yolo11x.pt 但有 yolo11s.pt → 加载 yolo11s.pt。"""
+        import model.endpoint.inference as inf_module
+
+        # 创建 yolo11s.pt（不需要真实权重）
+        yolo_s_path = os.path.join(mock_model_dir, "yolo11s.pt")
+        with open(yolo_s_path, "wb") as f:
+            f.write(b"fake_yolo11s_weights")
+
+        mock_yolo_instance = MagicMock()
+        mock_yolo_cls = MagicMock(return_value=mock_yolo_instance)
+
+        with patch.object(inf_module, "_create_backbone_offline", return_value=MockBackbone(MOCK_FEATURE_DIM)):
+            with patch.dict("sys.modules", {"ultralytics": MagicMock(YOLO=mock_yolo_cls)}):
+                result = inf_module.model_fn(mock_model_dir)
+
+        # 验证 YOLO 构造函数被调用，参数为 yolo11s.pt 路径
+        mock_yolo_cls.assert_called_once_with(yolo_s_path)
+        # 验证返回的 yolo_model 非 None
+        assert result["yolo_model"] is mock_yolo_instance
+
+    def test_model_fn_loads_yolo11x_when_both_exist(self, mock_model_dir):
+        """model_dir 中同时有 yolo11x.pt 和 yolo11s.pt → 优先加载 yolo11x.pt。"""
+        import model.endpoint.inference as inf_module
+
+        # 创建两个 YOLO 文件
+        yolo_x_path = os.path.join(mock_model_dir, "yolo11x.pt")
+        yolo_s_path = os.path.join(mock_model_dir, "yolo11s.pt")
+        with open(yolo_x_path, "wb") as f:
+            f.write(b"fake_yolo11x_weights")
+        with open(yolo_s_path, "wb") as f:
+            f.write(b"fake_yolo11s_weights")
+
+        mock_yolo_instance = MagicMock()
+        mock_yolo_cls = MagicMock(return_value=mock_yolo_instance)
+
+        with patch.object(inf_module, "_create_backbone_offline", return_value=MockBackbone(MOCK_FEATURE_DIM)):
+            with patch.dict("sys.modules", {"ultralytics": MagicMock(YOLO=mock_yolo_cls)}):
+                result = inf_module.model_fn(mock_model_dir)
+
+        # 验证 YOLO 构造函数被调用，参数为 yolo11x.pt 路径（优先级）
+        mock_yolo_cls.assert_called_once_with(yolo_x_path)
+        assert result["yolo_model"] is mock_yolo_instance
+
+    def test_model_fn_yolo_none_when_both_missing(self, mock_model_dir):
+        """model_dir 中两者都没有 → _yolo_model = None（确认不回归）。"""
+        import model.endpoint.inference as inf_module
+
+        # mock_model_dir 默认不含 YOLO 文件
+        with patch.object(inf_module, "_create_backbone_offline", return_value=MockBackbone(MOCK_FEATURE_DIM)):
+            result = inf_module.model_fn(mock_model_dir)
+
+        assert result["yolo_model"] is None
+
+
+# ── Spec 31 Task 3.2: 单元测试 — _yolo_crop 阈值测试 ────────────────────────
+
+
+class TestYoloCropThreshold:
+    """Spec 31 单元测试：_yolo_crop conf_threshold 默认值为 0.4（Requirements 6.2）。"""
+
+    def test_yolo_crop_default_conf_threshold_is_0_4(self):
+        """使用 inspect.signature 检查 _yolo_crop 的 conf_threshold 默认值。"""
+        import inspect
+
+        from model.endpoint.inference import _yolo_crop
+
+        sig = inspect.signature(_yolo_crop)
+        default = sig.parameters["conf_threshold"].default
+        assert default == 0.4, f"conf_threshold 默认值应为 0.4，实际为 {default}"
+
+    def test_yolo_crop_filters_below_threshold(self):
+        """conf=0.35 的检测结果被过滤掉（因为 0.35 < 0.4 默认阈值）。"""
+        from model.endpoint.inference import _yolo_crop
+
+        # 创建 mock YOLO 模型，返回 conf=0.35 的鸟检测
+        mock_model = _create_mock_yolo_model(detect_bird=True, conf=0.35, bbox=(50, 50, 200, 200))
+        image = Image.new("RGB", (300, 300), color=(100, 150, 200))
+
+        # 使用默认 conf_threshold=0.4，conf=0.35 应被过滤
+        result = _yolo_crop(image, mock_model)
+        assert result is None, "conf=0.35 应被默认阈值 0.4 过滤掉"
+
+    def test_yolo_crop_accepts_above_threshold(self):
+        """conf=0.45 的检测结果通过阈值过滤（0.45 >= 0.4）。"""
+        from model.endpoint.inference import _yolo_crop
+
+        mock_model = _create_mock_yolo_model(detect_bird=True, conf=0.45, bbox=(50, 50, 200, 200))
+        image = Image.new("RGB", (300, 300), color=(100, 150, 200))
+
+        result = _yolo_crop(image, mock_model)
+        assert result is not None, "conf=0.45 应通过默认阈值 0.4"
+        assert isinstance(result, Image.Image)
+
+
+# ── Spec 31 Task 3.3: 单元测试 — packager 动态 arcname 测试 ──────────────────
+
+
+class TestPackagerDynamicArcname:
+    """Spec 31 单元测试：packager.py 动态 arcname 逻辑（Requirements 6.3）。"""
+
+    def test_package_model_yolo11x_arcname(self, tmp_path):
+        """传入 yolo11x.pt 路径 → tar.gz 中 arcname 为 yolo11x.pt。"""
+        from model.endpoint.packager import package_model
+
+        # 创建临时模型文件
+        model_file = tmp_path / "test_model.pt"
+        torch.save({"dummy": "data"}, str(model_file))
+
+        class_names_file = tmp_path / "class_names.json"
+        class_names_file.write_text(json.dumps(MOCK_CLASS_NAMES))
+
+        # 创建 yolo11x.pt
+        yolo_file = tmp_path / "yolo11x.pt"
+        yolo_file.write_bytes(b"fake_yolo11x_weights")
+
+        output_dir = tmp_path / "output"
+
+        result_path = package_model(
+            model_path=str(model_file),
+            class_names_path=str(class_names_file),
+            output_dir=str(output_dir),
+            s3_bucket=None,
+            backbone_name="mock-backbone",
+            yolo_model_path=str(yolo_file),
+        )
+
+        # 解压并验证
+        extract_dir = tmp_path / "extracted"
+        with tarfile.open(result_path, "r:gz") as tar:
+            names = tar.getnames()
+            tar.extractall(path=str(extract_dir))
+
+        # 验证 arcname 为 yolo11x.pt（不是 yolo11s.pt）
+        assert "yolo11x.pt" in names, f"tar.gz 中应包含 yolo11x.pt，实际: {names}"
+        assert "yolo11s.pt" not in names, f"tar.gz 中不应包含 yolo11s.pt，实际: {names}"
+        assert (extract_dir / "yolo11x.pt").exists()
+
+    def test_package_model_yolo11s_arcname_backward_compat(self, tmp_path):
+        """传入 yolo11s.pt 路径 → tar.gz 中 arcname 为 yolo11s.pt（向后兼容）。"""
+        from model.endpoint.packager import package_model
+
+        model_file = tmp_path / "test_model.pt"
+        torch.save({"dummy": "data"}, str(model_file))
+
+        class_names_file = tmp_path / "class_names.json"
+        class_names_file.write_text(json.dumps(MOCK_CLASS_NAMES))
+
+        # 创建 yolo11s.pt
+        yolo_file = tmp_path / "yolo11s.pt"
+        yolo_file.write_bytes(b"fake_yolo11s_weights")
+
+        output_dir = tmp_path / "output"
+
+        result_path = package_model(
+            model_path=str(model_file),
+            class_names_path=str(class_names_file),
+            output_dir=str(output_dir),
+            s3_bucket=None,
+            backbone_name="mock-backbone",
+            yolo_model_path=str(yolo_file),
+        )
+
+        extract_dir = tmp_path / "extracted"
+        with tarfile.open(result_path, "r:gz") as tar:
+            names = tar.getnames()
+            tar.extractall(path=str(extract_dir))
+
+        # 验证 arcname 为 yolo11s.pt（向后兼容）
+        assert "yolo11s.pt" in names, f"tar.gz 中应包含 yolo11s.pt，实际: {names}"
+        assert "yolo11x.pt" not in names
+        assert (extract_dir / "yolo11s.pt").exists()
