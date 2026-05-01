@@ -55,12 +55,14 @@ aws_region = "<your-aws-region>"
 # type: test (macOS dev), v4l2 (USB camera), libcamera (CSI camera)
 # device: device path, only used with v4l2 (e.g. /dev/video0, /dev/IMX678)
 # width/height/framerate: capture resolution and framerate (parse/store only, pipeline use in future)
+# rotation: video rotation in degrees, valid values: 0 (default), 90, 180, 270
 [camera]
 # type = "v4l2"
 # device = "/dev/video0"
 # width = 1280
 # height = 720
 # framerate = 15
+# rotation = 0
 
 # Adaptive bitrate + stream mode configuration (optional, defaults shown)
 # bitrate_min_kbps: minimum bitrate in kbps (default: 1000)

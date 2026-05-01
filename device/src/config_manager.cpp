@@ -73,6 +73,16 @@ bool parse_camera_config(
         config.framerate = std::stoi(*val);
     }
 
+    // rotation field: 0, 90, 180, 270
+    if (auto* val = find_value(kv, "rotation")) {
+        int rot = std::stoi(*val);
+        if (rot != 0 && rot != 90 && rot != 180 && rot != 270) {
+            if (error_msg) *error_msg = "Invalid rotation (must be 0/90/180/270): " + *val;
+            return false;
+        }
+        config.rotation = rot;
+    }
+
     return true;
 }
 

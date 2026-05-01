@@ -11,6 +11,7 @@
 #include <gst/app/gstappsink.h>
 #include <spdlog/spdlog.h>
 #include <array>
+#include <string>
 #include <vector>
 
 namespace {
@@ -155,6 +156,19 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     GstElement* convert   = need_convert
                             ? gst_element_factory_make("videoconvert", "convert")
                             : nullptr;
+    // videoflip: rotate video when config.rotation != 0 (values: 90/180/270)
+    bool need_flip = (config.rotation == 90 || config.rotation == 180 || config.rotation == 270);
+    GstElement* flip = need_flip
+                       ? gst_element_factory_make("videoflip", "videoflip")
+                       : nullptr;
+    if (need_flip && flip) {
+        // GstVideoFlipMethod: 0=none, 1=CW 90, 2=180, 3=CCW 90 (= CW 270)
+        int method = 0;
+        if (config.rotation == 90) method = 1;
+        else if (config.rotation == 180) method = 2;
+        else if (config.rotation == 270) method = 3;
+        g_object_set(G_OBJECT(flip), "method", method, nullptr);
+    }
     GstElement* capsfilter= gst_element_factory_make("capsfilter",    "capsfilter");
     GstElement* raw_tee   = gst_element_factory_make("tee",           "raw-tee");
 
@@ -202,6 +216,9 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     all.push_back(src);        names.push_back("src");
     if (need_convert) {
         all.push_back(convert);    names.push_back("videoconvert");
+    }
+    if (need_flip) {
+        all.push_back(flip);       names.push_back("videoflip");
     }
     all.push_back(capsfilter); names.push_back("capsfilter");
     all.push_back(raw_tee);    names.push_back("raw-tee");
@@ -287,39 +304,36 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
     }
 
     // 7. Add all elements to the pipeline bin
-    if (need_convert) {
-        gst_bin_add_many(GST_BIN(pipeline),
-            src, convert, capsfilter, raw_tee,
-            q_ai, ai_sink,
-            q_enc, encoder, parser, bs_caps, enc_tee,
-            q_kvs, kvs_parser, avc_caps, kvs_sink,
-            q_web, web_sink,
-            nullptr);
-    } else {
-        gst_bin_add_many(GST_BIN(pipeline),
-            src, capsfilter, raw_tee,
-            q_ai, ai_sink,
-            q_enc, encoder, parser, bs_caps, enc_tee,
-            q_kvs, kvs_parser, avc_caps, kvs_sink,
-            q_web, web_sink,
-            nullptr);
+    //    Use the previously-built `all` vector for consistency (includes conditional
+    //    videoconvert and videoflip). gst_bin_add ownership transfers to the bin.
+    for (GstElement* e : all) {
+        gst_bin_add(GST_BIN(pipeline), e);
     }
+    // Remaining appsink/fakesink/queue elements that weren't in `all` are already
+    // added via the loop since `all` contains the complete list.
 
     // --- From this point, pipeline owns all elements.
     // --- On failure, only gst_object_unref(pipeline) is needed.
 
-    // 8. Link trunk: conditionally skip videoconvert
-    if (need_convert) {
-        if (!gst_element_link_many(src, convert, capsfilter, raw_tee, nullptr)) {
-            if (error_msg) *error_msg = "Failed to link trunk (src -> convert -> capsfilter -> raw-tee)";
-            gst_object_unref(pipeline);
-            return nullptr;
-        }
-    } else {
-        if (!gst_element_link_many(src, capsfilter, raw_tee, nullptr)) {
-            if (error_msg) *error_msg = "Failed to link trunk (src -> capsfilter -> raw-tee)";
-            gst_object_unref(pipeline);
-            return nullptr;
+    // 8. Link trunk: src -> [convert?] -> [flip?] -> capsfilter -> raw_tee
+    //    Build the chain dynamically based on which optional elements are present.
+    {
+        std::vector<GstElement*> trunk;
+        trunk.push_back(src);
+        if (need_convert) trunk.push_back(convert);
+        if (need_flip)    trunk.push_back(flip);
+        trunk.push_back(capsfilter);
+        trunk.push_back(raw_tee);
+
+        for (size_t i = 0; i + 1 < trunk.size(); ++i) {
+            if (!gst_element_link(trunk[i], trunk[i + 1])) {
+                if (error_msg) {
+                    *error_msg = "Failed to link trunk element ";
+                    *error_msg += std::to_string(i);
+                }
+                gst_object_unref(pipeline);
+                return nullptr;
+            }
         }
     }
 
@@ -371,7 +385,12 @@ GstElement* PipelineBuilder::build_tee_pipeline(std::string* error_msg,
             else if (src_format == CameraSource::SourceOutputFormat::UNKNOWN) fmt_name = "UNKNOWN";
             pl->info("Using videoconvert: source format={}", fmt_name);
         }
-        int elem_count = need_convert ? 17 : 16;
+        int elem_count = 16;
+        if (need_convert) elem_count++;
+        if (need_flip) {
+            elem_count++;
+            pl->info("Applying video rotation: {} degrees", config.rotation);
+        }
         pl->info("Dual-tee pipeline built successfully ({} elements)", elem_count);
     }
 

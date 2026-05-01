@@ -57,6 +57,30 @@ TEST(ConfigExampleTest, ParseCameraConfig_InvalidType) {
     EXPECT_NE(err.find("Invalid camera type"), std::string::npos);
 }
 
+// 3b. ParseCameraConfig_ValidRotation
+//     rotation=90/180/270 are parsed correctly; default is 0
+TEST(ConfigExampleTest, ParseCameraConfig_ValidRotation) {
+    for (int angle : {0, 90, 180, 270}) {
+        std::unordered_map<std::string, std::string> kv = {
+            {"rotation", std::to_string(angle)}
+        };
+        CameraSource::CameraConfig config;
+        std::string err;
+        EXPECT_TRUE(parse_camera_config(kv, config, &err)) << "angle=" << angle;
+        EXPECT_EQ(config.rotation, angle);
+    }
+}
+
+// 3c. ParseCameraConfig_InvalidRotation
+//     rotation=45 -> returns false, error_msg contains "Invalid rotation"
+TEST(ConfigExampleTest, ParseCameraConfig_InvalidRotation) {
+    std::unordered_map<std::string, std::string> kv = {{"rotation", "45"}};
+    CameraSource::CameraConfig config;
+    std::string err;
+    EXPECT_FALSE(parse_camera_config(kv, config, &err));
+    EXPECT_NE(err.find("Invalid rotation"), std::string::npos);
+}
+
 // 4. ParseStreamingConfig_EmptyMap_Defaults
 //    Empty kv map -> returns true, all fields at defaults
 TEST(ConfigExampleTest, ParseStreamingConfig_EmptyMap_Defaults) {

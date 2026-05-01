@@ -35,6 +35,7 @@ struct CameraConfig {
     int width = 1280;       // Resolution width (parse/store only, pipeline use in future spec)
     int height = 720;       // Resolution height
     int framerate = 15;     // Capture framerate
+    int rotation = 0;       // Video rotation in degrees: 0 (default), 90, 180, 270
 };
 
 // Source Bin 输出格式标记，用于 PipelineBuilder 决定是否跳过 videoconvert
