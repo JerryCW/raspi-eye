@@ -12,6 +12,7 @@ import os
 import time
 from collections import Counter
 from decimal import Decimal
+from pathlib import Path
 
 import boto3
 
@@ -27,6 +28,18 @@ sm_runtime = boto3.client("sagemaker-runtime")
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 
+# 学名 → 中文名映射（从 species_cn.json 加载）
+_SPECIES_CN_MAP: dict[str, str] = {}
+_species_cn_path = Path(__file__).parent / "species_cn.json"
+if _species_cn_path.exists():
+    with open(_species_cn_path, "r", encoding="utf-8") as f:
+        _SPECIES_CN_MAP = json.load(f)
+
+
+def _get_species_cn(scientific_name: str) -> str | None:
+    """根据英文学名查找中文名，找不到返回 None。"""
+    return _SPECIES_CN_MAP.get(scientific_name)
+
 
 def parse_event_json(event_data: dict) -> dict:
     """解析 event.json，提取必需字段。
@@ -35,7 +48,8 @@ def parse_event_json(event_data: dict) -> dict:
         event_data: event.json 解析后的字典
 
     Returns:
-        包含 event_id、device_id、start_time、detections_summary、snapshots 的字典
+        包含 event_id、device_id、start_time、end_time、frame_count、
+        kvs_stream_name、kvs_region、detections_summary、snapshots 的字典
 
     Raises:
         KeyError: 缺少必需字段
@@ -44,9 +58,51 @@ def parse_event_json(event_data: dict) -> dict:
         "event_id": event_data["event_id"],
         "device_id": event_data["device_id"],
         "start_time": event_data["start_time"],
+        "end_time": event_data.get("end_time"),
+        "frame_count": event_data.get("frame_count", 0),
+        "kvs_stream_name": event_data.get("kvs_stream_name"),
+        "kvs_region": event_data.get("kvs_region"),
         "detections_summary": event_data.get("detections_summary", {}),
         "snapshots": event_data.get("snapshots", []),
     }
+
+
+def _extract_yolo_top(detections_summary: dict) -> tuple[str, float]:
+    """从 detections_summary 中提取设备端 YOLO 检测次数最多的类别及其最高置信度。
+
+    Returns:
+        (top_class, top_confidence)，无检测时返回 ("unknown", 0.0)
+    """
+    if not detections_summary:
+        return "unknown", 0.0
+    top_class = max(detections_summary, key=lambda c: detections_summary[c].get("count", 0))
+    top_conf = detections_summary[top_class].get("max_confidence", 0.0)
+    return top_class, top_conf
+
+
+def _calc_duration_sec(start_time: str, end_time: str | None) -> int:
+    """计算事件时长（秒），解析失败或 end_time 缺失时返回 0。"""
+    if not end_time:
+        return 0
+    try:
+        from datetime import datetime, timezone
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        st = datetime.strptime(start_time, fmt).replace(tzinfo=timezone.utc)
+        et = datetime.strptime(end_time, fmt).replace(tzinfo=timezone.utc)
+        return max(0, int((et - st).total_seconds()))
+    except Exception:
+        return 0
+
+
+def _serialize_detections_summary(detections_summary: dict) -> dict:
+    """将 detections_summary 中的 float 转为 Decimal，适配 DynamoDB。"""
+    result = {}
+    for cls_name, stats in detections_summary.items():
+        result[cls_name] = {
+            "count": Decimal(str(stats.get("count", 0))),
+            "max_confidence": Decimal(str(round(stats.get("max_confidence", 0.0), 6))),
+        }
+    return result
 
 
 def build_snapshot_keys(event_key: str, snapshots: list[str]) -> list[str]:
@@ -199,6 +255,10 @@ def handler(event: dict, context) -> dict:
         event_id = parsed["event_id"]
         device_id = parsed["device_id"]
         start_time = parsed["start_time"]
+        end_time = parsed["end_time"]
+        frame_count = parsed["frame_count"]
+        kvs_stream_name = parsed["kvs_stream_name"]
+        kvs_region = parsed["kvs_region"]
         detections_summary = parsed["detections_summary"]
         snapshots = parsed["snapshots"]
 
@@ -265,10 +325,41 @@ def handler(event: dict, context) -> dict:
         votable_results = [r for r in inference_results if r.get("has_bird", False)]
         best = select_best_prediction(votable_results) if votable_results else None
 
-        # 用 update_item 把推理结果写回已有的事件记录
+        # 用 update_item 把推理结果 + event.json 原始字段写回 DynamoDB
         # raspi-eye-events 表 PK: device_id (HASH) + start_time (RANGE)
         update_expr_parts = []
         expr_values = {}
+
+        # --- event.json 原始字段（前端展示用）---
+        yolo_top_class, yolo_top_confidence = _extract_yolo_top(detections_summary)
+        duration_sec = _calc_duration_sec(start_time, end_time)
+        # thumbnailKey: 第一张截图的完整 S3 key
+        thumbnail_key = snapshot_keys[0] if snapshot_keys else None
+
+        update_expr_parts.extend([
+            "eventId = :eventId",
+            "endTime = :endTime",
+            "durationSec = :durationSec",
+            "frameCount = :frameCount",
+            "kvsStreamName = :kvsStreamName",
+            "kvsRegion = :kvsRegion",
+            "yoloTopClass = :yoloTopClass",
+            "yoloTopConfidence = :yoloTopConfidence",
+            "thumbnailKey = :thumbnailKey",
+            "detections_summary = :detections_summary",
+            "snapshots = :snapshots",
+        ])
+        expr_values[":eventId"] = event_id
+        expr_values[":endTime"] = end_time
+        expr_values[":durationSec"] = Decimal(str(duration_sec))
+        expr_values[":frameCount"] = Decimal(str(frame_count))
+        expr_values[":kvsStreamName"] = kvs_stream_name
+        expr_values[":kvsRegion"] = kvs_region
+        expr_values[":yoloTopClass"] = yolo_top_class
+        expr_values[":yoloTopConfidence"] = Decimal(str(round(yolo_top_confidence, 6)))
+        expr_values[":thumbnailKey"] = thumbnail_key
+        expr_values[":detections_summary"] = _serialize_detections_summary(detections_summary)
+        expr_values[":snapshots"] = snapshots
 
         if best:
             species = best["species"]
@@ -291,6 +382,8 @@ def handler(event: dict, context) -> dict:
                 "inference_cropped_image_key = :cropped_key",
                 "inference_reliable = :reliable",
                 "inference_vote_count = :vote_count",
+                "verified = :verified",
+                "species = :verified_species",
             ])
             expr_values[":species"] = species
             expr_values[":confidence"] = Decimal(str(round(confidence, 6)))
@@ -309,6 +402,12 @@ def handler(event: dict, context) -> dict:
             expr_values[":cropped_key"] = best_cropped_key
             expr_values[":reliable"] = reliable
             expr_values[":vote_count"] = Decimal(str(vote_count))
+            expr_values[":verified"] = True
+            expr_values[":verified_species"] = best["species"] if reliable else None
+            # 中文物种名
+            species_cn = _get_species_cn(best["species"]) if reliable else None
+            update_expr_parts.append("speciesCn = :speciesCn")
+            expr_values[":speciesCn"] = species_cn
         elif inference_results:
             # 所有图片云端 YOLO 均未检测到鸟
             update_expr_parts.extend([
@@ -317,12 +416,18 @@ def handler(event: dict, context) -> dict:
                 "inference_image_key = :image_key",
                 "inference_reliable = :reliable",
                 "inference_vote_count = :vote_count",
+                "verified = :verified",
+                "species = :verified_species",
             ])
             expr_values[":species"] = "no_bird_detected"
             expr_values[":confidence"] = Decimal("0")
             expr_values[":image_key"] = "N/A"
             expr_values[":reliable"] = False
             expr_values[":vote_count"] = Decimal("0")
+            expr_values[":verified"] = True
+            expr_values[":verified_species"] = None
+            update_expr_parts.append("speciesCn = :speciesCn")
+            expr_values[":speciesCn"] = None
 
         if errors:
             update_expr_parts.append("inference_error = :error")

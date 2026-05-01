@@ -5149,3 +5149,25 @@ model/tests/test_training.py::test_export_roundtrip PASSED
 **涉及文件：** model/lambda/handler.py（Decimal 修复）, scripts/deploy-inference-pipeline.sh（Lambda 函数名变更）, .kiro/specs/spec-30-inference-yolo-crop/design.md（追加部署注意事项）, .kiro/specs/spec-30-inference-yolo-crop/tasks.md（追加部署后修复记录）
 
 ---
+
+### 2026-04-27 — Hotfix: Lambda DynamoDB 写入 event.json 原始字段（前端展示修复）
+
+**完成概要：** Lambda handler.py 修改为在 `update_item` 时同时写入 event.json 的原始字段（eventId、endTime、durationSec、frameCount、kvsStreamName、kvsRegion、yoloTopClass、yoloTopConfidence、thumbnailKey、detections_summary、snapshots、verified、species），修复前端卡片显示缺失数据的问题。
+
+**问题根源：** 设备端只写 event.json 到 S3，不写 DynamoDB。Lambda 是 DynamoDB 的唯一写入者，但之前只写 `inference_` 前缀的推理结果字段，导致前端需要的原始事件字段（时间、KVS 流名、缩略图、设备端 YOLO 检测类别等）全部缺失。
+
+**测试状态：** 本地 27 个单元测试全部通过 ✅；Lambda 部署后手动触发验证通过 ✅（耗时 71 秒，含 Serverless 冷启动）；DynamoDB 记录确认包含所有新字段 ✅
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | 前端卡片 endTime 显示 —、durationSec 显示 0 秒、thumbnailKey 为 N/A、eventId 自动生成、kvsStreamName undefined | Spec 不够精确 | spec-17 需求 6 只定义了 `inference_` 前缀字段的写入，未要求将 event.json 原始字段也写入 DynamoDB。设备端只写 S3 不写 DynamoDB，Lambda 是唯一写入者 | handler.py 的 `update_item` 中增加 event.json 原始字段写入（eventId、endTime、durationSec、frameCount、kvsStreamName、kvsRegion、yoloTopClass、yoloTopConfidence、thumbnailKey、detections_summary、snapshots、verified、species） | 已反向更新 spec-17 requirements.md 需求 6 和 design.md DynamoDB 字段表 |
+
+**提炼的禁止项（SHALL NOT）：**
+
+本次无新增通用禁止项。问题属于 Spec 需求遗漏（设备端不写 DynamoDB 的前提下，Lambda 应承担全部字段写入），已通过反向更新 Spec 修复。
+
+**涉及文件：** model/lambda/handler.py（新增 event.json 原始字段写入 + verified/species 字段）, .kiro/specs/spec-17-sagemaker-endpoint/requirements.md（需求 6 验收标准更新）, .kiro/specs/spec-17-sagemaker-endpoint/design.md（DynamoDB 字段表更新）
+
+---

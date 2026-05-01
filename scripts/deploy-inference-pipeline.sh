@@ -219,7 +219,7 @@ deploy_lambda() {
 
     local tmp_zip="/tmp/lambda-deploy-$$.zip"
     rm -f "${tmp_zip}"
-    (cd "${PROJECT_ROOT}/model/lambda" && zip -j "${tmp_zip}" handler.py > /dev/null)
+    (cd "${PROJECT_ROOT}/model/lambda" && zip -j "${tmp_zip}" handler.py species_cn.json > /dev/null)
 
     # 检查函数是否已存在
     if aws lambda get-function \

@@ -305,18 +305,41 @@ PYTORCH_INFERENCE_IMAGE_URIS = {
 
 ### DynamoDB 写回设计（raspi-eye-events 表）
 
-Lambda 通过 `update_item` 写回已有的 `raspi-eye-events` 表，推理结果字段加 `inference_` 前缀：
+Lambda 通过 `update_item` 写回已有的 `raspi-eye-events` 表。写入两类字段：
+
+**event.json 原始字段（前端展示用）：**
 
 | 属性 | 类型 | 说明 |
 |------|------|------|
 | device_id (PK-HASH) | String | 设备 ID（已有字段） |
 | start_time (PK-RANGE) | String | ISO 8601 时间戳（已有字段） |
+| eventId | String | 事件 ID（来自 event.json） |
+| endTime | String / Null | 事件结束时间（来自 event.json） |
+| durationSec | Number | 事件时长（秒，由 start_time 和 end_time 计算） |
+| frameCount | Number | 截图帧数（来自 event.json） |
+| kvsStreamName | String / Null | KVS 流名称（来自 event.json） |
+| kvsRegion | String / Null | KVS region（来自 event.json） |
+| yoloTopClass | String | 设备端 YOLO 检测次数最多的类别（来自 detections_summary） |
+| yoloTopConfidence | Number | 该类别的最高置信度（来自 detections_summary） |
+| thumbnailKey | String / Null | 第一张截图的完整 S3 key |
+| detections_summary | Map | 设备端 YOLO 检测摘要（来自 event.json，数值转 Decimal） |
+| snapshots | List | 截图文件名列表（来自 event.json） |
+
+**推理结果字段（inference_ 前缀）：**
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
 | inference_species | String | 最高置信度物种名 |
 | inference_confidence | Number | 最高置信度值 |
 | inference_image_key | String | 最高置信度对应的 S3 图片 key |
 | inference_top5 | List | top-5 预测列表 |
 | inference_latency_ms | Number | 推理耗时（毫秒） |
+| inference_cropped_image_key | String / Null | crop 后图片的 S3 key（Spec 30 新增） |
+| inference_reliable | Boolean | 置信度是否达到门槛（Spec 31 新增） |
+| inference_vote_count | Number | 投票胜出票数（Spec 31 新增） |
 | inference_error | String / Null | 错误信息（正常为 null） |
+| verified | Boolean | 推理是否可靠（= inference_reliable，前端展示用） |
+| species | String / Null | 已验证物种名（reliable 时为物种名，否则为 null，前端展示用） |
 
 ### Lambda 环境变量
 
