@@ -20,12 +20,49 @@ enum class HealthState {
 // Return human-readable name for HealthState
 const char* health_state_name(HealthState s);
 
+// Error scope: classifies a GStreamer bus error by fault domain.
+// KVS_BRANCH / WEBRTC_BRANCH errors are branch-local and self-heal; only TRUNK
+// errors (shared upstream) should trigger whole-pipeline recovery. (Spec 32 需求 1)
+enum class ErrorScope { KVS_BRANCH, WEBRTC_BRANCH, TRUNK };
+
+// Pure function: classify a bus error by its source element name.
+// KVS branch elements (q-kvs/kvs-parser/avc-caps/kvs-sink) -> KVS_BRANCH;
+// WebRTC branch elements (q-web/webrtc-sink) -> WEBRTC_BRANCH;
+// everything else (incl. unknown / empty) -> TRUNK (conservative: rather recover than miss).
+ErrorScope classify_bus_error(const std::string& src_name);
+
+// Pure function: returns true iff consecutive_non_playing >= threshold && threshold > 0.
+// Used by heartbeat debounce to drive active recovery without premature triggering.
+bool should_trigger_recovery(int consecutive_non_playing, int threshold);
+
+// Bounded asynchronous teardown helpers (Spec 32 决策 B / 方案 X).
+// The blocking set_state(NULL) (kvssink stopStreamSync may block ~130s) is moved
+// off the GLib main loop: a worker thread runs it while the caller waits at most
+// budget_ms. On timeout the worker is detached and finishes in the background.
+//
+// (a) Transfers ownership: the worker sets the pipeline to NULL then unrefs it.
+//     Used by full_rebuild to destroy the old pipeline. Returns true if the
+//     teardown completed within budget_ms, false on timeout (worker detached).
+//     teardown_fn is injectable for tests (default: gst set NULL + get_state + unref);
+//     when a custom teardown_fn is supplied, the caller owns the unref decision.
+bool teardown_pipeline_bounded(GstElement* pipeline, int budget_ms,
+                               std::function<void(GstElement*)> teardown_fn = {});
+
+// (b) Does NOT transfer ownership: the worker only sets the pipeline to NULL
+//     (no unref). Used by try_state_reset to reuse the same pipeline. Returns
+//     true if NULL was reached within budget_ms, false on timeout.
+//     set_null_fn is injectable for tests (default: gst set NULL + get_state).
+bool set_null_bounded(GstElement* pipeline, int budget_ms,
+                      std::function<void(GstElement*)> set_null_fn = {});
+
 // Configuration for PipelineHealthMonitor (POD, all durations in milliseconds)
 struct HealthConfig {
     int watchdog_timeout_ms   = 5000;  // Buffer probe watchdog timeout
     int heartbeat_interval_ms = 2000;  // Heartbeat poll interval
     int initial_backoff_ms    = 1000;  // Initial retry backoff
     int max_retries           = 3;     // Max consecutive recovery failures before FATAL
+    int heartbeat_fail_threshold = 3;  // Consecutive non-PLAYING count to trigger recovery (Spec 32 需求 3)
+    int state_reset_timeout_ms   = 5000; // Bounded wait for NULL/teardown on main loop (Spec 32 需求 5)
 };
 
 // Recovery statistics
@@ -81,6 +118,11 @@ public:
     void set_pipeline(GstElement* new_pipeline,
                       const std::string& source_element_name = "src");
 
+    // Detach the monitor from the current pipeline BEFORE it is destroyed:
+    // removes the buffer probe and the bus watch, and sets pipeline_ to nullptr.
+    // Idempotent. Must be called on the GLib main loop thread (Spec 32 决策 C).
+    void detach();
+
 private:
     // State transition (must hold mutex_)
     // Returns true if transition occurred
@@ -123,6 +165,8 @@ private:
     HealthStats stats_;
     int consecutive_failures_ = 0;
     int current_backoff_ms_ = 0;
+    int consecutive_non_playing_ = 0;      // Heartbeat debounce counter (Spec 32 需求 3)
+    uint64_t branch_error_count_ = 0;      // Branch-level error count (observation, Spec 32 需求 1)
     std::chrono::steady_clock::time_point last_buffer_time_;
 
     // Pipeline pointer (not owned)

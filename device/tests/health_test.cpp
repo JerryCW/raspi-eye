@@ -46,6 +46,21 @@ static void inject_bus_warning(GstElement* pipeline) {
     gst_object_unref(bus);
 }
 
+// Inject a bus ERROR whose source is the named element inside the pipeline.
+// Used to test ErrorScope-based routing (Spec 32 需求 1).
+static void inject_bus_error_from(GstElement* pipeline, const char* element_name) {
+    GstElement* el = gst_bin_get_by_name(GST_BIN(pipeline), element_name);
+    GstBus* bus = gst_element_get_bus(pipeline);
+    GError* error = g_error_new(GST_CORE_ERROR, GST_CORE_ERROR_FAILED,
+                                "Injected branch error");
+    GstMessage* msg = gst_message_new_error(
+        GST_OBJECT(el ? el : pipeline), error, "branch fault injection");
+    gst_bus_post(bus, msg);
+    g_error_free(error);
+    gst_object_unref(bus);
+    if (el) gst_object_unref(el);
+}
+
 static GstElement* create_test_pipeline() {
     GstElement* pipeline = gst_parse_launch(
         "videotestsrc name=src is-live=true ! fakesink", nullptr);
@@ -116,6 +131,58 @@ TEST(HealthMonitor, BusErrorTriggersRecovery) {
 
     EXPECT_TRUE(recovered) << "State: " << health_state_name(monitor.state());
     EXPECT_GE(monitor.stats().total_recoveries, 1u);
+
+    monitor.stop();
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    gst_object_unref(pipeline);
+}
+
+// 2b. KvsBranchErrorNoRecovery — Spec 32 需求 1
+//     Bus ERROR from an element named "kvs-sink" is classified KVS_BRANCH and
+//     must NOT trigger whole-pipeline recovery (state stays HEALTHY).
+TEST(HealthMonitor, KvsBranchErrorNoRecovery) {
+    GstElement* pipeline = gst_parse_launch(
+        "videotestsrc name=src is-live=true ! fakesink name=kvs-sink", nullptr);
+    ASSERT_NE(pipeline, nullptr);
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+
+    auto cfg = test_config();
+    cfg.watchdog_timeout_ms = 60000;
+    cfg.heartbeat_interval_ms = 60000;  // disable heartbeat interference
+    PipelineHealthMonitor monitor(pipeline, cfg);
+    monitor.start("src");
+
+    inject_bus_error_from(pipeline, "kvs-sink");
+
+    // Pump the loop for a while; branch error must NOT cause recovery.
+    run_until([&]() { return monitor.stats().total_recoveries > 0; }, 800);
+
+    EXPECT_EQ(monitor.state(), HealthState::HEALTHY);
+    EXPECT_EQ(monitor.stats().total_recoveries, 0u);
+
+    monitor.stop();
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    gst_object_unref(pipeline);
+}
+
+// 2c. WebRtcBranchErrorNoRecovery — Spec 32 需求 1.3
+TEST(HealthMonitor, WebRtcBranchErrorNoRecovery) {
+    GstElement* pipeline = gst_parse_launch(
+        "videotestsrc name=src is-live=true ! fakesink name=webrtc-sink", nullptr);
+    ASSERT_NE(pipeline, nullptr);
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+
+    auto cfg = test_config();
+    cfg.watchdog_timeout_ms = 60000;
+    cfg.heartbeat_interval_ms = 60000;
+    PipelineHealthMonitor monitor(pipeline, cfg);
+    monitor.start("src");
+
+    inject_bus_error_from(pipeline, "webrtc-sink");
+    run_until([&]() { return monitor.stats().total_recoveries > 0; }, 800);
+
+    EXPECT_EQ(monitor.state(), HealthState::HEALTHY);
+    EXPECT_EQ(monitor.stats().total_recoveries, 0u);
 
     monitor.stop();
     gst_element_set_state(pipeline, GST_STATE_NULL);

@@ -81,6 +81,11 @@ _架构模式、API 选择、依赖兼容、接口契约相关的禁止项。→
   - 原因：SageMaker CreateModel 要求 model.tar.gz 与 endpoint 在同一 region，跨 region 报 `Could not access model data`
   - 建议：部署前验证 bucket region（`aws s3api get-bucket-location`），model.tar.gz 必须上传到 endpoint 所在 region 的 bucket
 
+- SHALL NOT 在推理/训练 requirements.txt 中用 `>=` 或不钉版本声明 transformers / torch / ultralytics / Pillow 等依赖（来源：2026-06-09 endpoint 推理全失败）
+  - 原因：容器镜像 torch 版本固定（如 PyTorch 2.6），上游依赖发新版会引入不兼容（如 transformers 新版引用 `torch.float8_e8m0fnu`，torch 2.7+ 才有），导致模型加载崩溃。本次"稳定运行一个月后无代码改动突然全部失败"的唯一根因就是 `transformers>=4.56` 漂移到不兼容新版
+  - 加重原因：依赖版本还决定模型结构兼容性——transformers 5.x 的 DINOv3 AutoModel 把 blocks 嵌套在 `backbone.model.*`，4.56.x 拍平成 `backbone.*`，与 checkpoint 不匹配会 `load_state_dict` 崩溃。训练与推理必须用同一精确版本
+  - 建议：所有进 model.tar.gz / Lambda / 训练容器的依赖一律钉 `==` 精确版本，并在注释中说明与容器 torch 版本的兼容关系；升级依赖时必须重新端到端验证
+
 ---
 
 ## Tasks 层

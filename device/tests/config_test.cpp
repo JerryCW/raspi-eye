@@ -88,10 +88,10 @@ TEST(ConfigExampleTest, ParseStreamingConfig_EmptyMap_Defaults) {
     StreamingConfig config;
     std::string err;
     EXPECT_TRUE(parse_streaming_config(kv, config, &err));
-    EXPECT_EQ(config.bitrate_min_kbps, 1000);
-    EXPECT_EQ(config.bitrate_max_kbps, 4000);
+    EXPECT_EQ(config.bitrate_min_kbps, 800);
+    EXPECT_EQ(config.bitrate_max_kbps, 1500);
     EXPECT_EQ(config.bitrate_step_kbps, 500);
-    EXPECT_EQ(config.bitrate_default_kbps, 2500);
+    EXPECT_EQ(config.bitrate_default_kbps, 1200);
     EXPECT_EQ(config.bitrate_eval_interval_sec, 5);
     EXPECT_EQ(config.bitrate_rampup_interval_sec, 30);
     EXPECT_EQ(config.debounce_sec, 3);
@@ -559,7 +559,7 @@ RC_GTEST_PROP(ConfigPBT, ParseStreamingConfigFidelity, ()) {
     };
 
     // Default values matching StreamingConfig defaults
-    static const std::vector<int> defaults = {1000, 4000, 500, 2500, 5, 30, 3};
+    static const std::vector<int> defaults = {800, 1500, 500, 1200, 5, 30, 3};
 
     // Randomly decide which fields to include
     std::unordered_map<std::string, std::string> kv;
@@ -1207,7 +1207,7 @@ TEST(ConfigExampleTest, ParseStreamingConfig_EmptyMap_NetworkDefaults) {
     StreamingConfig config;
     std::string err;
     EXPECT_TRUE(parse_streaming_config(kv, config, &err));
-    EXPECT_EQ(config.buffer_duration_sec, 180);
+    EXPECT_EQ(config.buffer_duration_sec, 40);
     EXPECT_EQ(config.latency_pressure_threshold, 5);
     EXPECT_EQ(config.latency_pressure_cooldown_sec, 30);
     EXPECT_TRUE(config.bandwidth_probe_enabled);

@@ -141,6 +141,11 @@ add_executable(health_test tests/health_test.cpp)
 target_link_libraries(health_test PRIVATE pipeline_manager GTest::gtest rapidcheck rapidcheck_gtest)
 add_test(NAME health_test COMMAND health_test)
 
+# Spec 32 韧性加固测试（纯函数 + 有界 teardown helper）
+add_executable(resilience_test tests/resilience_test.cpp)
+target_link_libraries(resilience_test PRIVATE pipeline_manager config_module GTest::gtest rapidcheck rapidcheck_gtest)
+add_test(NAME resilience_test COMMAND resilience_test)
+
 add_executable(shutdown_test tests/shutdown_test.cpp)
 target_link_libraries(shutdown_test PRIVATE pipeline_manager GTest::gtest_main rapidcheck rapidcheck_gtest)
 add_test(NAME shutdown_test COMMAND shutdown_test)

@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -19,6 +20,10 @@ static std::condition_variable s_cv;
 static std::atomic<bool> s_stop{false};
 static std::atomic<bool> s_running{false};
 static std::thread s_thread;
+
+// 健康门控回调（s_health_mtx 保护，看门狗线程读 / 主循环写）
+static std::mutex s_health_mtx;
+static std::function<bool()> s_health_check;
 
 // --- notify 方法 ---
 
@@ -72,7 +77,12 @@ void SdNotifier::start_watchdog_thread(int interval_sec) {
                 s_cv.wait_for(lock, std::chrono::seconds(interval_sec),
                               [] { return s_stop.load(); });
                 if (!s_stop.load()) {
-                    notify_watchdog();
+                    // 健康门控：非健康（FATAL）时跳过心跳，让 systemd WatchdogSec 兜底
+                    if (watchdog_gate_open()) {
+                        notify_watchdog();
+                    } else {
+                        if (logger) logger->warn("watchdog: health gate closed, skipping WATCHDOG=1");
+                    }
                 }
             }
         } catch (const std::exception& e) {
@@ -100,4 +110,19 @@ void SdNotifier::stop_watchdog_thread() {
 
 bool SdNotifier::watchdog_running() {
     return s_running.load();
+}
+
+void SdNotifier::set_health_check(std::function<bool()> is_healthy) {
+    std::lock_guard<std::mutex> lk(s_health_mtx);
+    s_health_check = std::move(is_healthy);
+}
+
+bool SdNotifier::watchdog_gate_open() {
+    std::function<bool()> check;
+    {
+        std::lock_guard<std::mutex> lk(s_health_mtx);
+        check = s_health_check;
+    }
+    if (!check) return true;  // 未注册：默认健康
+    return check();
 }

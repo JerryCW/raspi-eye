@@ -55,6 +55,10 @@ struct AppContext::Impl {
 
     std::unique_ptr<S3Uploader> s3_uploader_;
 
+    // rebuild 暂存新管道（成功后转正），FATAL 优雅退出回调
+    std::unique_ptr<PipelineManager> pending_pm_;
+    std::function<void()> shutdown_requester;
+
     // Cleanup manager
     ShutdownHandler shutdown_handler;
 };
@@ -314,15 +318,27 @@ bool AppContext::start(std::string* error_msg) {
             impl_->streaming_config.writeframe_fail_threshold);
     }
 
-    // --- Register rebuild callback ---
+    // --- Register rebuild callback (Spec 32 决策 B/C：detach -> 有界异步 teardown -> 带重试构建) ---
     impl_->health_monitor->set_rebuild_callback([this]() -> GstElement* {
+        auto lg = spdlog::get("app");
 #ifdef ENABLE_YOLO
         if (impl_->ai_handler_) {
             impl_->ai_handler_->stop();
         }
 #endif
-        std::string err;
-        // rebuild 时同样根据 enabled 决定传递 nullptr
+        // (1) 决策 C：先让 health monitor 与旧管道解绑（移除 probe + bus watch），
+        //     避免在销毁旧管道期间出现悬空引用。
+        impl_->health_monitor->detach();
+
+        // (2) 决策 B：有界异步销毁旧管道。release() 转移所有权给 worker 线程，
+        //     主循环最多等 state_reset_timeout_ms；超时则后台完成 NULL+unref。
+        if (impl_->pipeline_manager) {
+            GstElement* old = impl_->pipeline_manager->release();
+            impl_->pipeline_manager.reset();  // 壳已空，安全析构
+            teardown_pipeline_bounded(old, /*budget*/5000);
+        }
+
+        // rebuild 时根据 enabled 决定传递 nullptr
         const KvsSinkFactory::KvsConfig* kvs_ptr =
             impl_->kvs_config.enabled ? &impl_->kvs_config : nullptr;
         const AwsConfig* aws_ptr =
@@ -339,30 +355,50 @@ bool AppContext::start(std::string* error_msg) {
 #ifdef ENABLE_YOLO
         ai_rebuild_ptr = impl_->ai_handler_.get();
 #endif
-        GstElement* p = PipelineBuilder::build_tee_pipeline(
-            &err,
-            impl_->cam_config,
-            kvs_ptr,
-            aws_ptr,
-            webrtc_ptr,
-            ai_rebuild_ptr,
-            rebuild_kvs_sink_config_ptr);
-        if (!p) return nullptr;
+        // (3) 带重试构建+启动新管道（覆盖旧 v4l2 fd 释放窗口，Spec 32 需求 2）。
+        //     重试粒度是整次 build + start。
+        CameraSource::OpenRetryConfig retry_cfg;  // 默认 500ms × 6
+        int attempts = 0;
+        bool ok = CameraSource::open_with_retry([&]() -> bool {
+            std::string err;
+            GstElement* p = PipelineBuilder::build_tee_pipeline(
+                &err,
+                impl_->cam_config,
+                kvs_ptr,
+                aws_ptr,
+                webrtc_ptr,
+                ai_rebuild_ptr,
+                rebuild_kvs_sink_config_ptr);
+            if (!p) {
+                if (lg) lg->warn("rebuild: build_tee_pipeline failed: {}", err);
+                return false;
+            }
+            auto new_pm = PipelineManager::create(p, &err);
+            if (!new_pm) {
+                gst_object_unref(p);
+                return false;
+            }
+            if (!new_pm->start(&err)) {
+                if (lg) lg->warn("rebuild: pipeline start failed: {}", err);
+                return false;  // new_pm 析构会 stop+unref 半启动的管道
+            }
+            impl_->pending_pm_ = std::move(new_pm);  // 暂存，成功后转正
+            return true;
+        }, retry_cfg, {}, &attempts);
 
-        auto new_pm = PipelineManager::create(p, &err);
-        if (!new_pm) {
-            gst_object_unref(p);
-            return nullptr;
+        if (!ok) {
+            if (lg) lg->error("rebuild failed after {} attempt(s)", attempts);
+            return nullptr;  // 恢复失败 -> 计入 recovery 失败 -> 可能 FATAL
         }
-        if (!new_pm->start(&err)) {
-            return nullptr;
-        }
-        impl_->pipeline_manager = std::move(new_pm);
+        if (lg) lg->info("rebuild succeeded after {} attempt(s)", attempts);
+
+        impl_->pipeline_manager = std::move(impl_->pending_pm_);
+
+        // 更新各模块的 pipeline 引用
         impl_->stream_controller->set_pipeline(
             impl_->pipeline_manager->pipeline());
         impl_->bitrate_adapter->set_pipeline(
             impl_->pipeline_manager->pipeline());
-        // 更新 WebRtcMediaManager 的 pipeline 引用
         if (impl_->media_manager) {
             impl_->media_manager->set_pipeline(
                 impl_->pipeline_manager->pipeline());
@@ -372,17 +408,24 @@ bool AppContext::start(std::string* error_msg) {
             impl_->ai_handler_->start();
         }
 #endif
+        // health_monitor 在 try_full_rebuild 返回后 set_pipeline 重新 attach
         return impl_->pipeline_manager->pipeline();
     });
 
-    // --- Register health callback (log state changes, no FATAL exit here) ---
+    // --- Register health callback (log + FATAL -> request graceful shutdown) ---
     impl_->health_monitor->set_health_callback(
-        [](HealthState old_s, HealthState new_s) {
+        [this](HealthState old_s, HealthState new_s) {
             auto lg = spdlog::get("app");
             if (lg) {
                 lg->info("Health state: {} -> {}",
                          health_state_name(old_s),
                          health_state_name(new_s));
+            }
+            if (new_s == HealthState::FATAL && impl_->shutdown_requester) {
+                if (lg) {
+                    lg->error("Pipeline FATAL -- requesting graceful shutdown for systemd restart");
+                }
+                impl_->shutdown_requester();  // 仅设 flag，由 main 的 timer 退主循环
             }
         });
 
@@ -425,8 +468,10 @@ bool AppContext::start(std::string* error_msg) {
         });
     }
     impl_->shutdown_handler.register_step("pipeline", [this]() {
-        impl_->pipeline_manager->stop();
-        impl_->pipeline_manager.reset();
+        if (impl_->pipeline_manager) {
+            impl_->pipeline_manager->stop();
+            impl_->pipeline_manager.reset();
+        }
     });
 
     // --- Connect signaling (skip when WebRTC disabled, warn on failure) ---
@@ -464,4 +509,17 @@ bool AppContext::start(std::string* error_msg) {
 
 ShutdownSummary AppContext::stop() {
     return impl_->shutdown_handler.execute();
+}
+
+// ============================================================
+// set_shutdown_requester / is_healthy
+// ============================================================
+
+void AppContext::set_shutdown_requester(std::function<void()> fn) {
+    impl_->shutdown_requester = std::move(fn);
+}
+
+bool AppContext::is_healthy() const {
+    if (!impl_->health_monitor) return true;
+    return impl_->health_monitor->state() != HealthState::FATAL;
 }

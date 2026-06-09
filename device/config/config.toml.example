@@ -65,28 +65,30 @@ aws_region = "<your-aws-region>"
 # rotation = 0
 
 # Adaptive bitrate + stream mode configuration (optional, defaults shown)
-# bitrate_min_kbps: minimum bitrate in kbps (default: 1000)
-# bitrate_max_kbps: maximum bitrate in kbps (default: 4000)
+# bitrate_min_kbps: minimum bitrate in kbps (default: 800)
+# bitrate_max_kbps: maximum bitrate in kbps (default: 1500)
 # bitrate_step_kbps: bitrate adjustment step in kbps (default: 500)
-# bitrate_default_kbps: initial bitrate in kbps, must be in [min, max] (default: 2500)
+# bitrate_default_kbps: initial bitrate in kbps, must be in [min, max] (default: 1200)
+#   Spec 32: defaults lowered below measured upload bandwidth (~1.7Mbps) to reduce KVS backlog.
 # bitrate_eval_interval_sec: evaluation interval in seconds (default: 5)
 # bitrate_rampup_interval_sec: ramp-up interval in seconds (default: 30)
 # debounce_sec: stream mode switch debounce in seconds (default: 3)
-# buffer_duration_sec: kvssink buffer-duration in seconds (default: 180)
+# buffer_duration_sec: kvssink buffer-duration in seconds (default: 40)
+#   Spec 32: lowered 180 -> 40 to shorten drain time on recovery (tradeoff: less weak-network buffering).
 # latency_pressure_threshold: pressure events in 10s window to trigger UNHEALTHY (default: 5)
 # latency_pressure_cooldown_sec: seconds after last pressure before recovery (default: 30)
 # bandwidth_probe_enabled: enable startup bandwidth estimation (default: true)
 # bandwidth_probe_duration_sec: probe measurement duration in seconds (default: 10)
 # writeframe_fail_threshold: consecutive writeFrame failures for UNHEALTHY (default: 10)
 [streaming]
-# bitrate_min_kbps = 1000
-# bitrate_max_kbps = 4000
+# bitrate_min_kbps = 800
+# bitrate_max_kbps = 1500
 # bitrate_step_kbps = 500
-# bitrate_default_kbps = 2500
+# bitrate_default_kbps = 1200
 # bitrate_eval_interval_sec = 5
 # bitrate_rampup_interval_sec = 30
 # debounce_sec = 3
-# buffer_duration_sec = 180
+# buffer_duration_sec = 40
 # latency_pressure_threshold = 5
 # latency_pressure_cooldown_sec = 30
 # bandwidth_probe_enabled = true

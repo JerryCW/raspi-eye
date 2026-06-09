@@ -2,6 +2,12 @@
 // PipelineHealthMonitor implementation - three-layer detection, two-level recovery.
 #include "pipeline_health.h"
 #include <spdlog/spdlog.h>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <thread>
 
 // ---------------------------------------------------------------------------
 // health_state_name
@@ -16,6 +22,102 @@ const char* health_state_name(HealthState s) {
         case HealthState::FATAL:      return "FATAL";
     }
     return "UNKNOWN";
+}
+
+// ---------------------------------------------------------------------------
+// classify_bus_error / should_trigger_recovery — pure functions (Spec 32)
+// ---------------------------------------------------------------------------
+
+ErrorScope classify_bus_error(const std::string& src_name) {
+    // KVS branch elements (see pipeline_builder element naming)
+    if (src_name == "q-kvs" || src_name == "kvs-parser" ||
+        src_name == "avc-caps" || src_name == "kvs-sink") {
+        return ErrorScope::KVS_BRANCH;
+    }
+    // WebRTC branch elements
+    if (src_name == "q-web" || src_name == "webrtc-sink") {
+        return ErrorScope::WEBRTC_BRANCH;
+    }
+    // Everything else (src / v4l2-source / convert / encoder / tee / unknown / empty)
+    // -> TRUNK (conservative: rather recover than miss a real fault).
+    return ErrorScope::TRUNK;
+}
+
+bool should_trigger_recovery(int consecutive_non_playing, int threshold) {
+    return threshold > 0 && consecutive_non_playing >= threshold;
+}
+
+// ---------------------------------------------------------------------------
+// Bounded asynchronous teardown helpers (Spec 32 决策 B / 方案 X)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Run work_fn(pipeline) on a worker thread; the caller waits at most budget_ms.
+// Returns true if the worker finished within budget; false on timeout (the
+// worker is detached and finishes in the background).
+bool run_bounded(GstElement* pipeline, int budget_ms,
+                 std::function<void(GstElement*)> work_fn) {
+    auto mtx = std::make_shared<std::mutex>();
+    auto cv = std::make_shared<std::condition_variable>();
+    auto done = std::make_shared<std::atomic<bool>>(false);
+
+    std::thread worker([pipeline, work_fn, mtx, cv, done]() {
+        work_fn(pipeline);
+        done->store(true, std::memory_order_release);
+        cv->notify_one();
+    });
+
+    bool completed;
+    {
+        std::unique_lock<std::mutex> lock(*mtx);
+        completed = cv->wait_for(lock, std::chrono::milliseconds(budget_ms),
+                                 [&] { return done->load(std::memory_order_acquire); });
+    }
+
+    if (completed) {
+        worker.join();
+    } else {
+        worker.detach();  // finishes in background
+    }
+    return completed;
+}
+
+// Default teardown: set NULL (blocking), wait for NULL, then unref.
+void default_teardown(GstElement* pipeline) {
+    if (!pipeline) return;
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    GstState st = GST_STATE_VOID_PENDING;
+    gst_element_get_state(pipeline, &st, nullptr, GST_CLOCK_TIME_NONE);
+    gst_object_unref(pipeline);
+}
+
+// Default set-null: set NULL (blocking) and wait, no unref.
+void default_set_null(GstElement* pipeline) {
+    if (!pipeline) return;
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    GstState st = GST_STATE_VOID_PENDING;
+    gst_element_get_state(pipeline, &st, nullptr, GST_CLOCK_TIME_NONE);
+}
+
+}  // namespace
+
+bool teardown_pipeline_bounded(GstElement* pipeline, int budget_ms,
+                               std::function<void(GstElement*)> teardown_fn) {
+    if (!teardown_fn) teardown_fn = default_teardown;
+    bool ok = run_bounded(pipeline, budget_ms, std::move(teardown_fn));
+    auto logger = spdlog::get("pipeline");
+    if (logger) {
+        if (ok) logger->info("teardown_pipeline_bounded: completed within {}ms", budget_ms);
+        else    logger->warn("teardown_pipeline_bounded: not done within {}ms, detached to background", budget_ms);
+    }
+    return ok;
+}
+
+bool set_null_bounded(GstElement* pipeline, int budget_ms,
+                      std::function<void(GstElement*)> set_null_fn) {
+    if (!set_null_fn) set_null_fn = default_set_null;
+    return run_bounded(pipeline, budget_ms, std::move(set_null_fn));
 }
 
 // ---------------------------------------------------------------------------
@@ -217,18 +319,37 @@ gboolean PipelineHealthMonitor::bus_watch_cb(
             gchar* dbg = nullptr;
             gst_message_parse_error(msg, &err, &dbg);
 
+            const char* src_name = GST_OBJECT_NAME(msg->src);
+            ErrorScope scope = classify_bus_error(src_name ? src_name : "");
+
             auto logger = spdlog::get("pipeline");
-            if (logger) {
-                logger->error("Bus ERROR from {}: {}",
-                              GST_OBJECT_NAME(msg->src),
-                              err ? err->message : "unknown");
-                if (dbg) logger->debug("Debug info: {}", dbg);
+            if (scope == ErrorScope::TRUNK) {
+                if (logger) {
+                    logger->error("Bus ERROR from {} (TRUNK): {}",
+                                  src_name ? src_name : "unknown",
+                                  err ? err->message : "unknown");
+                    if (dbg) logger->debug("Debug info: {}", dbg);
+                }
+                if (err) g_error_free(err);
+                if (dbg) g_free(dbg);
+                self->attempt_recovery();
+            } else {
+                // Branch-level error (KVS / WebRTC): log + count only, no
+                // whole-pipeline recovery. kvssink restart-on-error=TRUE / the
+                // branch SDK self-heals. (Spec 32 需求 1/需求 1.3)
+                {
+                    std::lock_guard<std::mutex> lock(self->mutex_);
+                    self->branch_error_count_++;
+                }
+                if (logger) {
+                    logger->warn("Branch error ({}) from {}: {} -- not triggering pipeline recovery",
+                                 scope == ErrorScope::KVS_BRANCH ? "KVS" : "WEBRTC",
+                                 src_name ? src_name : "unknown",
+                                 err ? err->message : "unknown");
+                }
+                if (err) g_error_free(err);
+                if (dbg) g_free(dbg);
             }
-
-            if (err) g_error_free(err);
-            if (dbg) g_free(dbg);
-
-            self->attempt_recovery();
             break;
         }
         case GST_MESSAGE_WARNING: {
@@ -307,28 +428,47 @@ gboolean PipelineHealthMonitor::heartbeat_timer_cb(gpointer user_data) {
     HealthState old_state{};
     HealthState new_state{};
     bool changed = false;
+    bool trigger_recovery = false;
 
+    // Query current pipeline state with zero timeout.
     GstState gst_state = GST_STATE_NULL;
-    gst_element_get_state(self->pipeline_, &gst_state, nullptr, 0);
+    GstStateChangeReturn ret =
+        gst_element_get_state(self->pipeline_, &gst_state, nullptr, 0);
 
-    if (gst_state != GST_STATE_PLAYING) {
+    // ASYNC: state change in progress (transient) -> do not count. (Spec 32 需求 3)
+    if (ret == GST_STATE_CHANGE_ASYNC) {
+        return G_SOURCE_CONTINUE;
+    }
+
+    {
         std::lock_guard<std::mutex> lock(self->mutex_);
-        if (self->state_ == HealthState::HEALTHY ||
-            self->state_ == HealthState::DEGRADED) {
-            old_state = self->state_;
-            changed = self->transition_to(HealthState::ERROR);
-            new_state = self->state_;
-            cb_copy = self->health_cb_;
-
+        if (gst_state == GST_STATE_PLAYING) {
+            self->consecutive_non_playing_ = 0;
+        } else {
+            self->consecutive_non_playing_++;
             auto logger = spdlog::get("pipeline");
             if (logger) {
-                logger->warn("Heartbeat: pipeline state is {} (expected PLAYING)",
-                             gst_element_state_get_name(gst_state));
+                logger->warn("Heartbeat: pipeline state is {} (count {}/{})",
+                             gst_element_state_get_name(gst_state),
+                             self->consecutive_non_playing_,
+                             self->config_.heartbeat_fail_threshold);
+            }
+            if (should_trigger_recovery(self->consecutive_non_playing_,
+                                        self->config_.heartbeat_fail_threshold)) {
+                self->consecutive_non_playing_ = 0;
+                trigger_recovery = true;
             }
         }
     }
 
-    // Callback outside mutex
+    // Drive recovery actively outside mutex (eliminates "mark ERROR then wait
+    // forever"). attempt_recovery() handles the HEALTHY/DEGRADED->ERROR->RECOVERING
+    // transitions internally. (Spec 32 需求 3.4)
+    if (trigger_recovery) {
+        self->attempt_recovery();
+    }
+
+    // Callback outside mutex (none for the debounce path, kept for symmetry)
     if (changed && cb_copy) {
         cb_copy(old_state, new_state);
     }
@@ -475,37 +615,46 @@ bool PipelineHealthMonitor::try_state_reset() {
     auto logger = spdlog::get("pipeline");
     if (logger) logger->info("Attempting state reset recovery");
 
-    GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_NULL);
-    if (ret == GST_STATE_CHANGE_FAILURE) {
-        if (logger) logger->warn("set_state(NULL) failed");
+    auto t0 = std::chrono::steady_clock::now();
+
+    // Move the blocking set_state(NULL) off the main loop: worker thread does it,
+    // we wait at most state_reset_timeout_ms. (Spec 32 需求 5 / 决策 B helper b)
+    // Ownership NOT transferred here -- we want to reuse the same pipeline if NULL
+    // is reached within budget.
+    if (!set_null_bounded(pipeline_, config_.state_reset_timeout_ms)) {
+        // Timeout: NULL still in progress (kvssink stuck). Do not reuse a
+        // half-NULL pipeline; return false so attempt_recovery goes to
+        // full_rebuild, which takes ownership via release() + teardown_pipeline_bounded.
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count();
+        if (logger) {
+            logger->warn("state reset NULL not done within {}ms (waited {}ms), hand off to full_rebuild",
+                         config_.state_reset_timeout_ms, ms);
+        }
         return false;
     }
 
-    // Wait for NULL state (up to 1 second)
-    GstState actual = GST_STATE_VOID_PENDING;
-    gst_element_get_state(pipeline_, &actual, nullptr, GST_SECOND);
-    if (actual != GST_STATE_NULL) {
-        if (logger) logger->warn("Pipeline did not reach NULL state");
-        return false;
-    }
-
-    ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
+    // NULL reached within budget -> set PLAYING and reuse the same pipeline.
+    GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         if (logger) logger->warn("set_state(PLAYING) failed after reset");
         return false;
     }
 
-    // Wait for PLAYING state confirmation (up to 1 second)
-    actual = GST_STATE_VOID_PENDING;
-    ret = gst_element_get_state(pipeline_, &actual, nullptr, GST_SECOND);
-    if (ret == GST_STATE_CHANGE_FAILURE || actual != GST_STATE_PLAYING) {
-        if (logger) logger->warn("Pipeline did not reach PLAYING state after reset");
-        gst_element_set_state(pipeline_, GST_STATE_NULL);
-        return false;
-    }
+    GstState actual = GST_STATE_VOID_PENDING;
+    ret = gst_element_get_state(pipeline_, &actual, nullptr,
+                                static_cast<gint64>(config_.state_reset_timeout_ms) * GST_MSECOND);
+    bool ok = (ret != GST_STATE_CHANGE_FAILURE && actual == GST_STATE_PLAYING);
 
-    if (logger) logger->info("State reset recovery succeeded");
-    return true;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    if (ok) {
+        if (logger) logger->info("State reset recovery succeeded ({}ms)", ms);
+    } else {
+        if (logger) logger->warn("Pipeline did not reach PLAYING after reset ({}ms)", ms);
+        gst_element_set_state(pipeline_, GST_STATE_NULL);
+    }
+    return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -613,4 +762,25 @@ void PipelineHealthMonitor::set_pipeline(GstElement* new_pipeline,
         bus_watch_id_ = gst_bus_add_watch(bus, bus_watch_cb, this);
         gst_object_unref(bus);
     }
+}
+
+// ---------------------------------------------------------------------------
+// detach — unbind from current pipeline before it is destroyed (Spec 32 决策 C)
+// ---------------------------------------------------------------------------
+
+void PipelineHealthMonitor::detach() {
+    // Remove buffer probe (probe_pad_ holds a ref, removed+unref inside).
+    remove_probe();
+
+    // Remove bus watch so callbacks no longer fire on the (about-to-die) pipeline.
+    if (bus_watch_id_ != 0) {
+        g_source_remove(bus_watch_id_);
+        bus_watch_id_ = 0;
+    }
+
+    // Drop the (non-owning) pipeline pointer to avoid dangling reference.
+    pipeline_ = nullptr;
+
+    auto logger = spdlog::get("pipeline");
+    if (logger) logger->debug("Health monitor detached from pipeline");
 }

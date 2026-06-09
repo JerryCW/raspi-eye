@@ -2,6 +2,8 @@
 // 跨平台 systemd 通知封装：Linux 调用 libsystemd，macOS 空实现。
 #pragma once
 
+#include <functional>
+
 class SdNotifier {
 public:
     // 禁止实例化
@@ -33,4 +35,13 @@ public:
 
     // 查询心跳线程是否正在运行（线程安全）
     static bool watchdog_running();
+
+    // 注册健康查询回调（线程安全）。看门狗心跳发送前查询：
+    // 返回 false（非健康，如 FATAL）时跳过 WATCHDOG=1，使 systemd WatchdogSec 兜底重启。
+    // 未注册时默认 healthy=true（保持现有行为）。(Spec 32 需求 4)
+    static void set_health_check(std::function<bool()> is_healthy);
+
+    // 返回当前是否应发送看门狗心跳（健康门控判定，可单测）：
+    // 未注册 health_check 时返回 true；否则返回 health_check() 的结果。
+    static bool watchdog_gate_open();
 };

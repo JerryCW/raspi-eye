@@ -142,6 +142,15 @@ void PipelineManager::stop() {
     if (pl) pl->info("Pipeline stopped");
 }
 
+GstElement* PipelineManager::release() {
+    GstElement* p = pipeline_;
+    pipeline_ = nullptr;  // shell is now empty; destructor is a no-op
+
+    auto pl = spdlog::get("pipeline");
+    if (pl) pl->info("Pipeline ownership released (not stopped/unref-ed)");
+    return p;
+}
+
 GstState PipelineManager::current_state() const {
     if (!pipeline_) return GST_STATE_NULL;
 

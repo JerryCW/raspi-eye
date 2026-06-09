@@ -38,6 +38,13 @@ public:
     // Stop the pipeline and release resources (idempotent).
     void stop();
 
+    // Release ownership of the underlying pipeline WITHOUT stopping or unref-ing it.
+    // Returns the raw GstElement* (caller takes ownership) and sets the internal
+    // pointer to nullptr, so the PipelineManager shell can be safely destroyed.
+    // Used by the bounded async teardown path (Spec 32 决策 B): the old pipeline's
+    // blocking set_state(NULL)+unref is handed off to a worker thread.
+    GstElement* release();
+
     // Query the current pipeline state.
     GstState current_state() const;
 

@@ -15,16 +15,16 @@
 
 // Streaming configuration (parsed from TOML [streaming] section)
 struct StreamingConfig {
-    int bitrate_min_kbps = 1000;
-    int bitrate_max_kbps = 4000;
+    int bitrate_min_kbps = 800;        // Spec 32 需求 6：降到实测上传带宽以下
+    int bitrate_max_kbps = 1500;       // Spec 32 需求 6
     int bitrate_step_kbps = 500;
-    int bitrate_default_kbps = 2500;
+    int bitrate_default_kbps = 1200;   // Spec 32 需求 6：≤ 实测上传 1.7Mbps
     int bitrate_eval_interval_sec = 5;
     int bitrate_rampup_interval_sec = 30;
     int debounce_sec = 3;
 
     // 网络自适应配置字段（Spec 26）
-    int buffer_duration_sec = 180;              // kvssink buffer-duration 秒数
+    int buffer_duration_sec = 40;               // Spec 32 需求 5：180 → 40，缩短排空
     int latency_pressure_threshold = 5;         // 10 秒内 pressure 次数阈值
     int latency_pressure_cooldown_sec = 30;     // pressure 停止后恢复等待秒数
     bool bandwidth_probe_enabled = true;        // 是否启用启动带宽探测
@@ -34,8 +34,8 @@ struct StreamingConfig {
 
 // KVS sink 属性配置（POD，从 StreamingConfig + BitrateConfig 转换）
 struct KvsSinkConfig {
-    int avg_bandwidth_bps = 2500000;   // default_kbps * 1000
-    int buffer_duration_sec = 180;     // 从 StreamingConfig 获取
+    int avg_bandwidth_bps = 1200000;   // default_kbps * 1000（Spec 32 需求 6）
+    int buffer_duration_sec = 40;      // 从 StreamingConfig 获取（Spec 32 需求 5）
 };
 
 // Logging configuration (parsed from TOML [logging] section)

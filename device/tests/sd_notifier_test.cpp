@@ -37,6 +37,37 @@ TEST(SdNotifierTest, InitialWatchdogNotRunning) {
     EXPECT_FALSE(SdNotifier::watchdog_running());
 }
 
+// Spec 32 需求 4：看门狗健康门控
+// 未注册 health_check 时默认门开（healthy）
+TEST(SdNotifierTest, GateOpenWhenNoHealthCheck) {
+    SdNotifier::set_health_check({});  // 清空
+    EXPECT_TRUE(SdNotifier::watchdog_gate_open());
+}
+
+// 注册 health_check 返回 true（健康）-> 门开（发送心跳）
+TEST(SdNotifierTest, GateOpenWhenHealthy) {
+    SdNotifier::set_health_check([]() { return true; });
+    EXPECT_TRUE(SdNotifier::watchdog_gate_open());
+    SdNotifier::set_health_check({});  // 复位避免影响其他测试
+}
+
+// 注册 health_check 返回 false（FATAL）-> 门关（跳过心跳）
+TEST(SdNotifierTest, GateClosedWhenUnhealthy) {
+    SdNotifier::set_health_check([]() { return false; });
+    EXPECT_FALSE(SdNotifier::watchdog_gate_open());
+    SdNotifier::set_health_check({});  // 复位
+}
+
+// 门控查询会调用注册的回调（计数验证）
+TEST(SdNotifierTest, GateQueriesHealthCheck) {
+    int calls = 0;
+    SdNotifier::set_health_check([&calls]() { ++calls; return true; });
+    SdNotifier::watchdog_gate_open();
+    SdNotifier::watchdog_gate_open();
+    EXPECT_EQ(calls, 2);
+    SdNotifier::set_health_check({});  // 复位
+}
+
 // stop 未运行的线程不崩溃（幂等性）
 // 验证需求: 2.5
 TEST(SdNotifierTest, StopIdleNoCrash) {

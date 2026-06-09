@@ -10,11 +10,13 @@
 #include <signal.h>
 #include <unistd.h>
 #include <atomic>
+#include <cstdlib>
 #include <string>
 
 // 全局 atomic（async-signal-safe）
 static std::atomic<int> g_signal_count{0};
 static std::atomic<bool> g_shutdown_requested{false};
+static std::atomic<bool> g_fatal{false};  // FATAL 退出标志，决定退出码（Spec 32 需求 4）
 
 static void signal_handler(int /*sig*/) {
     if (g_signal_count.fetch_add(1, std::memory_order_relaxed) >= 1) {
@@ -86,6 +88,12 @@ static int run_pipeline(int argc, char* argv[]) {
         return 1;
     }
 
+    // FATAL -> 优雅退出：仅设 flag，由 check_shutdown timer 退出主循环（Spec 32 需求 4）
+    ctx.set_shutdown_requester([]() {
+        g_fatal.store(true, std::memory_order_relaxed);
+        g_shutdown_requested.store(true, std::memory_order_relaxed);
+    });
+
     // Create main loop (local variable, not global)
     GMainLoop* loop = g_main_loop_new(nullptr, FALSE);
 
@@ -109,6 +117,8 @@ static int run_pipeline(int argc, char* argv[]) {
     }
 
     // Phase 5.5: 通知 systemd 启动完成 + 启动看门狗
+    // 看门狗心跳按健康状态门控：FATAL 时不发送，使 systemd WatchdogSec 兜底重启
+    SdNotifier::set_health_check([&ctx]() { return ctx.is_healthy(); });
     SdNotifier::notify_ready();
     SdNotifier::start_watchdog_thread();
 
@@ -131,7 +141,7 @@ static int run_pipeline(int argc, char* argv[]) {
     }
     g_main_loop_unref(loop);
     log_init::shutdown();
-    return 0;
+    return g_fatal.load(std::memory_order_relaxed) ? EXIT_FAILURE : 0;
 }
 
 int main(int argc, char* argv[]) {

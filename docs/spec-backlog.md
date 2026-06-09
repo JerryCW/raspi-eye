@@ -122,6 +122,19 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 | 22 | pi-deploy | Pi 5 部署自动化：build + install + systemctl restart 一键脚本，config.toml 初始化部署 | spec-20 | scripts | ✅ |
 | 23 | log-management | 统一日志管理：per-component level 配置 + KVS SDK 日志重定向到 spdlog + 统一格式 | spec-19 | device | ✅ |
 
+## 阶段五续：推理质量优化
+
+| Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
+|------|------|------|------|------|------|
+| 30 | inference-yolo-crop | 推理链路 YOLO Crop 对齐：SageMaker endpoint 加入 YOLO crop 步骤消除 train-serving skew，Lambda 提取 crop 图片上传 S3 | spec-17 | model | ✅ |
+| 31 | inference-voting-threshold | Lambda 端多图投票与置信度门槛：多数投票选择最终 species + confidence < 0.5 标记 uncertain + DynamoDB 新增 vote_count/reliable 字段 | spec-30 | model | 🔄 |
+
+## 阶段八：设备端稳定性加固
+
+| Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
+|------|------|------|------|------|------|
+| 32 | pipeline-resilience | 管道韧性加固：bus 错误按域分类（KVS/WebRTC 分支错误不再拖垮整管道）+ kvssink restart-on-error 自愈 + heartbeat 去抖主动恢复 + 有界异步 teardown（set_state(NULL) 移出主循环，130s→≤5s）+ FATAL 优雅退出交 systemd 重启 + 看门狗健康门控 + 默认码率降至 1200kbps + CPU 基线诊断脚本 | spec-5, spec-8, spec-20 | device + scripts | 🔄 |
+
 ## 阶段七：前端（可选，优先级低）
 
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
@@ -171,7 +184,7 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 
 - **KVS streamLatencyPressure 接入 BitrateAdapter**：当前 adaptive-streaming（Spec 15）仅监听 GStreamer kvssink 的 `stream-status` 信号（HEALTHY/UNHEALTHY），但 KVS Producer SDK 内部的 `streamLatencyPressure` 回调不经过 GStreamer 信号。Pi 5 生产日志显示 SDK 层面 buffer 积压 67 秒但 BitrateAdapter 未触发降码率。需要将 `streamLatencyPressure` 回调接入 BitrateAdapter 作为额外的降码率触发源。（来源：spec-25 Pi 5 生产日志审查）
 
-- **KVS 弱网优化**：Pi 5 到 KVS ap-southeast-1 的实际上传速度仅 211 KB/s（1.7 Mbps），远低于到 Cloudflare 的 1.4 MB/s（11 Mbps），导致 2.5 Mbps 编码码率持续积压、putMedia 连接反复断开重建（30 分钟内 10000+ 条 latency pressure）。需要：(1) kvssink 属性调优（avg-bandwidth-bps 匹配实际码率）；(2) 降低默认码率到上传速度以下（~1200 kbps）；(3) 评估换 region（东京/香港）是否改善路由；(4) 考虑 KVS_ONLY 模式下进一步降码率。（来源：spec-25 Pi 5 生产日志排查）
+- **KVS 弱网优化**：Pi 5 到 KVS ap-southeast-1 的实际上传速度仅 211 KB/s（1.7 Mbps），远低于到 Cloudflare 的 1.4 MB/s（11 Mbps），导致 2.5 Mbps 编码码率持续积压、putMedia 连接反复断开重建（30 分钟内 10000+ 条 latency pressure）。需要：(1) kvssink 属性调优（avg-bandwidth-bps 匹配实际码率）→ **已纳入 Spec 32（avg-bandwidth-bps 跟随 default 码率）**；(2) 降低默认码率到上传速度以下（~1200 kbps）→ **已纳入 Spec 32（需求 6，default 1200kbps / max 1500kbps）**；(3) 评估换 region（东京/香港）是否改善路由（仍待办，Spec 32 明确不含换 region）；(4) 考虑 KVS_ONLY 模式下进一步降码率（仍待办）。（来源：spec-25 Pi 5 生产日志排查）
 
 - **model/ 目录重组**：当前 `model/src/` 把采集（Spec 27）、清洗（Spec 28）、训练（Spec 29）的代码全混在一起。需要按数据流水线阶段重组为 `model/collection/`、`model/cleaning/`、`model/training/` 三个子目录，更新所有 import 路径、测试、S3 同步命令和 SageMaker 容器内路径。等 Spec 29 训练跑通后开独立 Spec 执行。（来源：spec-29 代码审查）
 
@@ -186,4 +199,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ~ spec-16 ✅（含 spec-4.5 ⬜、spec-13.6 ✅、spec-15.5 ✅）, spec-17 ~ spec-18 ✅（合并为 spec-17）, spec-19 ~ spec-29 ✅（含 spec-21 ⬜）。设备端 + ML 管线 + 云端推理链路开发完成。下一步：spec-21（前端 viewer）
+当前进度：spec-0 ~ spec-16 ✅（含 spec-4.5 ⬜、spec-13.6 ✅、spec-15.5 ✅）, spec-17 ~ spec-18 ✅（合并为 spec-17）, spec-19 ~ spec-30 ✅（含 spec-21 ⬜）, spec-31 🔄, spec-32 🔄（Task 1-6 已完成并通过宿主机验证，Task 7 待 Pi 5 实测）。下一步：spec-32 Task 7（Pi 5 集成验证 + CPU 基线 + trace 归档）

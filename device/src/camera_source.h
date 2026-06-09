@@ -2,6 +2,7 @@
 // 摄像头源抽象层：根据配置创建 GStreamer 视频源元素
 #pragma once
 #include <gst/gst.h>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -61,5 +62,22 @@ GstElement* create_source(const CameraConfig& config,
 // Accepts "test", "v4l2", "libcamera" (case-insensitive).
 // Returns true and sets out_type on success, false on failure.
 bool parse_camera_type(const std::string& str, CameraType& out_type);
+
+// 摄像头打开重试配置（Spec 32 需求 2）。
+// 用于恢复/重建时覆盖旧 v4l2 fd 尚未释放的窗口。
+struct OpenRetryConfig {
+    int max_attempts = 6;    // 最多尝试次数
+    int interval_ms  = 500;  // 每次尝试间隔（毫秒）
+};
+
+// 反复调用 try_open（返回 true 即成功），直到成功或耗尽 max_attempts。
+// 不直接依赖 GStreamer，便于单测：sleep_ms 可注入（默认真实 sleep）。
+// out_attempts（可选）返回实际调用 try_open 的次数。
+// 返回是否成功。约定：成功时 try_open 调用次数 ∈ [1, max_attempts]；
+// 全失败时恰好调用 max_attempts 次并返回 false。
+bool open_with_retry(const std::function<bool()>& try_open,
+                     const OpenRetryConfig& cfg,
+                     const std::function<void(int)>& sleep_ms = {},
+                     int* out_attempts = nullptr);
 
 } // namespace CameraSource

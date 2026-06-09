@@ -5,6 +5,8 @@
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <thread>
 #include <vector>
 
 // 使用 CameraSource 命名空间中的 V4L2Format 类型简化 anonymous namespace 内部引用
@@ -412,6 +414,40 @@ bool parse_camera_type(const std::string& str, CameraType& out_type) {
     if (lower == "v4l2")      { out_type = CameraType::V4L2;      return true; }
     if (lower == "libcamera") { out_type = CameraType::LIBCAMERA; return true; }
     return false;
+}
+
+bool open_with_retry(const std::function<bool()>& try_open,
+                     const OpenRetryConfig& cfg,
+                     const std::function<void(int)>& sleep_ms,
+                     int* out_attempts) {
+    auto pl = spdlog::get("pipeline");
+    int max_attempts = cfg.max_attempts > 0 ? cfg.max_attempts : 1;
+    int attempts = 0;
+    bool ok = false;
+
+    for (int i = 0; i < max_attempts; ++i) {
+        ++attempts;
+        if (try_open()) {
+            ok = true;
+            break;
+        }
+        if (pl) pl->warn("Camera open attempt {}/{} failed", attempts, max_attempts);
+        // 不在最后一次失败后再 sleep
+        if (i + 1 < max_attempts) {
+            if (sleep_ms) {
+                sleep_ms(cfg.interval_ms);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(cfg.interval_ms));
+            }
+        }
+    }
+
+    if (out_attempts) *out_attempts = attempts;
+    if (pl) {
+        if (ok) pl->info("Camera opened after {} attempt(s)", attempts);
+        else    pl->error("Camera open failed after {} attempt(s)", attempts);
+    }
+    return ok;
 }
 
 } // namespace CameraSource

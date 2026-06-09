@@ -5171,3 +5171,41 @@ model/tests/test_training.py::test_export_roundtrip PASSED
 **涉及文件：** model/lambda/handler.py（新增 event.json 原始字段写入 + verified/species 字段）, .kiro/specs/spec-17-sagemaker-endpoint/requirements.md（需求 6 验收标准更新）, .kiro/specs/spec-17-sagemaker-endpoint/design.md（DynamoDB 字段表更新）
 
 ---
+
+## 2026-06-09 — SageMaker Endpoint 推理全失败修复（依赖版本漂移）
+
+**完成概要：** raspi-eye-bird-classifier endpoint 昨天起推理全部失败。根因是 `model/endpoint/requirements.txt` 用 `transformers>=4.56` 未钉版本，上游发布新版后容器内模型加载崩溃。修复为钉死 `transformers==5.5.4`，重新打包 model.tar.gz 并 `--update` endpoint。端到端验证通过（DynamoDB 写回 inference_species=Pterorhinus sannio, confidence=0.886, latency=5118ms, error=None）。
+
+**问题根源（两层，按发现顺序）：**
+1. **float8 导入崩溃**：容器镜像是 PyTorch 2.6 CPU（`pytorch-inference:2.6.0-cpu-py312`）。`transformers>=4.56` 在冷启动安装时拉到引用 `torch.float8_e8m0fnu`（torch 2.7+ 才有）的新版，导致 `DINOv3ViTModel` 导入失败、TorchServe worker 崩溃。每次 invoke 卡在精确 60s（容器健康检查超时）。这就是"稳定跑一个月昨天突然坏"——代码没动，上游依赖漂移。
+2. **state_dict 结构不匹配（修第一层时暴露）**：先尝试钉 `transformers==4.56.0`，float8 错误消失，但暴露出 `load_state_dict` 崩溃：模型期望 `backbone.layer.*`，checkpoint 是 `backbone.model.layer.*`。说明训练时用的是 transformers **5.x**（DINOv3 的 AutoModel 把 transformer blocks 嵌套在 `backbone.model.*` 下），4.56.0 把结构拍平了，太旧。
+
+**定位手段：** 本地 `torch.load` introspect checkpoint：metadata `backbone_name=dinov3-vitl16, num_classes=63, lora=True`；state_dict 前缀 `backbone.embeddings.*`(5) + `backbone.model.*`(408) + `backbone.norm.*`(2) + `head.*`(2)。用本地 transformers 5.5.4 的 `AutoModel.from_config` 构建同结构，key 集合与 checkpoint **完全匹配（0 缺失 0 多余）**，确认需要 5.x。再 grep 5.5.4 源码确认无 `float8_e8m0fnu` 引用，且 METADATA 声明 `torch>=2.4`（兼容容器 torch 2.6）。
+
+**完整错误链（容器日志 /aws/sagemaker/Endpoints/raspi-eye-bird-classifier）：**
+```
+# 故障原始态（>=4.56 拉到 float8 版本）：
+AttributeError: module 'torch' has no attribute 'float8_e8m0fnu'
+ModuleNotFoundError: Could not import module 'DINOv3ViTModel'
+Backend worker process died.
+# 钉 4.56.0 后暴露的第二层：
+RuntimeError: Error(s) in loading state_dict for _BirdClassifier:
+  Missing key(s): "backbone.layer.0.norm1.weight", ... (模型期望 backbone.layer.*)
+  Unexpected key(s): "backbone.model.layer.0.norm1.weight", ... (checkpoint 是 backbone.model.layer.*)
+```
+
+**Trace 记录：**
+
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | endpoint 推理全失败，看似 timeout（每次 invoke 卡 60s），ModelLatency 卡精确 60s | Spec 缺少信息（依赖未钉版本） | 容器日志：`torch has no attribute float8_e8m0fnu` → `Could not import DINOv3ViTModel` → worker died。`transformers>=4.56` 拉到 torch 2.7+ 才支持的新版 | 钉死 `transformers==5.5.4`（5.x 保证 `.model` 结构 + 无 float8 引用 + torch>=2.4 兼容容器 torch 2.6） | 重新打包 model.tar.gz + `--update` endpoint；反哺 shall-not.md 依赖钉版本禁止项 |
+| 2 | 钉 4.56.0 后 `load_state_dict` 崩溃，key 前缀 `backbone.model.*` vs `backbone.*` | 二次规则触发（不盲试版本） | 本地 introspect checkpoint + 用 transformers 5.5.4 重建结构，确认 5.x 产生 `.model` 嵌套且与 checkpoint 完全匹配 | 从 4.56.0 改为 5.5.4，结构与训练时一致 | 已通过本地 key 完全匹配验证后再部署，避免线上反复试错 |
+
+**提炼的禁止项（SHALL NOT）：**
+- **推理/训练依赖严禁用 `>=` / 不钉版本**：transformers、torch、ultralytics、Pillow 等必须钉到 `==` 精确版本。上游漂移是本次"稳定运行一个月后无改动突然故障"的唯一根因。容器镜像 torch 版本固定（2.6），依赖必须与之兼容并锁死。已同步到 shall-not.md（Design 层）。
+
+**验证命令：** `bash scripts/deploy-inference-pipeline.sh --e2e-test` → DynamoDB 写回 `inference_species=Pterorhinus sannio, confidence=0.886, vote_count=3, latency_ms=5118, error=None` → pass。容器日志「模型加载完成: backbone=dinov3-vitl16, num_classes=63」+「YOLO 模型加载完成」，无 float8 / state_dict / worker died / Traceback。
+
+**涉及文件：** model/endpoint/requirements.txt（`transformers>=4.56` → `transformers==5.5.4`，补充根因注释）。model.tar.gz 在 S3 原地替换 `code/requirements.txt`（模型权重 bird_classifier.pt / yolo11x.pt 未动），旧版本备份为 `s3://raspi-eye-captures-014498626607-ap-southeast-1-an/endpoint/dinov3-vitl16-lora/model.tar.gz.bak-20260427`。
+
+---

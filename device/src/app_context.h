@@ -2,6 +2,7 @@
 // Application context: three-phase lifecycle (init/start/stop) with pImpl.
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include "config_manager.h"
@@ -26,6 +27,15 @@ public:
 
     // Phase 3: delegate to ShutdownHandler::execute()
     ShutdownSummary stop();
+
+    // Register a callback invoked when the pipeline health enters FATAL.
+    // Used by main to request a graceful shutdown (Spec 32 需求 4).
+    void set_shutdown_requester(std::function<void()> fn);
+
+    // Returns false only when the health monitor is in FATAL state.
+    // Returns true when healthy/degraded/recovering or when no monitor exists.
+    // Thread-safe (PipelineHealthMonitor::state() is mutex-protected).
+    bool is_healthy() const;
 
 private:
     struct Impl;
