@@ -1,0 +1,60 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "2. 建立 SDK seam、共享 runtime 与 SignalingOwner 状态机": [
+      {
+        "executionId": "bde819de-e628-4324-b815-cb91120b5dbb",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787395150150
+      },
+      {
+        "executionId": "bde819de-e628-4324-b815-cb91120b5dbb",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787395166682
+      },
+      {
+        "executionId": "f9c2ca01-214a-41eb-92e5-650836434f91",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787410111863
+      },
+      {
+        "executionId": "2981e9a6-81ee-422c-b68f-0231a6acfa10",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787485053478
+      }
+    ],
+    "3. 实现安全 SignalingCallbackBridge 与有界 MessageDispatcher": [
+      {
+        "executionId": "bde819de-e628-4324-b815-cb91120b5dbb",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787395150281
+      },
+      {
+        "executionId": "2981e9a6-81ee-422c-b68f-0231a6acfa10",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787485081159
+      }
+    ],
+    "4. 以 PeerSession、CallbackBridge、HandlePermit 和 Reaper 重构 peer 生命周期": [
+      {
+        "executionId": "bde819de-e628-4324-b815-cb91120b5dbb",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787395150313
+      }
+    ],
+    "5. 完成媒体 I/O、local ICE、僵尸/缓存上限与健康观测": [
+      {
+        "executionId": "bde819de-e628-4324-b815-cb91120b5dbb",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787395150359
+      }
+    ],
+    "6. 收敛双平台回归并执行分层 Pi 长稳门禁": [
+      {
+        "executionId": "bde819de-e628-4324-b815-cb91120b5dbb",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1787395150416
+      }
+    ]
+  }
+}

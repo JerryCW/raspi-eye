@@ -97,6 +97,7 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 |------|------|------|------|------|------|
 | 14 | webrtc-sdp-fix | Bugfix: WebRTC SDP 协商 + ICE 连接 + NALU 格式修复（addSupportedCodec、ICE 缓存、byte-stream 格式） | spec-13.5 | device | ✅ |
 | 13.6 | webrtc-peer-lifecycle-fix | Bugfix: WebRTC peer connection 生命周期死锁修复 — deferred cleanup + shared_mutex + cleanup thread | spec-13 | device | ✅ |
+| 13.7 | signaling-reconnect-fix | Bugfix: signaling WebSocket 断连自动重连与健康日志 | spec-12, spec-13.6 | device | ✅ |
 | 15 | adaptive-streaming | 自适应码率控制 + 流模式切换（FULL/KVS_ONLY/WEBRTC_ONLY/DEGRADED） | spec-8, spec-13 | device | ✅ |
 | 15.5 | shutdown-fix | Bugfix: Shutdown 卡死修复 — std::thread + condition_variable 替换 std::async | spec-15 | device | ✅ |
 | 16 | zero-copy-buffers | 缓冲区零拷贝重构与预分配池化，目标 CPU 负载 ~26% @ 720p15 | spec-15 | device | ✅ |
@@ -134,6 +135,8 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
 | 32 | pipeline-resilience | 管道韧性加固：bus 错误按域分类（KVS/WebRTC 分支错误不再拖垮整管道）+ kvssink restart-on-error 自愈 + heartbeat 去抖主动恢复 + 有界异步 teardown（set_state(NULL) 移出主循环，130s→≤5s）+ FATAL 优雅退出交 systemd 重启 + 看门狗健康门控 + 默认码率降至 1200kbps + CPU 基线诊断脚本 | spec-5, spec-8, spec-20 | device + scripts | 🔄 |
+| 33 | webrtc-long-running-resilience | Bugfix: Task 0 失活取证（pi-diagnose.sh，归因基线）+ Pi SDK 语义门禁 + signaling 单 owner/两级 command deadline（QUERY 2s / SEND 10s 迟到无害）+ 有界 message dispatcher + 固定池化 CallbackBridge（type-stable，免 SDK quiescence 证明）+ PeerSession/HandlePermit/Reaper + 僵尸 peer 回收，修复运行 1～2 天后 WebRTC 永久停止；分两个 Stage 部署归因（Stage 1 signaling 层 / Stage 2 peer 层）；4 个生产文件 + 2 个既有测试文件（6 文件显式例外） | spec-13.6, spec-13.7；整机 72h 依赖 spec-34 | device | ⬜ |
+| 34 | device-lifecycle-safety | 修复 pipeline 双 teardown owner、ShutdownHandler detached worker、borrower 解绑顺序、health timer 与 AppContext 生命周期 P0；完成后解锁 spec-32 故障注入和 spec-33 整机 72h | spec-32 Task 1～6 | device | ⬜ |
 
 ## 阶段七：前端（可选，优先级低）
 
@@ -178,9 +181,11 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 
 - **WebRtcMediaManager 与 PipelineHealthMonitor 集成**：WebRTC 分支的连接状态（所有 peer 断开、连续 writeFrame 失败等）需要反馈给 PipelineHealthMonitor，用于流模式切换（FULL/KVS_ONLY/WEBRTC_ONLY/DEGRADED）。等 spec-14（adaptive-streaming）实现。（来源：spec-13 review）
 
-- **broadcast_frame 异步帧分发**：当前 broadcast_frame 在 GStreamer streaming 线程中同步调用 writeFrame，持锁遍历所有 peer。如果 Pi 5 端到端验证发现 writeFrame 有阻塞行为（网络拥塞时），需要改为异步队列分发。等 spec-14 或 spec-15 根据实际性能数据决定。（来源：spec-13 review）
+- **broadcast_frame 异步帧分发**：当前 broadcast_frame 在 GStreamer streaming 线程中同步调用 writeFrame，持锁遍历所有 peer。→ **已纳入 Spec 33 的 SDK 语义门禁与媒体 I/O 隔离**：先确认 Pi 当前 SDK 的 `writeFrame` 阻塞上界和 frameData 所有权，再采用 session 级 I/O gate；不得用 detached frame worker 猜测规避生命周期问题。（来源：spec-13 review、spec-33 design）
 
 - **WebRTC 日志可观测性优化**：当前 ICE candidate 收发每条都打 info 级别（一次连接 20+ 条），缺少 ICE 状态转换、DTLS 握手、SDP 摘要、media flow 统计等关键诊断信息。需要：(1) ICE candidate 单条降为 debug，连接建立后打汇总 info；(2) 增加 ICE/DTLS 状态转换里程碑日志；(3) SDP offer/answer 打印 codec/分辨率摘要；(4) peer 连接期间增加 media flow 状态日志；(5) cleanup 日志加上 peer 存活时长。（来源：spec-24 Pi 5 生产日志审查）→ **已纳入 Spec 25（webrtc-log-observability）**
+
+- **WebRTC 永久失活升级为进程退出（兜底自愈）**：spec-33 的目标是无需重启即可恢复，但作为 7×24 无人值守产品，恢复手段穷尽后仍需最后一道保险：signaling 连续 recreate 失败超过阈值（如 30 分钟）或 WebRTC 子系统进入不可恢复状态时，主动让 sd_notify 停止喂狗或直接优雅退出，交 systemd 重启（Restart=on-failure + WatchdogSec=30 已就绪）。与 spec-33 验收不冲突（验收针对断网/churn 场景，兜底针对未知 bug）。等 spec-33 Stage 2 部署观察后，纳入 spec-20 的后续迭代或独立小 Spec。（来源：spec-33 第三次 review）
 
 - **KVS streamLatencyPressure 接入 BitrateAdapter**：当前 adaptive-streaming（Spec 15）仅监听 GStreamer kvssink 的 `stream-status` 信号（HEALTHY/UNHEALTHY），但 KVS Producer SDK 内部的 `streamLatencyPressure` 回调不经过 GStreamer 信号。Pi 5 生产日志显示 SDK 层面 buffer 积压 67 秒但 BitrateAdapter 未触发降码率。需要将 `streamLatencyPressure` 回调接入 BitrateAdapter 作为额外的降码率触发源。（来源：spec-25 Pi 5 生产日志审查）
 
@@ -199,4 +204,4 @@ _从 Spec 执行过程中推迟的事项，创建新 Spec 前检查此列表。_
 - ✅ 已完成
 - ⏸️ 暂停
 
-当前进度：spec-0 ~ spec-16 ✅（含 spec-4.5 ⬜、spec-13.6 ✅、spec-15.5 ✅）, spec-17 ~ spec-18 ✅（合并为 spec-17）, spec-19 ~ spec-30 ✅（含 spec-21 ⬜）, spec-31 🔄, spec-32 🔄（Task 1-6 已完成并通过宿主机验证，Task 7 待 Pi 5 实测）。下一步：spec-32 Task 7（Pi 5 集成验证 + CPU 基线 + trace 归档）
+当前进度：spec-0 ~ spec-16 ✅（含 spec-4.5 ⬜、spec-13.6/13.7 ✅、spec-15.5 ✅）, spec-17 ~ spec-30 ✅（含 spec-21 ⬜）, spec-31 🔄, spec-32 🔄（Task 1-6 已完成并通过宿主机验证，Task 7 待生命周期 P0 修复后做 Pi 实测）, spec-33 ⬜（三件套已完成第三次 review 修订：消解 send deadline 自锁矛盾（决策 D 两级 deadline）、CallbackBridge 改固定池化免 SDK quiescence 证明（决策 B）、reconnect 默认 A2、新增 Task 0 取证与 Stage 1/2 分阶段部署归因；Task 0 取证 + Task 1 SDK 门禁可立即并行开始，后续编码受门禁结果约束，整机 72h 依赖 spec-34）, spec-34 ⬜（待创建：设备生命周期安全 P0）。下一步：Pi 可达后先跑 spec-33 Task 0 取证（scripts/pi-diagnose.sh）；创建并完成 spec-34；期间可并行收集 spec-33 Task 1 的 Pi SDK 证据；生命周期 P0 修复后再执行 spec-32 Task 7 与 spec-33 整机长稳验收。

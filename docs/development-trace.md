@@ -5209,3 +5209,106 @@ RuntimeError: Error(s) in loading state_dict for _BirdClassifier:
 **涉及文件：** model/endpoint/requirements.txt（`transformers>=4.56` → `transformers==5.5.4`，补充根因注释）。model.tar.gz 在 S3 原地替换 `code/requirements.txt`（模型权重 bird_classifier.pt / yolo11x.pt 未动），旧版本备份为 `s3://raspi-eye-captures-014498626607-ap-southeast-1-an/endpoint/dinov3-vitl16-lora/model.tar.gz.bak-20260427`。
 
 ---
+
+### 2026-08-22 — Spec: spec-33-webrtc-long-running-resilience / 任务: Task 0 失活取证与假设分类
+
+**完成概要：** 使用 `scripts/pi-diagnose.sh`（新增取证脚本，macOS 远程模式）+ AWS CloudWatch 交叉取证，捕获到失活现场（取证时设备正处于失活态），root cause 证据链闭合，假设排序大幅更新。
+
+**测试状态：** 零生产代码变更（`git status` 确认仅新增 scripts/pi-diagnose.sh 与 spec-33 文档修订）— 无新增测试
+
+**Trace 记录（取证证据链）：**
+
+| # | 证据 | 来源 | 结论 |
+|---|------|------|------|
+| 1 | `/usr/local/bin/raspi-eye` 编译于 2026-06-09 23:03；Pi 上 `~/raspi-eye` 仓库目录不存在 | ssh ls + find | **部署 drift**：设备运行的是 6 月 9 日（657eb35，spec-32 Task1-6 后）的二进制，且仓库被删除后 pi-build.sh 已无法运行。6/9 与本地 HEAD (d6c3bd8) 间无 webrtc 源码变化，但 webrtc_signaling.cpp 的 spec-13.7 重连日志格式与设备日志不匹配，需在 Pi 重建仓库后核对二进制实际包含的代码 |
+| 2 | 今日 10:48/12:49/14:49（每 2h 整）各出现一轮 DESCRIBE→CREATE→GET_ICE_CONFIG→READY→CONNECTED→**0.4s 后 DISCONNECTED**；journald 无任何 `Reconnect attempt`、无 `triggering auto-reconnect` 后缀日志 | journalctl 72h | SDK 内置 reconnect（reconnect=TRUE，2h 周期与凭证/WebSocket TTL 吻合）每次重连成功后立刻被断开；应用层重连从未触发 |
+| 3 | DISCONNECTED 后健康日志持续报 `Signaling health: connected for Ns, disconnects=0, reconnects=0`（每 60s 一条，直到取证时刻） | journalctl | **假设 A 证实（stale connected）**：运行中二进制的 DISCONNECTED 处理不置 connected=false、不触发重连、不计数——WebRTC 自 10:48 开机起从未真正可用 |
+| 4 | CloudWatch ConnectAsMaster SampleCount 过去 24h 仅 3 次（10/12/14 时各 1），与设备日志一一对应 | CloudWatch Latency/SampleCount | **排除双 master 抢占**：无第二个 master 占用 RaspiEyeAlphaChannel |
+| 5 | 15:00 时段 RaspiEyeAlphaChannel MessagesTransferred=24（viewer 发 offer/ICE 但设备 WebSocket 已断，收不到）；11:00 时段旧 channel RaspiEyeLv MessagesTransferred=19 | CloudWatch | viewer 侧正常发消息，设备侧收不到 → 症状「viewer 永远连不上」成立；账号存在旧 channel RaspiEyeLv 仍有客户端活动（旧书签/测试页，待清理，非本次失活原因） |
+| 6 | KVS Producer 报 `Limit exceeded on the number of concurrent connections`（0x52000051，多次）；PutMedia.ActiveConnections 每小时 Max=1 | journalctl + CloudWatch | Producer 重连时短暂新旧连接重叠，非持续双连；与 signaling 失活无直接因果，记录待观察 |
+| 7 | gdb 全线程栈：31 线程全部处于 poll/futex/cond 正常等待，无死锁、无线程卡在 on_viewer_offer/SendMessageSync | gdb thread apply all bt | **本次现场排除假设 B（消息泵死锁）**；假设 C（退避风暴）也未出现（无 Reconnect attempt 日志） |
+
+**假设排序更新（对照 spec-33 决策 C 三假设）：**
+- 假设 A（僵尸 signaling / stale connected / 无 recreate）：**证实**，且比预想更严重——不是「运行 1-2 天后」而是「本次开机起就失活」，触发器是 SDK 2h 周期重连后 0.4s 即断。0.4s 被断的服务端原因未定位（候选：IoT credential provider 的凭证在 ConnectSync 后过期、SDK 内置 reconnect 使用过期签名 URL），需 Task 1 SDK 源码分析（`scripts/webrtc-sdk-probe.sh`）确认 reconnect 时凭证刷新逻辑。
+- 假设 B（消息泵死锁）：本次现场排除，但代码缺陷仍在（offer 同步处理 + 锁内 SDK），spec-33 Task 3/4 照常修复。
+- 假设 C（退避风暴）：未触发（应用层重连从未启动过），代码缺陷仍在（`1 << attempt`），照常修复。
+
+**根因结论（Task 0 归档）：** spec-33 的修复方向正确（需求 2 的 recreate + deadline + A2 直接命中假设 A），但存在两个前置事实必须先处理：(1) **部署 drift**——Pi 仓库丢失、二进制 2 个月未更新，任何修复都无法生效，必须先恢复 `git clone` + pi-build 部署链路；(2) SDK 2h 重连后 0.4s 被断的服务端原因需 Task 1 结合 SDK 源码（reconnect 路径是否复用过期凭证/URL）给出证据，这直接影响决策 A1/A2 的最终确认（当前证据强烈支持 A2：禁用 SDK 内置 reconnect，应用层全权 recreate 时走完整 create/fetch/connect 会刷新凭证与签名 URL）。
+
+**新增 SHALL NOT 候选：** 部署验证必须包含二进制新鲜度检查（对比 `ls -la /usr/local/bin/raspi-eye` 时间与最新 commit 时间），出现 ≥3 次后提炼入 shall-not.md。
+
+**涉及文件：** scripts/pi-diagnose.sh（新增），docs/development-trace.md（本记录）；取证数据存于 /tmp/raspi-eye-diagnose-20260822-152342/（未入库）
+
+---
+
+### 2026-08-22（补充更正）— Spec: spec-33 / Task 0 取证结论重大修正 + 部署链路修复 + 现场验证通过
+
+**完成概要：** 上一条 Task 0 取证记录中的核心结论被一个日志 bug 污染，本条更正。发现并修复 `webrtc_signaling.cpp` 的 `state_names` 数组缺少枚举首项 `UNKNOWN`，导致**所有 signaling 状态名日志偏移 +1**；修复后重新翻译日志，root cause 判断全面反转。同时修复 pi-deploy.sh 的 Text file busy 缺陷，恢复 Pi 部署链路，部署后现场验证 viewer 连接端到端成功。
+
+**测试状态：** Pi 5 全量 ctest 19/19 通过；macOS 本地 webrtc_media_test 的 `ReadReadConcurrencyWithSharedLock` 吞吐比值断言在高负载下失败（0.64<2.0，与改动无关，为 spec-33 需求 7.3 已判定待替换的脆弱测试）
+
+**Trace 记录（更正上一条）：**
+
+| 上一条的结论 | 更正后 |
+|---|---|
+| "CONNECTED 后 0.4s 被 DISCONNECTED，SDK 重连被踢" | 实为 `CONNECTING(8) → CONNECTED(9)`，正常连接成功。旧 state_names[8]="CONNECTED"、[9]="DISCONNECTED" 全部错位 |
+| "假设 A 证实：stale connected、DISCONNECTED 不触发重连" | **撤销**。connected=true 是正确的，设备 signaling 全程 CONNECTED；DISCONNECTED 从未发生过，重连逻辑从未需要触发 |
+| "每 2h SDK 重连后被断开" | 实为 SDK 正常的周期性 ICE config/凭证刷新（GET_CREDENTIALS→…→CONNECTED），每次成功 |
+| "0.4s 被断的服务端原因需 Task 1 定位" | 不存在此现象，无需定位 |
+
+**仍然成立的事实：** (1) 失活期间 viewer offer 已到达 AWS（CloudWatch MessagesTransferred/SendSdpOffer 有数据），设备日志 `Received SDP offer`=0——消息在"服务端已接收 → 设备 WebSocket 投递"段丢失，方向指向 SDK v1.12.1（Pi 安装版本，commit ef4649473b）长连接后消息投递失活/半开连接（对齐社区 issue #243"master 闲置后拒绝新 peer"）；(2) 部署 drift 事实成立（二进制 6/9、真实仓库在 `~/Workspace/raspi-eye` 而非 `~/raspi-eye`，历史取证时 find -maxdepth 3 漏扫导致误判"仓库丢失"）；(3) 代码中的并发/生命周期缺陷（handle 多线程、锁内 SDK、CallbackContext UAF、backoff 位移溢出、启动 connect 失败无重试）经代码核实依然真实存在，spec-33 修复方向不变，但它们与本次失活的因果性待长连接观察验证。
+
+**修复与部署：**
+- `device/src/webrtc_signaling.cpp`：state_names 补齐 UNKNOWN 首项 + DESCRIBE_MEDIA/JOIN_SESSION 系列，加注释说明历史误导（诊断性关键修复）
+- `scripts/pi-deploy.sh`：install_binary 前先 systemctl stop（修复 Text file busy 导致的部署失败）
+- 部署 657eb35+日志修正到 Pi（先 scp 单文件到 Pi 工作树构建，正式版本待统一 commit 后 Pi 侧 git 同步；**注意 Pi 工作树 webrtc_signaling.cpp 有本地覆盖，pull 前需 checkout 还原**）
+- 部署时首次启动因 stop→start 过快摄像头句柄未释放 exit 1，systemd RestartSec=5 自动恢复（记录为已知瞬态，可在 pi-deploy 中加等待缓解）
+
+**现场验证（17:49）：** viewer 打开 ipc.jerrpot.com → 设备收到 offer → 18 条 ICE 交换 → `Peer viewer-* connected (elapsed=0.4s)` → `First frame sent (size=44009, keyframe=true)`，用户确认画面正常。
+
+**观察窗口基线（Stage 0）：** 自 2026-08-22 17:37 起，当前版本连续运行观察；下次失活立即执行 `scripts/pi-diagnose.sh`（本次修正后日志语义可信），重点核对：失活时 signaling 最后状态、`Received SDP offer` 是否停增、2h 刷新序列是否仍出现。spec-33 Task 1 SDK 源码分析新增焦点：v1.12.1 的 WebSocket ping/pong 与消息投递路径、上游 changelog 中 1.12.1 之后的 signaling 稳定性修复。
+
+**新增 SHALL NOT 候选（第 1 次出现，暂不入 shall-not.md）：** 手写与外部 SDK 枚举对应的名称数组时必须逐项核对枚举定义（含首项），或改用 SDK 自带的 to-string 接口；日志显示值必须同时打印数值（本次 `({})` 打印数值救了命，靠它才发现错位）。
+
+**涉及文件：** device/src/webrtc_signaling.cpp, scripts/pi-deploy.sh, docs/development-trace.md
+
+---
+
+### 2026-08-22 — Spec: spec-33 / Task 1: Pi SDK 语义决策门（全部 CONFIRMED，root cause 闭环）
+
+**完成概要：** 对运行中 SDK（v1.18.0, ef4649473b，源码基准 `~/Workspace/amazon-kinesis-video-streams-webrtc-sdk-c`）完成全部语义门禁取证，design.md Gates 表 10 项全 CONFIRMED、无 BLOCKED。发现两条永久失活路径，与 Task 0 观测（offer 达 AWS 而设备未收）形成闭环。
+
+**测试状态：** 纯取证任务，无代码变更、无测试
+
+**Trace 记录（关键取证结论）：**
+1. **`ChannelInfo.reconnect` 是死配置**：全库仅 ChannelInfo.c:133 拷贝一次，无任何读取点——SDK 内置重连无法禁用，决策 A1/A2 前提被推翻，改为 **A3（共存策略）**。
+2. **永久失活路径 1**：断线时 SDK 用 detached 线程单次重连（15s 上界），失败仅调用可选的 `errorReportFn` 后彻底放弃；**现有应用未注册该回调**，重连失败即静默永久失活。
+3. **永久失活路径 2**：SDK 全无 WebSocket ping/pong/keepalive；服务端静默断开（NAT 超时等）不触发任何 callback，SDK 永远自认 connected。上游至 v1.20.0 无针对性修复——应用层活性检测是唯一防线（利用 2h ICE refresh 必产生 state callback 的规律，3h 无信号判半开）。
+4. **决策 D 成立**：Linux 下 SIGNALING_SEND_TIMEOUT=5s（Windows 才 15s），≤10s 完成 deadline，SEND 路径不 BLOCKED。
+5. **同步 callback 契约证实**：`onNewIceLocalCandidate` 在 SDK 持 peerConnectionObjLock 时同步调应用回调——回调内阻塞 send 占住 SDK 锁、回调内调 Peer API 死锁；local ICE fire-and-forget 与两阶段创建是必要而非优化。
+6. 其余上界：create 10s / connect 状态机 15s / free 9s / deinit=threadpool join / writeFrame 毫秒级持 srtpSessionLock 且 frameData 返回即可释放 / closePeerConnection 有限 / SRTP 符号 Include.h:279。
+7. 升级待办：SDK v1.20.0 含 #2372（stale TURN credentials）修复，记入 backlog，不在本 Spec。
+
+**涉及文件：** .kiro/specs/spec-33-webrtc-long-running-resilience/design.md（Gates 表 + 决策 A3 + seam on_error）、requirements.md（Constraints 加活性超时 3h/裕量窗口 20s）、tasks.md（Task 0/1 勾选）
+
+---
+### 2026-08-23 — Spec: spec-33 / Task 2: SDK seam、共享 runtime 与 SignalingOwner 状态机
+**完成概要：** webrtc_signaling 全量重构为单一共享 runtime：`webrtc::internal` seam（RuntimeOptions/RuntimeClock/IceServerRecord/SignalingSdkOps/create_for_test）、KvsRuntimeToken 进程级 refcount、ControlMailbox（256 有界命令队列 + 带外 SHUTDOWN + per-generation 合并 state 槽）、SignalingOwner 单常驻 worker（STOPPED→…→STOPPING 状态机、30s CONNECTED deadline、observed_at<=deadline 胜负、{1,2,4,8,16,30} 常量表饱和退避、稳定 30s 重置、决策 A3 三防线：errorReportFn 事件消费 / DISCONNECTED 20s 裕量窗口 / 3h 活性半开检测）、Command exactly-once（CAS 保护 promise，QUERY 取消零副作用、SEND 迟到无害）。删除旧 reconnect_thread_/needs_reconnect_ 双平台平行实现。
+**测试状态：** webrtc_test 29 例三连跑全过（新增 15 例：staged failure 启动恢复、10,000 次恢复 160ms≪15s、deadline 边界两例、洪水不饿死控制面、SEND 迟到 exactly-once、过期命令零 SDK 调用、单 owner 线程、release 后无调用、队列≤256、退避常量表精确校验、A3 grace/liveness、token refcount、取消零副作用）；全量 18/19（唯一失败为 spec-13.6 预存 flaky ReadReadConcurrencyWithSharedLock，spec-33 Task 5 计划替换）；ASan 零报告
+**Trace 记录：**
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | 子代理反复被中止（11 派发 2 成功） | 环境（网络断连） | invoke_sub_agent 返回 aborted，用户确认网络反复断开 | 用户授权主会话直接完成剩余实现 | 网络不稳时避免长时子代理任务 |
+| 2 | StagedFailureStartupRecovery 首跑失败 | 实现时序 | fail_and_backoff 先 release 后设 backoff_deadline，manual clock 测试以 release 为周期标记时产生竞态 | release 移到 deadline 设置之后（release 成为"退避已装配"的外部可观测标记） | manual clock 测试需明确外部可观测事件与内部状态的 happens-before |
+| 3 | ExpiredCommandNeverStartsSdkCall 首跑失败 | 测试竞态 | owner 取件前时钟被推进 | FakeSignalingOps 加 gate_entered 计数器，先确认 owner 已进入门禁再推时钟 | 事件门禁优于状态轮询 |
+**偏离记录：** IceServerRecord 增加 group 字段（保留公共 get_ice_config 按 TURN 组语义）；get_ice_config 改为 CONNECTED 时缓存读取（QUERY_ICE 命令刷新同一缓存）；工具集无文件写入工具，经用户授权用 bash heredoc 写码（以编译+测试兜底验证）。
+---
+### 2026-08-23 — Spec: spec-33 / Task 3: SignalingCallbackBridge 固定 slot 与有界 MessageDispatcher
+**完成概要：** 决策 B 落地：SignalingCallbackBridge 为 Impl 首成员固定 slot（析构最晚，SDK callback 只捕获 slot 地址），callback 入口 in-flight lease 协议（fetch_add → 校验 open/generation → 失配递减计 stale）；recreate 固定序列 open=false → release → generation++ → 等 in-flight==0 → 复开。MessageDispatcher 单常驻 worker：512 有界队列、OFFER 满队淘汰最旧 ICE、全 OFFER 拒新 OFFER、新 ICE 满丢弃、immutable handler snapshot、旧 generation 只计 stale；oversize（peer>256B/payload>16KiB）在分配前拒绝。shutdown 固定顺序：关命令 admission → dispatcher 关闭/丢弃/join → 取消 QUEUED → 带外 SHUTDOWN → owner release/join。RateLimitedLog（首条立即/60s 窗口/10min 重置）用于 overflow/oversize 日志。HealthSnapshot 增加 message_queue_depth/messages_dropped。
+**测试状态：** webrtc_test 36 例三连跑全过（新增 7 例：SDK callback 不跑 handler+FIFO、512 overflow 淘汰/拒绝、全 OFFER 拒绝、handler 异常隔离、旧 generation 双层 stale（bridge 入口 + dispatch 时）、handler snapshot 替换、shutdown 丢弃+oversize 拒绝）；全量 18/19（同上预存 flaky）；ASan 零报告
+**Trace 记录：**
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | CancelledQueuedCommandNeverExecutes 在 Task 3 改动后失败 | 测试时序假设失效 | dispatcher join 拉长 disconnect 窗口，opener 线程过早开门导致排队命令被 owner 取走执行（send_calls=2） | opener 改为等 command_queue_depth==0（drain 完成）再开门，建立确定性 happens-before | 跨任务改动可能改变既有测试的隐式时序假设，disconnect 路径变更需重查依赖它的测试 |
+**待办：** Stage 1 部署门（等用户 commit+push 后执行 pi-build + pi-deploy + 记录观察窗口起点）。ProductionSignalingOps 真实 SDK 路径编译验证依赖 Pi 构建。
+---

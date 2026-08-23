@@ -109,6 +109,11 @@ do_test() {
 
 install_binary() {
     log "Installing binary to ${INSTALL_BIN}..."
+    # Stop the service first: cp onto a running binary fails with "Text file busy"
+    if systemctl is-active --quiet "${SERVICE_NAME}"; then
+        log "Stopping ${SERVICE_NAME} before replacing binary..."
+        sudo systemctl stop "${SERVICE_NAME}"
+    fi
     sudo cp "device/build/raspi-eye" "${INSTALL_BIN}"
     sudo chmod 755 "${INSTALL_BIN}"
     SUMMARY_BINARY="installed"

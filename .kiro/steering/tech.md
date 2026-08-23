@@ -92,7 +92,7 @@ ctest --test-dir device/build --output-on-failure
 - Pi 5 采用原生编译：git push → SSH 到 Pi 5 → git pull → cmake + build + ctest
 - 不使用交叉编译（当前项目规模小，Pi 5 编译速度可接受）
 - 后续编译时间超过 5 分钟时再考虑交叉编译
-- 环境变量：`PI_HOST`（默认 raspberrypi.local）、`PI_USER`（默认 pi）、`PI_REPO_DIR`（默认 ~/raspi-eye）
+- 环境变量：`PI_HOST`（默认 raspberrypi.local，实际地址 192.168.2.100）、`PI_USER`（默认 pi）、`PI_REPO_DIR`（默认 ~/raspi-eye）
 
 ## 开发环境差异
 
