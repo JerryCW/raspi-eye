@@ -294,6 +294,62 @@ const char* camera_type_name(CameraType type) {
 }
 
 // ============================================================
+// 1.35 create_libcamera_bin: libcamerasrc + pinned I420 capsfilter
+// ============================================================
+// libcamerasrc picks the FIRST structure of the downstream caps intersection
+// with no format preference. In the full tee pipeline the intersection can
+// start with GRAY8 (element registration order dependent), which negotiate()
+// then configures as a RAW stream and fails with not-negotiated. Pinning
+// format=I420 inside the source bin makes negotiation deterministic; the
+// pisp ISP delivers YUV420 (I420) natively at 1080p (verified on imx219).
+GstElement* create_libcamera_bin(std::string* error_msg) {
+    GstElement* src = gst_element_factory_make("libcamerasrc", "libcam-source");
+    if (!src) {
+        if (error_msg) *error_msg = "Failed to create libcamerasrc (plugin not available)";
+        return nullptr;
+    }
+    GstElement* caps_filter = gst_element_factory_make("capsfilter", "libcam-caps");
+    if (!caps_filter) {
+        gst_object_unref(src);
+        if (error_msg) *error_msg = "Failed to create capsfilter for libcamerasrc";
+        return nullptr;
+    }
+    GstCaps* caps = gst_caps_new_simple("video/x-raw",
+        "format", G_TYPE_STRING, "I420", nullptr);
+    g_object_set(G_OBJECT(caps_filter), "caps", caps, nullptr);
+    gst_caps_unref(caps);
+
+    GstElement* bin = gst_bin_new("src");
+    if (!bin) {
+        gst_object_unref(src);
+        gst_object_unref(caps_filter);
+        if (error_msg) *error_msg = "Failed to create source bin";
+        return nullptr;
+    }
+    gst_bin_add_many(GST_BIN(bin), src, caps_filter, nullptr);
+    if (!gst_element_link(src, caps_filter)) {
+        if (error_msg) *error_msg = "Failed to link libcamerasrc -> capsfilter";
+        gst_object_unref(bin);
+        return nullptr;
+    }
+    GstPad* src_pad = gst_element_get_static_pad(caps_filter, "src");
+    if (!src_pad) {
+        if (error_msg) *error_msg = "Failed to get src pad from libcamera capsfilter";
+        gst_object_unref(bin);
+        return nullptr;
+    }
+    GstPad* ghost = gst_ghost_pad_new("src", src_pad);
+    gst_object_unref(src_pad);
+    if (!ghost) {
+        if (error_msg) *error_msg = "Failed to create ghost pad for source bin";
+        gst_object_unref(bin);
+        return nullptr;
+    }
+    gst_element_add_pad(bin, ghost);
+    return bin;
+}
+
+// ============================================================
 // 1.4 Rewrite create_source to dispatch by CameraType and format
 // ============================================================
 
@@ -316,9 +372,9 @@ GstElement* create_source(const CameraConfig& config,
         }
 
         case CameraType::LIBCAMERA: {
-            GstElement* bin = create_single_element_bin("libcamerasrc", "libcam-source", error_msg);
-            if (bin && pl) pl->info("Camera source created: libcamerasrc (Source Bin)");
-            set_format(SourceOutputFormat::UNKNOWN);
+            GstElement* bin = create_libcamera_bin(error_msg);
+            if (bin && pl) pl->info("Camera source created: libcamerasrc + pinned I420 caps (Source Bin)");
+            set_format(SourceOutputFormat::I420);
             return bin;
         }
 
