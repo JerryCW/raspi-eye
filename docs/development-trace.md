@@ -5312,3 +5312,27 @@ RuntimeError: Error(s) in loading state_dict for _BirdClassifier:
 | 1 | CancelledQueuedCommandNeverExecutes 在 Task 3 改动后失败 | 测试时序假设失效 | dispatcher join 拉长 disconnect 窗口，opener 线程过早开门导致排队命令被 owner 取走执行（send_calls=2） | opener 改为等 command_queue_depth==0（drain 完成）再开门，建立确定性 happens-before | 跨任务改动可能改变既有测试的隐式时序假设，disconnect 路径变更需重查依赖它的测试 |
 **待办：** Stage 1 部署门（等用户 commit+push 后执行 pi-build + pi-deploy + 记录观察窗口起点）。ProductionSignalingOps 真实 SDK 路径编译验证依赖 Pi 构建。
 ---
+### 2026-08-24 — Spec: spec-33 / Stage 1 部署门完成（Task 3 收尾）
+**完成概要：** signaling 层修复（Task 2+3，commit dfc1fcc）部署到 Pi 生产。Pi Release 构建 19/19 测试全过（含真实 SDK 路径 ProductionSignalingOps 首次编译验证、macOS 上 flaky 的 webrtc_media_test 在 Pi 上通过）。部署过程处理两个环境问题：
+1. **USB 摄像头 IMX678 离线**（用户确认硬件故障，lsusb 无设备）→ 切换 CSI imx219：config.toml `type="libcamera"`。
+2. **libcamerasrc not-negotiated 循环崩溃**（切 CSI 后暴露的预存 bug）：GST_CAPS:6 取证确认 libcamerasrc 对下游 caps 交集无格式偏好、直接取第一项；app 完整 tee 管道中交集首项为 GRAY8 → 配置成 RAW 流失败；gst-launch 手测交集 I420 居首故无法复现。修复（commit 7c6f784）：source bin 内 capsfilter 钉死 format=I420（pisp 原生 YUV420，imx219 1080p 实测），报告 I420 跳过冗余 videoconvert。
+**部署后状态：** 服务 active，摄像头 1920x1080-YUV420 出流，Signaling CONNECTED gen=1，2 分钟窗口零 Bus ERROR。
+**Stage 1 观察窗口起点：** 2026-08-24 09:37 CST（部署 commit dfc1fcc + 7c6f784）。目标窗口 ≥ 2× 历史失活间隔（历史 1～2 天失活一次 → 窗口 ≥ 4 天，至 2026-08-28）。窗口内失活复现即用 scripts/pi-diagnose.sh 取证并对照 Task 0 基线（假设 A：僵尸 signaling / B：offer 死锁 / C：退避溢出）更新归因。窗口不阻塞 Task 4～5 开发。
+**诊断方法记录：** 严格遵守"不猜测修复"禁止项——gst-launch 逐维度隔离（裸源/加 caps/完整链路/带 GST_PLUGIN_PATH/完整 tee 拓扑）+ app 内 GST_CAPS:6 抓协商交集，锁定唯一差异后一次性修复，一次成功。
+---
+### 2026-08-24 — Spec: spec-33 / Task 4+5: peer 生命周期重构与媒体 I/O/资源上限/健康观测
+**完成概要：** webrtc_media 全量重构为共享 peer runtime（子代理执行，网络恢复后通道正常）。Task 4：PeerSdkOps seam（PeerHandle/PeerCallbacks，stub+production adapter）、PeerSession shared_ptr map、PeerCallbackBridge 固定 slot 池（决策 B，lease 协议）、HandlePermitPool(16) 与 slot 一一绑定、唯一 PeerReaper worker（exactly-once retired CAS、10s grace、RuntimeClock 驱动）、两阶段 offer（permit→map 占位→锁外 SDK→按 generation 发布/回滚，in_creation 双检协议）、所有 SDK 调用不持 map 锁、production CallbackCell 固定池。Task 5：CONNECTING 30s 超时（Reaper watch 机制，weak_ptr，无新线程）、local ICE fire-and-forget（bridge→try_post_ice_candidate，≤4KiB 有界复制）、PendingIceStore（per-peer 50/peer 20/global 200/4KiB/TTL 30s，LRU 用单调序号）、WebRtcMediaManager::HealthSnapshot（三队列深度/active/live/回收原因分类/stale/overflow/expired）、写失败日志里程碑化防洪、static_assert 证明 ≤16MiB 预算。
+**测试状态：** webrtc_media_test 51 例全过（Task 4 新增 17 例含 PBT Property 5；Task 5 新增 13 例含确定性锁探针替换 ReadReadConcurrencyWithSharedLock 吞吐比值测试）；全量 19/19 首次全绿；ASan 零报告
+**Trace 记录：**
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | harness 析构期 Reaper 探针 SEGV | 测试自身 bug | 探针经公共指针访问已析构 impl_ | teardown 前关闭探针 | fake 的跨对象探针须在被探对象析构前解除 |
+| 2 | PeerCountInvariant/PeerLifecycleInvariant 需适配 | 语义变化 | permit 瞬时耗尽（retired handle 归还前）可拒绝低于上限的 offer | 模型仅在成功时插入，at-limit 严格断言保留 | 已记录为 permit 语义副作用 |
+| 3 | s3_test JpgBeforeJsonSorted 间歇失败 | 预存 flake | 基线（git stash 后）复跑 3 次 1/3 失败，与本次改动无关 | 忽略 | 后续 Spec 可修 |
+**偏离记录：** PendingIce peer LRU 用单调序号代替时间戳（冻结 manual clock 下时间戳并列）；写失败日志节流用计数里程碑而非 60s 时间窗；state age 落地为 oldest_session_age_sec；keyframe 消费与 local ICE 计数在 Task 4 先行最小实现。
+---
+### 2026-08-24 — Spec: spec-33 / Task 6（宿主机部分）: 双平台回归收敛与虚拟 72h 等价
+**完成概要：** 平行状态机残留核对（生产代码零残留零改动）；webrtc_test.cpp 消除全部 4 处遗留固定 sleep（spec-13.7 时代 reconnect 测试改为事件驱动等待/确定性断言，原共 1.7s sleep 降至 0-100ms）；Properties 1~8 覆盖映射盘点闭合（唯一缺口 P8 虚拟 72h 已补）；新增 VirtualTime72HourEquivalence：ManualClock 10 分钟步进推进 72 虚拟小时（2h state 心跳模拟 ICE refresh + 每小时应用消息 + 24h 处 grace 恢复 + 48h 处 3h 断信号 liveness recreate），断言稳定窗口 recreate rate==0、liveness 有信号不误触发、断信号 exactly-one recreate、计数器单调、队列有界、69 条消息零丢弃、shutdown 干净，实测 2ms（预算 15s）。
+**测试状态：** webrtc_test 37 例全过（1.6s）、webrtc_media_test 51 例全过、全量 19/19、ASan 零报告
+**Pi 延后项（Stage 1 观察窗口 2026-08-28 结束后执行）：** (1) pi-build 编译验证（Task 4/5 media 改动未上 Pi）；(2) Stage 2 部署（先归档 Stage 1 窗口结论对照 Task 0 归因基线）；(3) 短断网/长断网/重复 offer/100 轮 viewer churn；(4) 资源采样（线程/RSS/队列/handles 增长率）；(5) 整机 72h soak（额外 BLOCKED on spec-34 生命周期 P0）。Task 6 保持 in_progress 直至 Pi 部分完成。
+---

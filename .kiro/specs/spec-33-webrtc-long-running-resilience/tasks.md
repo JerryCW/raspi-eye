@@ -67,7 +67,7 @@ Pi 仅构建用 `./scripts/pi-build.sh`；安装 binary 并重启 systemd 用 `.
   - 验证：CTest + ASan；普通队列≤256；10,000 序列≤15s；所有 handle 操作线程 id 唯一
   - SHALL NOT 使用 combined `create_fetch_connect()`；SHALL NOT 用 `1 << attempt`；SHALL NOT 让 QUERY 类 caller timeout 后的 QUEUED command 执行或任何 command 越过完成 deadline 启动 SDK 调用
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5, 6.1, 7.1, 7.2, 8.1, 8.2, 8.3, 8.4_
-- [-] 3. 实现安全 SignalingCallbackBridge 与有界 MessageDispatcher
+- [x] 3. 实现安全 SignalingCallbackBridge 与有界 MessageDispatcher
   - 在 `webrtc_signaling.cpp` 让 signaling bridge 为 Impl 内固定 slot（注册前就绪、Impl 生命周期内不释放，决策 B）；callback 入口 `fetch_add(in_flight)` → 校验 open/generation → 失配递减返回并计 stale；client recreate 仅执行 open=false → release → generation 递增 → 复开，in-flight 归零前不进入下一 generation
   - 所有 C ABI state/message callback 使用 `try/catch (...)`；state callback 只向 ControlMailbox 发布 generation/state/observed_at，不执行外部 API 或等待业务锁
   - message callback 在分配前校验 peer_id≤256B、payload≤16KiB，只复制并 try-enqueue；容量 512，OFFER 满队列时淘汰最旧 ICE，全 OFFER 时拒绝新 OFFER，新 ICE 满时丢弃
@@ -80,7 +80,7 @@ Pi 仅构建用 `./scripts/pi-build.sh`；安装 binary 并重启 systemd 用 `.
   - SHALL NOT 在 SDK callback 执行业务处理；SHALL NOT 让 C++ 异常越过 C ABI
   - _Requirements: 1.4, 1.5, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 6.1, 6.3, 7.1, 7.3_
 
-- [ ] 4. 以 PeerSession、CallbackBridge、HandlePermit 和 Reaper 重构 peer 生命周期
+- [x] 4. 以 PeerSession、CallbackBridge、HandlePermit 和 Reaper 重构 peer 生命周期
   - 在 `webrtc_media.h` 定义 Design Component 1 的 `PeerHandle`、`PeerCallbacks`、`PeerSdkOps` 与精确 `create_for_test(...)`；补齐必要 include
   - 在 `webrtc_media.cpp` 将 peer map value 改为 `std::shared_ptr<PeerSession>`；session 保存 generation、HandlePermit、state、slot 指针（不拥有）、opaque handle、I/O gate、keyframe flag 和统计
   - 实现容量 16 的 HandlePermit 池与一一绑定的 16 个 PeerCallbackBridge 固定 slot（Impl 生命周期内不释放，决策 B）；permit 从 create 前持有到 free 完成且 slot in-flight==0；active≤10，active+creating+retired live handle≤16；无 permit 时拒绝新建/替换且保留现有 peer
@@ -94,7 +94,7 @@ Pi 仅构建用 `./scripts/pi-build.sh`；安装 binary 并重启 systemd 用 `.
   - SHALL NOT 仅设 `ctx->impl=nullptr` 后 delete；SHALL NOT 用 sleep 推断 quiescence；SHALL NOT 对含 atomic 对象做拷贝 emplace
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 6.1, 7.2, 8.2, 8.3, 8.4_
 
-- [ ] 5. 完成媒体 I/O、local ICE、僵尸/缓存上限与健康观测
+- [x] 5. 完成媒体 I/O、local ICE、僵尸/缓存上限与健康观测
   - `broadcast_frame()` 在 map 锁内仅复制 CONNECTED session shared_ptr，解锁后按 session I/O gate 调 write；Reaper 对同 session 使用同一 gate，不同 session 不共享锁
   - 根据 Task 1 契约编码 frame data 生命周期和 write/free 顺序；从当前头文件使用 SRTP-not-ready 符号，不保留裸 `0x5c000003`；无法确认则停止本任务
   - 区分可配置 keyframe-only 阈值与固定 100 次断开阈值；CONNECTING 30s、FAILED/CLOSED、write failure>100 进入 DISCONNECTING，10s 后 Reaper 回收
@@ -109,7 +109,7 @@ Pi 仅构建用 `./scripts/pi-build.sh`；安装 binary 并重启 systemd 用 `.
   - SHALL NOT 用 detached frame worker、固定 sleep、吞吐比值或裸状态码证明正确性
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 7.2, 7.3, 8.1, 8.4_
 
-- [ ] 6. 收敛双平台回归并执行分层 Pi 长稳门禁
+- [x] 6. 收敛双平台回归并执行分层 Pi 长稳门禁
   - 让 macOS fake 与 Linux production adapter 共用 SignalingOwner、MessageDispatcher、PeerSession、Reaper 和 runtime token；删除旧 `reconnect_loop`/`simulate_disconnect` 平行状态机
   - 在 `webrtc_test.cpp` 用 manual clock/事件门禁替换所有 200/500ms 固定 sleep；保留并更新 connect/disconnect/reconnect/send/ICE query preservation，按新语义区分 API 链成功与 CONNECTED callback
   - 在两个测试文件完成 Properties 1～8：10,000 command/reconnect、message overflow、bridge retirement、permit/ICE 资源模型和虚拟时间等价 72h；稳定网络窗口 recreate rate=0

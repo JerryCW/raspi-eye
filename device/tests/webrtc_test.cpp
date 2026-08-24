@@ -1,10 +1,14 @@
 // webrtc_test.cpp
-// WebRTC signaling tests: 6 example-based + 2 PBT properties.
+// WebRTC signaling tests: config example/PBT + legacy stub tests (spec-13.7,
+// updated to spec-33 semantics) + spec-33 runtime tests (SignalingOwner,
+// bridge, dispatcher, virtual-time 72h equivalence). No fixed sleeps: manual
+// clock + event gates + wait_until_true only.
 #include "webrtc_signaling.h"
 
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -30,6 +34,19 @@ static std::string write_temp_toml(const std::string& content) {
     ofs.close();
     close(fd);
     return path;
+}
+
+// Busy-yield until pred is true or the real-time budget expires (event-driven
+// wait on published atomics; not a fixed sleep). Shared by the legacy stub
+// tests and the spec-33 runtime tests below.
+static bool wait_until_true(const std::function<bool()>& pred,
+                            std::chrono::milliseconds budget = std::chrono::milliseconds(2000)) {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) return true;
+        std::this_thread::yield();
+    }
+    return pred();
 }
 
 // ============================================================
@@ -184,7 +201,10 @@ RC_GTEST_PROP(WebRtcConfigPBT, MissingFieldsDetected, ()) {
 
 // Property 2: Preservation — 非断连场景行为不变
 // Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
-// 在未修复代码上此测试 MUST PASS — 确认基线行为
+// 在未修复代码上此测试 MUST PASS — 确认基线行为。
+// spec-33 语义注记：connect()==true 表示 staged API 链成功；is_connected()
+// 由 CONNECTED callback 发布。stub adapter 同步发布 CONNECTED，因此
+// connect() 返回后 is_connected() 立即为 true，公共行为保持不变。
 RC_GTEST_PROP(WebRtcSignalingPreservation, ConnectDisconnectSendConsistency, ()) {
     auto sig = create_test_signaling();
     if (!sig) {
@@ -225,13 +245,16 @@ RC_GTEST_PROP(WebRtcSignalingPreservation, ConnectDisconnectSendConsistency, ())
 }
 
 // ============================================================
-// Bug Condition Exploration Test (spec-13.7)
+// Bug Condition Exploration Test (spec-13.7, updated for spec-33)
 // ============================================================
 
 // Bug Condition Exploration: 意外断连后自动重连恢复
 // Validates: Requirements 1.1, 1.2, 1.4, 2.1, 2.2
-// 在未修复代码上此测试 FAIL（无自动重连机制）
-// 在修复后此测试 PASS（reconnect_loop 自动恢复连接）
+// spec-13.7 时代此测试探测 reconnect_loop 的缺失；spec-33 之后由
+// SignalingOwner 的 RECONNECT 命令（release -> recreate 下一 generation）
+// 承担同一职责。语义更新：reconnect()==true 只代表 staged API 链成功，
+// is_connected() 由 CONNECTED callback 发布（stub 是同步 CONNECTED，
+// 行为不变）。等待改为事件驱动（wait_until_true 轮询可观测状态）。
 TEST(WebRtcSignalingBugCondition, AutoReconnectAfterUnexpectedDisconnect) {
     auto sig = create_test_signaling();
     if (!sig) GTEST_SKIP() << "Real SDK rejects fake creds";
@@ -240,24 +263,24 @@ TEST(WebRtcSignalingBugCondition, AutoReconnectAfterUnexpectedDisconnect) {
     EXPECT_TRUE(sig->connect(&err)) << "connect() failed: " << err;
     EXPECT_TRUE(sig->is_connected());
 
-    // 模拟意外断连：通过 reconnect() 公共 API 触发 needs_reconnect_
-    // 在真实场景中，SDK 回调 on_signaling_state_changed(DISCONNECTED) 设置此标志
-    // reconnect() 设置 needs_reconnect_=true 并通知 reconnect_loop
+    // 模拟意外断连恢复路径：reconnect() 公共 API 触发 owner 的全量 recreate
+    // （真实场景中由 errorReportFn/grace 超时驱动同一条 fail_and_backoff 路径）
     EXPECT_TRUE(sig->reconnect(&err));
 
-    // 等待 reconnect_loop 处理（stub 使用 100ms 延迟）
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-    // EXPECTED BEHAVIOR: 断连后 reconnect_loop 自动恢复连接
-    EXPECT_TRUE(sig->is_connected())
-        << "Expected: auto-reconnect restores connection after unexpected disconnect";
+    // EXPECTED BEHAVIOR: recreate 后 CONNECTED callback 恢复连接
+    EXPECT_TRUE(wait_until_true([&] { return sig->is_connected(); }))
+        << "Expected: owner recreate restores connection after unexpected disconnect";
 }
 
 // ============================================================
-// Reconnect Unit Tests (spec-13.7, Task 3.6)
+// Reconnect Unit Tests (spec-13.7, Task 3.6; updated for spec-33)
+// 等待方式从固定 sleep 改为事件驱动（wait_until_true 轮询 is_connected
+// 等可观测条件）。语义：connect()/reconnect()==true 表示 staged API 链
+// 成功，is_connected() 只由当前 generation 的 CONNECTED callback 发布；
+// stub adapter 在 connect() 内同步发布 CONNECTED，行为保持不变。
 // ============================================================
 
-// Test: reconnect() 触发 reconnect_loop 自动重连
+// Test: reconnect() 触发 owner 的全量 recreate 并恢复连接
 // Validates: Requirements 2.1, 2.2
 TEST(WebRtcSignalingReconnect, ReconnectTriggersAutoReconnect) {
     auto sig = create_test_signaling();
@@ -267,16 +290,14 @@ TEST(WebRtcSignalingReconnect, ReconnectTriggersAutoReconnect) {
     EXPECT_TRUE(sig->connect(&err)) << "connect() failed: " << err;
     EXPECT_TRUE(sig->is_connected());
 
-    // reconnect() 设置 needs_reconnect_ 并通知 reconnect_loop
+    // reconnect() 提交 RECONNECT 命令：owner release 旧 client 后 recreate
     EXPECT_TRUE(sig->reconnect(&err));
 
-    // 等待 reconnect_loop 处理（stub 使用 100ms 延迟）
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    EXPECT_TRUE(sig->is_connected())
-        << "reconnect() should trigger auto-reconnect via reconnect_loop";
+    EXPECT_TRUE(wait_until_true([&] { return sig->is_connected(); }))
+        << "reconnect() should recreate the client and restore the connection";
 }
 
-// Test: disconnect() 设置 shutdown_requested_，阻止自动重连
+// Test: disconnect() 执行固定顺序 shutdown（join owner），之后无自动重连
 // Validates: Requirements 2.7
 TEST(WebRtcSignalingReconnect, ShutdownPreventsReconnect) {
     auto sig = create_test_signaling();
@@ -286,17 +307,23 @@ TEST(WebRtcSignalingReconnect, ShutdownPreventsReconnect) {
     EXPECT_TRUE(sig->connect(&err));
     EXPECT_TRUE(sig->is_connected());
 
-    // disconnect() 设置 shutdown_requested_ = true，停止 reconnect 线程
+    // disconnect() 是同步的固定顺序 shutdown：关闭 admission -> join
+    // dispatcher -> 带外 SHUTDOWN -> join owner。返回后 owner 已销毁，
+    // 不存在任何可自动重连的后台线程（确定性，无需等待）。
     sig->disconnect();
     EXPECT_FALSE(sig->is_connected());
+    EXPECT_EQ(sig->health_snapshot().state, "STOPPED")
+        << "after disconnect() the owner must be fully stopped";
 
-    // 等待确认无自动重连发生
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    EXPECT_FALSE(sig->is_connected())
-        << "disconnect() should prevent auto-reconnect (shutdown_requested)";
+    // 有界负向观察窗口：确认没有后台路径重新发布 is_connected。
+    EXPECT_FALSE(wait_until_true([&] { return sig->is_connected(); },
+                                 std::chrono::milliseconds(100)))
+        << "disconnect() must prevent any auto-reconnect";
+    EXPECT_FALSE(sig->send_answer("peer1", "sdp"))
+        << "admission must stay closed after shutdown";
 }
 
-// Test: disconnect() 安全停止 reconnect 线程，无崩溃/悬挂
+// Test: disconnect() 安全停止 owner worker，无崩溃/悬挂
 // Validates: Requirements 2.7, 3.1
 TEST(WebRtcSignalingReconnect, DisconnectSafelyStopsReconnectThread) {
     auto sig = create_test_signaling();
@@ -305,7 +332,7 @@ TEST(WebRtcSignalingReconnect, DisconnectSafelyStopsReconnectThread) {
     std::string err;
     EXPECT_TRUE(sig->connect(&err));
 
-    // disconnect 应安全停止 reconnect 线程
+    // disconnect 应安全 join owner worker（固定 shutdown 顺序）
     sig->disconnect();
     EXPECT_FALSE(sig->is_connected());
 
@@ -314,7 +341,7 @@ TEST(WebRtcSignalingReconnect, DisconnectSafelyStopsReconnectThread) {
     // 到达此处无崩溃/悬挂即通过
 }
 
-// Test: disconnect() 后调用 reconnect() 执行完整重连
+// Test: disconnect() 后调用 reconnect() 重启 owner 并执行完整 staged connect
 // Validates: Requirements 2.1, 2.2, 3.4
 TEST(WebRtcSignalingReconnect, ReconnectAfterDisconnect) {
     auto sig = create_test_signaling();
@@ -325,10 +352,10 @@ TEST(WebRtcSignalingReconnect, ReconnectAfterDisconnect) {
     sig->disconnect();
     EXPECT_FALSE(sig->is_connected());
 
-    // disconnect 后 reconnect 线程已停止，reconnect() 应执行完整 connect
+    // disconnect 后 owner 已 join；reconnect() 重启 owner 并执行完整
+    // create/fetch/connect 链（新 generation）。
     EXPECT_TRUE(sig->reconnect(&err));
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    EXPECT_TRUE(sig->is_connected())
+    EXPECT_TRUE(wait_until_true([&] { return sig->is_connected(); }))
         << "reconnect() after disconnect() should restore connection";
 }
 
@@ -603,18 +630,6 @@ private:
     std::condition_variable gate_cv_;
     bool gate_open_ = true;
 };
-
-// Busy-yield until pred is true or the real-time budget expires (event-driven
-// wait on published atomics; not a fixed sleep).
-bool wait_until_true(const std::function<bool()>& pred,
-                     std::chrono::milliseconds budget = std::chrono::milliseconds(2000)) {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) return true;
-        std::this_thread::yield();
-    }
-    return pred();
-}
 
 std::unique_ptr<WebRtcSignaling> make_runtime_signaling(
     std::shared_ptr<wi::SignalingSdkOps> ops,
@@ -1403,4 +1418,135 @@ TEST(SignalingDispatcher, ShutdownDropsQueuedAndOversizeRejected) {
     fake->emit_message(wi::kSignalingMsgOffer, "after", "sdp");
     EXPECT_FALSE(wait_until_true([&] { return probe->has("offer:after:sdp"); },
                                  std::chrono::milliseconds(100)));
+}
+
+// ============================================================
+// Spec 33 Task 6 — virtual-time 72h equivalence
+// ============================================================
+
+// 23. Virtual 72h equivalence (design Property 8): drive the full runtime
+// through 72 hours of manual-clock time with periodic normal signal
+// (2-hourly SDK-like state heartbeat = ICE config refresh analogue, hourly
+// application message, one transient DISCONNECTED recovered inside the SDK
+// reconnect grace window, one 3h signal blackout detected by liveness).
+// Asserts: stable-window recreate rate == 0 (no false-positive recreate and
+// no false liveness trigger while signal is present), half-open detection
+// recovers after 3h of silence, all counters are monotonic and bounded,
+// queues stay within capacity, and shutdown is clean afterwards. Runs in
+// seconds of real time (manual clock only, no fixed sleeps).
+// **Validates: Requirements 2.5, 6.4, 7.4, 8.4** (Property 8)
+TEST(SignalingRuntime, VirtualTime72HourEquivalence) {
+    const auto real_start = std::chrono::steady_clock::now();
+    auto clock = std::make_shared<ManualClock>();
+    auto fake = std::make_shared<FakeSignalingOps>(clock);
+    wi::RuntimeOptions options;  // defaults: liveness 3h, grace 20s, backoff {1..30}
+    auto sig = make_runtime_signaling(fake, clock, options);
+    ASSERT_NE(sig, nullptr);
+
+    // Hourly application traffic delivered through the dispatcher.
+    std::atomic<int> ice_delivered{0};
+    sig->set_ice_candidate_callback([&](const std::string&, const std::string&) {
+        ice_delivered.fetch_add(1);
+    });
+
+    ASSERT_TRUE(sig->connect());
+    ASSERT_TRUE(sig->is_connected());
+
+    // Monotonicity + bounds checked on every 10-minute step.
+    WebRtcSignaling::HealthSnapshot prev = sig->health_snapshot();
+    int hours_elapsed = 0;
+    int ice_sent = 0;
+    auto check_step = [&] {
+        auto s = sig->health_snapshot();
+        ASSERT_GE(s.recreate_count, prev.recreate_count) << "counter must be monotonic";
+        ASSERT_GE(s.total_disconnects, prev.total_disconnects) << "counter must be monotonic";
+        ASSERT_GE(s.stale_events, prev.stale_events) << "counter must be monotonic";
+        ASSERT_GE(s.messages_dropped, prev.messages_dropped) << "counter must be monotonic";
+        ASSERT_GE(s.commands_expired, prev.commands_expired) << "counter must be monotonic";
+        ASSERT_LE(s.command_queue_depth, options.command_capacity) << "queue must stay bounded";
+        ASSERT_LE(s.message_queue_depth, options.message_capacity) << "queue must stay bounded";
+        prev = s;
+    };
+
+    // One virtual hour = 6 x 10min steps. The SDK-like heartbeat every 2h
+    // keeps the observed signal gap well under the 3h liveness timeout, so
+    // liveness must never fire while signal is present.
+    auto run_stable_hours = [&](int hours) {
+        for (int h = 0; h < hours; ++h) {
+            for (int step = 0; step < 6; ++step) {
+                clock->advance(std::chrono::minutes(10));
+                check_step();
+                ASSERT_TRUE(sig->is_connected())
+                    << "connection must stay up in a stable window (hour "
+                    << hours_elapsed << ")";
+            }
+            ++hours_elapsed;
+            if (hours_elapsed % 2 == 0) {
+                fake->emit_state(wi::kSignalingStateOther, clock->now());
+            }
+            fake->emit_message(wi::kSignalingMsgIceCandidate, "viewer-hb", "candidate");
+            ++ice_sent;
+        }
+    };
+
+    // ---- Phase A: 24h stable network ----
+    run_stable_hours(24);
+    EXPECT_EQ(sig->health_snapshot().recreate_count, 0u)
+        << "stable-window recreate rate must be 0 (no false-positive recreate)";
+
+    // ---- Phase B: transient DISCONNECTED, SDK internal reconnect succeeds
+    //      inside the 20s grace window (recovery without recreate) ----
+    fake->emit_state(wi::kSignalingStateDisconnected, clock->now());
+    ASSERT_TRUE(wait_until_true([&] { return !sig->is_connected(); }));
+    clock->advance(std::chrono::seconds(5));
+    fake->emit_state(wi::kSignalingStateConnected, clock->now());
+    ASSERT_TRUE(wait_until_true([&] { return sig->is_connected(); }))
+        << "same-generation CONNECTED inside the grace window must recover";
+    EXPECT_EQ(sig->health_snapshot().recreate_count, 0u)
+        << "grace-window recovery must not recreate the client";
+    EXPECT_GE(sig->health_snapshot().total_disconnects, 1u);
+    check_step();
+
+    // ---- Phase C: 24 more stable hours ----
+    run_stable_hours(24);
+    EXPECT_EQ(sig->health_snapshot().recreate_count, 0u)
+        << "48h of stable operation must not produce any recreate";
+    ASSERT_TRUE(wait_until_true([&] { return ice_delivered.load() == ice_sent; }))
+        << "all hourly messages must be dispatched (sent " << ice_sent << ")";
+
+    // ---- Phase D: total signal blackout -> half-open (liveness) detection
+    //      after 3h, then recreate + reconnect ----
+    const int releases_before = fake->release_calls();
+    for (int step = 0; step < 19; ++step) {  // 3h10m of silence (>= 3h timeout)
+        clock->advance(std::chrono::minutes(10));
+    }
+    ASSERT_TRUE(wait_until_true([&] { return fake->release_calls() > releases_before; }))
+        << "3h without any callback signal must release the half-open client";
+    clock->advance(std::chrono::minutes(10));  // covers the 1s backoff
+    ASSERT_TRUE(wait_until_true([&] { return sig->is_connected(); }))
+        << "the owner must recreate and reconnect after half-open detection";
+    EXPECT_EQ(sig->health_snapshot().recreate_count, 1u)
+        << "exactly one recreate: the liveness-triggered one";
+    hours_elapsed += 3;
+    check_step();
+
+    // ---- Phase E: stable network to the 72h mark ----
+    run_stable_hours(72 - hours_elapsed);
+    ASSERT_TRUE(wait_until_true([&] { return ice_delivered.load() == ice_sent; }));
+    auto end_snap = sig->health_snapshot();
+    EXPECT_EQ(end_snap.recreate_count, 1u)
+        << "no further recreate in the final stable window";
+    EXPECT_EQ(end_snap.messages_dropped, 0u) << "no message may be dropped in 72h";
+    EXPECT_EQ(end_snap.command_queue_depth, 0u);
+    EXPECT_EQ(end_snap.message_queue_depth, 0u);
+
+    // ---- Clean shutdown after 72 virtual hours ----
+    sig->disconnect();
+    EXPECT_FALSE(sig->is_connected());
+    EXPECT_EQ(sig->health_snapshot().state, "STOPPED");
+
+    const auto real_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - real_start);
+    EXPECT_LE(real_elapsed.count(), 15)
+        << "72 virtual hours must complete within 15s of real time";
 }
