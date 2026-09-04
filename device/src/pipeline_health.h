@@ -55,6 +55,19 @@ bool teardown_pipeline_bounded(GstElement* pipeline, int budget_ms,
 bool set_null_bounded(GstElement* pipeline, int budget_ms,
                       std::function<void(GstElement*)> set_null_fn = {});
 
+// (c) Does NOT transfer ownership: the worker dispatches set_state(PLAYING).
+//     S6 blockade (Spec 32.5 取证定案): the NULL_TO_READY uplift re-initializes
+//     kvssink -- kinesis_video_producer_init synchronously destroys the old KVS
+//     producer and enters the KVS stream free chain (join-while-holding-lock
+//     deadlock in the 2026-09-03 incident) -- so the PLAYING call must run on a
+//     worker thread, never on the GLib main loop. Returns true if the call
+//     finished within budget_ms, false on timeout (worker detached). The caller
+//     then confirms PLAYING with get_state on the main loop (waiting only, it
+//     never frees; 取证维持排除). set_playing_fn is injectable for tests
+//     (default: gst set PLAYING).
+bool set_playing_bounded(GstElement* pipeline, int budget_ms,
+                         std::function<void(GstElement*)> set_playing_fn = {});
+
 // Configuration for PipelineHealthMonitor (POD, all durations in milliseconds)
 struct HealthConfig {
     int watchdog_timeout_ms   = 5000;  // Buffer probe watchdog timeout
@@ -113,6 +126,17 @@ public:
     // Must return a new GstElement* pipeline in PLAYING state, or nullptr on failure.
     void set_rebuild_callback(RebuildCallback cb);
 
+    // Register liveness checkpoint callback (Spec 32.5 缺陷 1, design 决策点 3).
+    // Invoked at recovery checkpoints CP1 (attempt_recovery entry), CP2 / CP2.5 /
+    // CP3 / CP3.5 (after each bounded-wait primitive in try_state_reset) and CP6
+    // (attempt_recovery exit), so the app layer can keep the watchdog liveness
+    // timestamp fresh while attempt_recovery occupies the main loop (the CP0 2s
+    // timer cannot run during that time). Invariant: every bounded-wait primitive
+    // inside try_state_reset is followed by a checkpoint, keeping any adjacent
+    // checkpoint gap <= 5s + eps < T_stale = 10s. When not registered, recovery
+    // behavior is exactly as before.
+    void set_liveness_callback(std::function<void()> cb);
+
     // Update the monitored pipeline pointer (after rebuild).
     // Also re-installs buffer probe on the new pipeline.
     void set_pipeline(GstElement* new_pipeline,
@@ -149,6 +173,10 @@ private:
     void attempt_recovery();
     bool try_state_reset();
     bool try_full_rebuild();
+
+    // Invoke liveness callback (if registered) + phase-boundary info log.
+    // Called at recovery checkpoints CP1/CP2/CP2.5/CP3/CP3.5/CP6 (Spec 32.5).
+    void liveness_checkpoint(const char* tag);
 
     // Install buffer probe on source element's src pad
     void install_probe(const std::string& source_element_name);
@@ -187,6 +215,7 @@ private:
     // Callbacks (set once, read from timer/bus callbacks)
     HealthCallback health_cb_;
     RebuildCallback rebuild_cb_;
+    std::function<void()> liveness_cb_;  // recovery checkpoints (Spec 32.5)
 
     // Source element name for re-installing probe after rebuild
     std::string source_element_name_;

@@ -135,6 +135,7 @@ YOLO 检测器（spec-9）只依赖 spec-3：纯本地推理，不需要 AWS 凭
 | Spec | 名称 | 目标 | 依赖 | 模块 | 状态 |
 |------|------|------|------|------|------|
 | 32 | pipeline-resilience | 管道韧性加固：bus 错误按域分类（KVS/WebRTC 分支错误不再拖垮整管道）+ kvssink restart-on-error 自愈 + heartbeat 去抖主动恢复 + 有界异步 teardown（set_state(NULL) 移出主循环，130s→≤5s）+ FATAL 优雅退出交 systemd 重启 + 看门狗健康门控 + 默认码率降至 1200kbps + CPU 基线诊断脚本 | spec-5, spec-8, spec-20 | device + scripts | 🔄 |
+| 32.5 | recovery-deadlock-watchdog-fix | Bugfix: 2026-09-03 恢复流程死锁 + 看门狗失明修复——(1) 喂狗与 GLib 主循环活性绑定（主循环 liveness timer + watchdog 线程 stale 判定，保留 FATAL 门控），主线程死锁时停喂让 WatchdogSec=30 兜底重启；(2) 代码路径取证后封堵绕过有界异步 teardown 的同步 KVS stream free 路径（主线程 join-while-holding-lock 死锁于 libcproducer 内部，冻结 2 天 8 小时） | spec-32 Task 1～6, spec-20 | device | 🔄 |
 | 33 | webrtc-long-running-resilience | Bugfix: Task 0 失活取证（pi-diagnose.sh，归因基线）+ Pi SDK 语义门禁 + signaling 单 owner/两级 command deadline（QUERY 2s / SEND 10s 迟到无害）+ 有界 message dispatcher + 固定池化 CallbackBridge（type-stable，免 SDK quiescence 证明）+ PeerSession/HandlePermit/Reaper + 僵尸 peer 回收，修复运行 1～2 天后 WebRTC 永久停止；分两个 Stage 部署归因（Stage 1 signaling 层 / Stage 2 peer 层）；4 个生产文件 + 2 个既有测试文件（6 文件显式例外） | spec-13.6, spec-13.7；整机 72h 依赖 spec-34 | device | ⬜ |
 | 34 | device-lifecycle-safety | 修复 pipeline 双 teardown owner、ShutdownHandler detached worker、borrower 解绑顺序、health timer 与 AppContext 生命周期 P0；完成后解锁 spec-32 故障注入和 spec-33 整机 72h | spec-32 Task 1～6 | device | ⬜ |
 

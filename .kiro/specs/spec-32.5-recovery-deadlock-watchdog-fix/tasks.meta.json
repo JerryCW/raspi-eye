@@ -1,0 +1,230 @@
+{
+  "pbtResults": {
+    "2. Write bug condition exploration test（缺陷 1 看门狗失明）": {
+      "status": "passed",
+      "failingExample": "SdNotifierTest.ExplorationMainLoopStalledGateMustClose FAILED on unfixed code (expected):\nValue of: SdNotifier::watchdog_gate_open()\n  Actual: true\nExpected: false\n反例：health_check 恒返回 true（模拟死锁时状态机停在 RECOVERING 非 FATAL）、liveness 从不刷新（模拟主循环死锁，未修复代码根本不存在 liveness 刷新机制）时，watchdog_gate_open() 仍返回 true——门控只反映状态机标记，不反映主循环活性，WATCHDOG=1 照发（对应事故中喂狗持续 2 天 8 小时）。确认缺陷 1 存在。",
+      "lastRunTimestamp": 1788509244254
+    },
+    "3. Write preservation property tests (BEFORE implementing fix)": {
+      "status": "passed",
+      "lastRunTimestamp": 1788511799732
+    },
+    "4.4 Verify bug condition exploration test now passes": {
+      "status": "passed",
+      "lastRunTimestamp": 1788513270599
+    },
+    "4.5 Verify preservation tests still pass（sd_notifier 部分）": {
+      "status": "passed",
+      "lastRunTimestamp": 1788513285681
+    }
+  },
+  "executionHistory": {
+    "1. 缺陷 2 取证：定位主线程同步 KVS 拆除路径（先取证后修复）": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508966972
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508994364
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788511412522
+      }
+    ],
+    "2. Write bug condition exploration test（缺陷 1 看门狗失明）": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967064
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788509012056
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788511414007
+      }
+    ],
+    "3. Write preservation property tests (BEFORE implementing fix)": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967090
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788511491885
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788512620662
+      }
+    ],
+    "4.1 sd_notifier 新增 liveness 原语与组合门控": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967112
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788512641554
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788513347037
+      }
+    ],
+    "4.2 main.cpp 接线 CP0 主循环 liveness timer": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967152
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788513348910
+      }
+    ],
+    "4.3 缺陷 1 单测 + RapidCheck PBT": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967179
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788513358250
+      }
+    ],
+    "4.4 Verify bug condition exploration test now passes": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967202
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788513359838
+      }
+    ],
+    "4.5 Verify preservation tests still pass（sd_notifier 部分）": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967230
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788513370865
+      }
+    ],
+    "5.1 pipeline_health：S1/S4/S5 封堵 + op_tag 日志 + 检查点 CP1–CP3/CP6": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967265
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788513383969
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788514980059
+      }
+    ],
+    "5.2 app_context：S2/S3 封堵 + CP4/CP5 接线": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967290
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788514982212
+      }
+    ],
+    "5.3 缺陷 2 单测：线程断言 + 检查点触发 + 超时分支可观测": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967323
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788514992536
+      }
+    ],
+    "5.4 Verify preservation tests still pass（恢复编排部分）": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967364
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788514994654
+      }
+    ],
+    "6. Checkpoint — macOS 全量构建 + 测试全绿": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967408
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788515005687
+      },
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788515348608
+      }
+    ],
+    "7. Pi 5 端到端验证 + trace 归档 + shall-not 反哺": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788508967442
+      }
+    ],
+    "4. Fix 缺陷 1：喂狗与主循环活性绑定（liveness 门控）": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788513370925
+      }
+    ],
+    "5. Fix 缺陷 2：封堵同步 KVS 拆除路径 + 检查点接线 + 日志增强": [
+      {
+        "executionId": "3510a4ef-58c5-4eca-b0b4-3566a15a1813",
+        "chatSessionId": "sess_71253588-fc10-4b1d-bdfa-5acbc535534e",
+        "timestamp": 1788514994679
+      }
+    ]
+  }
+}

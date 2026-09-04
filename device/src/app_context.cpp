@@ -13,6 +13,7 @@
 #include "pipeline_builder.h"
 #include "pipeline_health.h"
 #include "pipeline_manager.h"
+#include "sd_notifier.h"
 #include "shutdown_handler.h"
 #include "stream_mode_controller.h"
 #include "s3_uploader.h"
@@ -274,6 +275,14 @@ bool AppContext::start(std::string* error_msg) {
     impl_->health_monitor = std::make_unique<PipelineHealthMonitor>(
         impl_->pipeline_manager->pipeline());
 
+    // --- Wire recovery liveness checkpoints (Spec 32.5 缺陷 1, 决策点 3) ---
+    // attempt_recovery occupies the main loop (the CP0 2s timer cannot run);
+    // checkpoints CP1-CP3.5/CP6 keep the watchdog liveness timestamp fresh
+    // while a legal recovery makes progress. On macOS this is a no-op stub.
+    impl_->health_monitor->set_liveness_callback([]() {
+        SdNotifier::refresh_liveness();
+    });
+
     // --- Create StreamModeController ---
     impl_->stream_controller = std::make_unique<StreamModeController>(
         impl_->pipeline_manager->pipeline(),
@@ -336,6 +345,8 @@ bool AppContext::start(std::string* error_msg) {
             GstElement* old = impl_->pipeline_manager->release();
             impl_->pipeline_manager.reset();  // 壳已空，安全析构
             teardown_pipeline_bounded(old, /*budget*/5000);
+            // CP4 (Spec 32.5 缺陷 1): bounded teardown returned, refresh liveness.
+            SdNotifier::refresh_liveness();
         }
 
         // rebuild 时根据 enabled 决定传递 nullptr
@@ -360,6 +371,11 @@ bool AppContext::start(std::string* error_msg) {
         CameraSource::OpenRetryConfig retry_cfg;  // 默认 500ms × 6
         int attempts = 0;
         bool ok = CameraSource::open_with_retry([&]() -> bool {
+            // CP5 (Spec 32.5 缺陷 1): refresh liveness at the end of every
+            // build+start attempt, on all return paths (RAII scope guard).
+            struct Cp5Guard {
+                ~Cp5Guard() { SdNotifier::refresh_liveness(); }
+            } cp5_guard;
             std::string err;
             GstElement* p = PipelineBuilder::build_tee_pipeline(
                 &err,
@@ -375,12 +391,25 @@ bool AppContext::start(std::string* error_msg) {
             }
             auto new_pm = PipelineManager::create(p, &err);
             if (!new_pm) {
-                gst_object_unref(p);
+                // S2 封堵 (Spec 32.5): even a never-started NULL-state pipeline
+                // may enter the kvssink dispose / KVS free chain on its final
+                // unref (unverified SDK behavior -- 保守走 worker). The bounded
+                // teardown keeps the ref-zero point off the main loop; the NULL
+                // transition is a no-op here, cost negligible.
+                teardown_pipeline_bounded(p, /*budget*/5000);
                 return false;
             }
             if (!new_pm->start(&err)) {
                 if (lg) lg->warn("rebuild: pipeline start failed: {}", err);
-                return false;  // new_pm 析构会 stop+unref 半启动的管道
+                // S3 封堵 (Spec 32.5): after start() dispatched set_state(PLAYING),
+                // kvssink may already own a live producer/stream. Destroying the
+                // half-started pipeline synchronously on the main loop (new_pm
+                // dtor = stop + unref) risks the same KVS free deadlock as S6.
+                // Hand ownership to a bounded worker instead.
+                GstElement* hp = new_pm->release();
+                new_pm.reset();  // 壳已空，安全析构
+                teardown_pipeline_bounded(hp, /*budget*/5000);
+                return false;
             }
             impl_->pending_pm_ = std::move(new_pm);  // 暂存，成功后转正
             return true;

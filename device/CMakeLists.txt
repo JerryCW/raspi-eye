@@ -115,6 +115,9 @@ if(SYSTEMD_FOUND)
     target_link_libraries(sd_notifier_module PRIVATE ${SYSTEMD_LIBRARIES})
 endif()
 
+# Spec 32.5: app_context 接线恢复检查点 CP4/CP5 到 SdNotifier::refresh_liveness
+target_link_libraries(pipeline_manager PUBLIC sd_notifier_module)
+
 # 可执行文件
 add_executable(raspi-eye src/main.cpp)
 target_link_libraries(raspi-eye PRIVATE pipeline_manager sd_notifier_module)

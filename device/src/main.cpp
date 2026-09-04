@@ -25,6 +25,14 @@ static void signal_handler(int /*sig*/) {
     g_shutdown_requested.store(true, std::memory_order_relaxed);
 }
 
+// CP0: 主循环 liveness timer 回调（每 2s 一次，仅一次原子写；Spec 32.5 缺陷 1）
+// 主循环正常运转时持续刷新 liveness 时间戳；主循环停摆（死锁）时刷新必然停止，
+// 看门狗门控在陈旧度 > T_stale(10s) 后跳过喂狗，交 systemd WatchdogSec=30 兜底。
+static gboolean liveness_tick(gpointer /*data*/) {
+    SdNotifier::refresh_liveness();
+    return G_SOURCE_CONTINUE;
+}
+
 // timeout callback 轮询 shutdown flag（每 200ms）
 static gboolean check_shutdown(gpointer data) {
     auto* loop = static_cast<GMainLoop*>(data);
@@ -117,8 +125,12 @@ static int run_pipeline(int argc, char* argv[]) {
     }
 
     // Phase 5.5: 通知 systemd 启动完成 + 启动看门狗
-    // 看门狗心跳按健康状态门控：FATAL 时不发送，使 systemd WatchdogSec 兜底重启
+    // 看门狗心跳组合门控：health（FATAL 时不发送）AND liveness（主循环活性）。
+    // 启动看门狗前先显式刷新一次 liveness（消除哨兵态），再注册 2s 主循环
+    // timer（CP0）持续刷新——主循环死锁时刷新停止，systemd WatchdogSec 兜底。
     SdNotifier::set_health_check([&ctx]() { return ctx.is_healthy(); });
+    SdNotifier::refresh_liveness();
+    g_timeout_add(2000, liveness_tick, nullptr);
     SdNotifier::notify_ready();
     SdNotifier::start_watchdog_thread();
 

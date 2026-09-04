@@ -5336,3 +5336,55 @@ RuntimeError: Error(s) in loading state_dict for _BirdClassifier:
 **测试状态：** webrtc_test 37 例全过（1.6s）、webrtc_media_test 51 例全过、全量 19/19、ASan 零报告
 **Pi 延后项（Stage 1 观察窗口 2026-08-28 结束后执行）：** (1) pi-build 编译验证（Task 4/5 media 改动未上 Pi）；(2) Stage 2 部署（先归档 Stage 1 窗口结论对照 Task 0 归因基线）；(3) 短断网/长断网/重复 offer/100 轮 viewer churn；(4) 资源采样（线程/RSS/队列/handles 增长率）；(5) 整机 72h soak（额外 BLOCKED on spec-34 生命周期 P0）。Task 6 保持 in_progress 直至 Pi 部分完成。
 ---
+### 2026-08-24 — Spec: spec-33 / Task 6 延后项 1 完成：Pi 真实 SDK 编译验证（Stage 1 窗口保留）
+**完成概要：** commit c5b5e21（Task 4-6 宿主机改动）push 后，Pi 代码库更新至最新并完成 Release 构建 + 全量测试：19/19 全过（webrtc_test 37 例 + webrtc_media_test 51 例，ProductionPeerSdkOps 真实 SDK 路径首次编译验证通过）。按用户决策未重启服务——运行中的 Stage 1 二进制（09:37 启动）保持不变，观察窗口继续（至 08-28）。Task 6 剩余 Pi 项：Stage 2 部署门、断网/churn、资源采样、72h soak（BLOCKED on spec-34）。
+---
+### 2026-08-30 — Spec: spec-33 / Stage 1 观察窗口事件 #1 取证（viewer 连不上，但根因不是历史失活 bug）
+**现象：** 用户远程（非局域网）viewer 连接失败：每次 offer 后 ~1s 内收到带 video+audio track 的 SDP answer，ICE 永远停在 checking，15s 超时（连续 8+ 次会话，跨 45 分钟两个窗口）。用户回家后 16:53 从局域网连接一次成功（Peer connected, elapsed=0.5s, First frame sent）。
+**Master 侧取证（未重启服务，按协议采证）：**
+1. 单进程单服务确认（ps/systemd/tmux/screen 均排除第二实例）；进程仅 2 条 TLS 连接（producer + signaling WSS）
+2. **失活窗口 master 零 offer 到达**（journalctl 全窗口无 Received SDP offer/bridge/dispatcher 任何日志；spdlog stderr 无缓冲，16:53 场次日志即时可见证明通路正常；journald 无 suppression）
+3. 自 08-29 21:28 本代次启动以来 master 仅收到 1 个 offer（16:53 成功那次）；当天信令零状态事件（无 DISCONNECTED/recreate）
+**结论（矛盾收敛）：** viewer 收到的 answer 由**另一个 master** 应答——KVS SINGLE_MASTER 将 viewer 消息路由到了幽灵 master，我方 master WSS 挂着但收不到路由。幽灵 master 能秒回 SDP（带媒体 track）但 ICE 不通，符合"遗留的 KVS 控制台 WebRTC 测试页（MASTER 身份）挂在睡眠/受限网络的机器上"或другой设备旧 demo 的特征。**与 Task 0 三假设（A 僵尸 signaling/B offer 死锁/C 退避溢出）均不匹配，为新签名。**
+**Stage 1 修复有效性铁证（重大发现）：** Aug 25 21:10~22:28 生产环境发生真实网络风暴，SDK 连续 5 次报 RECONNECT_FAILED（gen 1→9，8 次 recreate 含退避 attempt=1/2/3），**owner 每次都 release+backoff+recreate 并恢复 CONNECTED**——这正是旧代码的永久失活路径 1（未注册 errorReportFn，一次 RECONNECT_FAILED 即永久死亡）。新 runtime 扛过整场风暴，假设 A 的修复被生产验证。
+**旁枝问题（独立域，不计入 spec-33）：**
+1. restart counter=18（6 天）：周内约 10 次服务重启，触发链为 libcam-source "Internal data stream error"（运行数小时后突发，与 08-24 修复的确定性 not-negotiated 不同）+ IoT credential SSL timeout + KVS branch error → spec-32 FATAL 优雅退出。属 pipeline/网络域，归 spec-32 Task 7 / spec-34
+2. KVS producer 全天 "Limit exceeded on concurrent connections" + putMedia HTTP 400 + curl error 43：producer 连接 churn，spec-25 已知弱网签名的恶化形态，待独立处理
+**待办：** (1) 用户确认失活时段是否有其他 master（KVS 控制台测试页/旧 demo 设备）；(2) raspi-eye-new AWS profile 凭证失效，更新后查 CloudWatch 信令指标（ConnectAsMaster）定案；(3) 下次远程失活时 viewer 侧打印 answer SDP 的 fingerprint/ice-ufrag 以指纹比对幽灵 master
+---
+### 2026-09-03 — Spec: spec-33 / Stage 1 观察窗口事件 #2 取证：KVS Producer SDK 死锁导致管道冻结 2 天（viewer 可连接但无图像）
+**现象：** viewer 信令/ICE 全部成功（ICE connected、WebRTC connected successfully），master 侧 Peer connected + Force keyframe requested 正常，但视频永远转圈无帧。
+**取证链（重启前完成，gdb 堆栈存档 /tmp/hang_stacks_20260903.txt）：**
+1. 进程 3 秒 CPU tick 增量 = 0（编码/推理线程全部静止）；112 个 fd 中无任何 video 设备（摄像头已被释放）
+2. 51 线程全部 futex_wait；触发点：09-01 10:39 v4l2-source "Internal data stream error" → Watchdog timeout → HEALTHY→DEGRADED→ERROR→RECOVERING → "Attempting state reset recovery" 后**再无任何日志**——恢复流程挂死 2 天 8 小时
+3. gdb 定案死锁环：**主线程**在 KinesisVideoStream::free() → freeStream → shutdownStream → freeStreamMapping → defaultJoinThread → pthread_join(198754)，且持有 producer client 锁 0x5556135a4610 与 0x555612f2d720（mutex owner 字段 = 164162 主线程 TID）；**被 join 的线程 198754（q-kvs:src）**卡在 getStreamingTokenResultEvent → continuousRetryStreamReadyHandler → getStreamMapping 等同一把 client 锁。经典 join-while-holding-lock 死锁，位于 KVS Producer C SDK（libcproducer）内部，触发条件为 pipeline recovery 释放 kvssink 时 SDK 的 continuousRetry 回调线程恰在做 stream ready/token 重连（与全天 producer 连接 churn 叠加）
+4. systemd stop 时 SIGTERM 超时，被 SIGKILL——死锁进程连优雅退出都不可能
+**重大设计缺陷暴露：** SdNotifier watchdog 线程独立于主线程存活，主线程死锁 2 天期间持续喂狗，systemd watchdog 完全失明。看门狗喂狗必须与主循环/管道 liveness 绑定（归 spec-20/spec-34 域）。
+**修复动作：** 归档堆栈后 systemctl restart（18:59），新进程 231473 健康：CPU 活跃、video fd 打开、MJPG→jpegdec 管道正常、信令 CONNECTED gen=1。
+**归因分层：** (a) 直接根因 = KVS Producer SDK freeStreamMapping join 死锁（SDK bug，v1.x 已知死锁类别，待查 upstream issue）；(b) 触发面 = 我方 recovery 在主/bus 线程同步做 kvssink 拆除（违反"set_state 同步阻塞"教训的同类风险）；(c) 放大器 = watchdog 喂狗与管道 liveness 解耦。三层分别归：SDK 升级评估（backlog）、spec-32/34 recovery 线程模型、spec-20 watchdog 绑定改造。
+**旁枝确认：** 09-01 事件与 08-30 记录的 libcam/v4l2 "Internal data stream error" 服务重启潮同源，但本次没有走 FATAL 退出路径而是挂死——同一触发两种终态，说明 recovery 路径存在竞态分叉。
+---
+### 2026-09-04 — Spec: spec-32.5 / Task 1: 缺陷 2 取证定案——主线程进入 KVS free 的路径是 S6（set_state(PLAYING) 上行再初始化），推翻 S1 假设
+**取证结论（定案调用点）：** 主线程进入 `KinesisVideoStream::free()` 的路径**不是** S1（try_state_reset 尾部裸 set_state(NULL)），而是 **S6——`try_state_reset` 中 `gst_element_set_state(pipeline_, GST_STATE_PLAYING)` 的上行转换**。精确链条：主线程 set PLAYING → GStreamer 逐级分发 NULL_TO_READY → `gst_kvs_sink_change_state(NULL_TO_READY)` → `kinesis_video_producer_init()` → 末行 `data->kinesis_video_producer = KinesisVideoProducer::createSync(...)`（unique_ptr 赋值**同步析构旧 producer**）→ `~KinesisVideoProducer` → `freeStreams()` → `freeStream()`（先取 client 锁）→ `KinesisVideoStream::free()`（`std::call_once`，对应 gdb 栈帧 #10/#11）→ C 层 `freeKinesisVideoStream → freeStream → shutdownStream → streamShutdownAggregate → freeStreamMapping → pthread_join(198754)`——持锁 join 一个正等同一把 client 锁的 continuousRetry 线程（LWP 198754 栈：`getStreamingTokenResultEvent → … → continuousRetryStreamReadyHandler → getStreamMapping` 等锁；线程名 "q-kvs:src" 是 Linux 线程名继承所致——由旧管道 q-kvs 流线程在 putFrame 路径中触发 SDK 自复位时派生）。
+**三条证据链（交叉验证，缺一不可）：**
+1. **journal 排除法（Pi 实机 journalctl，一手证据）**：`Sep 01 10:39:16.453 "Attempting state reset recovery"` 为最后一条 spdlog 日志（08-30 取证已证明 spdlog stderr 无缓冲、journald 无抑制）。try_state_reset 代码序：set_null_bounded 超时会打 warn（未出现 → 返回 true 静默成功）；set PLAYING 返回 FAILURE 会打 warn（未出现）；get_state 5s 有界返回后必打 succeeded/did-not-reach 二选一（都未出现）→ **主线程必然阻塞在 set_state(PLAYING) 内部**。S1 裸 NULL 之前必打 "Pipeline did not reach PLAYING after reset" warn，该 warn 不存在 → S1 根本没被执行到，直接排除
+2. **SDK 源码（Pi 上 /home/pi/Workspace/kvs-producer-sdk-cpp）**：`gst_kvs_sink_change_state` 各转换均不直接调 free（PAUSED_TO_READY 只 stopSync，READY_TO_NULL 只打日志）——这解释了为何 set_null_bounded 的 worker 拆 NULL 反而安全通过；唯一进入 free 链的路径是 NULL_TO_READY 的 producer 重建（旧对象析构）与 finalize（最后 unref）。设计 S6 排除理由"set PLAYING 上行转换一般不触发 free"被源码直接证伪
+3. **gdb 栈帧比对**：Thread 1 栈帧 #5–#11 与上述链条逐帧吻合（freeStreamMapping→defaultJoinThread→pthread_join(expected=198754)；call_once→KinesisVideoStream::free 对应 KinesisVideoStream.cpp:143 的 `std::call_once(free_kinesis_video_stream_flag_, freeKinesisVideoStream, ...)`）；SDK stdout 日志 02:39:16–17 UTC（=本地 10:39:16–17，恢复开始 1 秒内）显示 continuousRetry 错误风暴 + "shutdownStreamCurl called when already in progress"——worker 的 stopSync 与 SDK 自复位相撞，正是 join 目标线程存在的窗口
+**逐项 S 结论：**
+| # | 结论 | 依据 |
+|---|------|------|
+| S1 | **排除（本次事故）**，保留为同类危险面保守封堵 | journal 证明其前置 warn 未打、未执行到；macOS 动态旁证（fakesink broken pipeline + 临时 fprintf 线程 id）确认该裸 NULL 确实在主调线程执行——若走到就是同类风险，Task 5 照旧封堵 |
+| S2 | 保守封堵维持 | 未启动管道 NULL 态 kvssink dispose 行为仍未验证（kvssink finalize 会 reset producer，可能进 free 链），按 SHALL NOT 不猜测，统一走 worker |
+| S3 | 保守封堵维持 | 半启动管道析构 stop() 同步 set NULL + unref 在主线程；set PLAYING 分发后 kvssink 可能已完成 NULL_TO_READY 建流，此时主线程拆除风险与 S6 同级 |
+| S4 | 加固维持 | 双 worker 竞态 UAF 分析不受本结论影响 |
+| S5 | 加固维持 | 消息引用归零点漂移分析不受本结论影响 |
+| S6 | **定案为本次死锁调用点（推翻设计排除理由）** | 三条证据链收敛；上行 set_state(PLAYING) 触发 kvssink producer 重建 → 旧 producer 同步析构 → 持锁 pthread_join |
+**Gate 判定：S1 假设被推翻，触发硬约束**——已按 gate 回 design.md 更新 Hypothesized Root Cause 可疑面定位（S6 从排除项改为定案项，S1 降级为同类危险面）。**对 Task 5 封堵设计的直接影响（需在执行 Task 5 前消解）：** 现行 Fix Implementation 只封堵 S1/S2/S3（拆除方向），未覆盖 S6（上行 PLAYING 方向）——主线程的 `set_state(PLAYING)` 同样会同步进入 KVS free 链，必须同样移入 worker 有界执行（如新增 set_playing_bounded 或将 try_state_reset 的 PLAYING+get_state 整段入 worker），否则同类死锁原样复发。
+**动态旁证记录（macOS，临时代码已移除）：** 在 pipeline_health.cpp 三处插入临时 fprintf 线程 id（default_set_null worker / set PLAYING 前 / 裸 NULL 前）+ health_test.cpp 临时用例（broken pipeline，state_reset_timeout_ms=300，max_retries=1），`ctest -R '^health_test$' -V` 观察：FORENSIC-S6 与 FORENSIC-S1 线程 id == 测试主线程 id，FORENSIC-WORKER 为独立线程。观察后 `git checkout` 还原两文件并重编译，health_test 全绿（9.3s）。
+**Trace 记录：**
+| # | 症状 | 归因类别 | 完整 Trace | 解决方案 | 建议行动 |
+|---|------|---------|-----------|---------|----------|
+| 1 | design 把 S6 列为排除项、S1 列为最强假设 | Spec 假设错误（凭"上行转换一般不触发 free"的常识推断，未查 SDK 源码） | kvssink NULL_TO_READY 的 `kinesis_video_producer_init` 末行 unique_ptr 赋值同步析构旧 producer，进入完整 free/join 链 | 取证定案后按 gate 更新 design 可疑面 | 外部 SDK 的状态转换副作用必须查源码定案，不得用"一般不会"推断（对应 shall-not"不猜测 SDK 行为"）|
+| 2 | journal 与 trace 归档表述有偏差（归档写"再无任何日志"，tasks 写"bounded 日志不出"） | 取证精度 | 实机 journalctl 复核：确实自 10:39:16.453 后 spdlog 零输出，SDK stdout 缓冲日志 11:09 才 flush | 以实机 journal 为准，排除法闭合 | 关键时间线取证优先回原始 journal 复核，不依赖二手归档 |
+**涉及文件：** docs/development-trace.md（本条）、.kiro/specs/spec-32.5-recovery-deadlock-watchdog-fix/design.md（gate 触发的可疑面更新）；生产代码零改动（临时诊断代码已全部还原）
+---

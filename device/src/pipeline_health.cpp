@@ -56,14 +56,43 @@ namespace {
 // Run work_fn(pipeline) on a worker thread; the caller waits at most budget_ms.
 // Returns true if the worker finished within budget; false on timeout (the
 // worker is detached and finishes in the background).
+//
+// S4 hardening (Spec 32.5): the worker holds its own reference on the pipeline
+// for the whole duration of work_fn, so a detached worker can never observe a
+// use-after-free when another owner (e.g. a later teardown worker) drops its
+// reference. The extra reference is released on the worker thread, so a
+// potential ref-zero point (dispose) also stays off the main loop.
+//
+// op_tag makes the paired worker/caller logs identifiable (Spec 32.5 需求 2.9):
+// worker side logs "worker [tag] start" / "worker [tag] done, elapsed=Xms"
+// (also after a detach -- the background completion is still logged); caller
+// side logs completed/timeout with the actual wait time and the budget.
 bool run_bounded(GstElement* pipeline, int budget_ms,
-                 std::function<void(GstElement*)> work_fn) {
+                 std::function<void(GstElement*)> work_fn,
+                 const char* op_tag) {
     auto mtx = std::make_shared<std::mutex>();
     auto cv = std::make_shared<std::condition_variable>();
     auto done = std::make_shared<std::atomic<bool>>(false);
+    const std::string tag = op_tag ? op_tag : "op";
 
-    std::thread worker([pipeline, work_fn, mtx, cv, done]() {
+    // S4: take the worker's reference BEFORE the thread starts, so it is
+    // guaranteed to exist before run_bounded returns (no window where the
+    // caller could drop the last ref before the worker begins running).
+    // A ref never triggers dispose, so taking it on the caller thread is safe.
+    if (pipeline) gst_object_ref(pipeline);
+
+    auto t0 = std::chrono::steady_clock::now();
+    std::thread worker([pipeline, work_fn, mtx, cv, done, tag]() {
+        auto wlogger = spdlog::get("pipeline");
+        if (wlogger) wlogger->info("worker [{}] start", tag);
+        auto w0 = std::chrono::steady_clock::now();
         work_fn(pipeline);
+        // S4: drop the worker's reference on the worker thread. If this is the
+        // last reference, dispose runs here -- never on the main loop.
+        if (pipeline) gst_object_unref(pipeline);
+        auto wms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - w0).count();
+        if (wlogger) wlogger->info("worker [{}] done, elapsed={}ms", tag, wms);
         done->store(true, std::memory_order_release);
         cv->notify_one();
     });
@@ -74,18 +103,40 @@ bool run_bounded(GstElement* pipeline, int budget_ms,
         completed = cv->wait_for(lock, std::chrono::milliseconds(budget_ms),
                                  [&] { return done->load(std::memory_order_acquire); });
     }
+    auto waited_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
 
+    auto logger = spdlog::get("pipeline");
     if (completed) {
         worker.join();
+        if (logger) {
+            logger->info("bounded [{}]: completed, waited={}ms (budget={}ms)",
+                         tag, waited_ms, budget_ms);
+        }
     } else {
-        worker.detach();  // finishes in background
+        worker.detach();  // finishes in background; worker logs its own done line
+        if (logger) {
+            logger->warn("bounded [{}]: timeout, waited={}ms (budget={}ms), worker detached to background",
+                         tag, waited_ms, budget_ms);
+        }
     }
     return completed;
 }
 
-// Default teardown: set NULL (blocking), wait for NULL, then unref.
+// Default teardown: flush the bus first, then set NULL (blocking), wait for
+// NULL, and unref.
+// S5 hardening (Spec 32.5): queued bus messages hold references on their source
+// elements (e.g. kvssink). Flushing the bus HERE releases those message-held
+// references on this worker thread, so the pipeline's final unref below is the
+// true ref-zero point and kvssink dispose cannot drift to an unpredictable
+// thread (such as the main loop finalizing the bus watch source).
 void default_teardown(GstElement* pipeline) {
     if (!pipeline) return;
+    GstBus* bus = gst_element_get_bus(pipeline);
+    if (bus) {
+        gst_bus_set_flushing(bus, TRUE);
+        gst_object_unref(bus);
+    }
     gst_element_set_state(pipeline, GST_STATE_NULL);
     GstState st = GST_STATE_VOID_PENDING;
     gst_element_get_state(pipeline, &st, nullptr, GST_CLOCK_TIME_NONE);
@@ -100,24 +151,35 @@ void default_set_null(GstElement* pipeline) {
     gst_element_get_state(pipeline, &st, nullptr, GST_CLOCK_TIME_NONE);
 }
 
+// Default set-playing: dispatch the uplift set_state(PLAYING), no get_state.
+// S6 (Spec 32.5 取证定案): the NULL_TO_READY leg re-initializes kvssink and
+// synchronously destroys the old KVS producer (KinesisVideoStream::free ->
+// pthread_join while holding the client lock), so this call must run on a
+// worker thread. The return value of set_state is intentionally discarded:
+// a FAILURE outcome is picked up by the caller's get_state confirmation.
+void default_set_playing(GstElement* pipeline) {
+    if (!pipeline) return;
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+}
+
 }  // namespace
 
 bool teardown_pipeline_bounded(GstElement* pipeline, int budget_ms,
                                std::function<void(GstElement*)> teardown_fn) {
     if (!teardown_fn) teardown_fn = default_teardown;
-    bool ok = run_bounded(pipeline, budget_ms, std::move(teardown_fn));
-    auto logger = spdlog::get("pipeline");
-    if (logger) {
-        if (ok) logger->info("teardown_pipeline_bounded: completed within {}ms", budget_ms);
-        else    logger->warn("teardown_pipeline_bounded: not done within {}ms, detached to background", budget_ms);
-    }
-    return ok;
+    return run_bounded(pipeline, budget_ms, std::move(teardown_fn), "teardown");
 }
 
 bool set_null_bounded(GstElement* pipeline, int budget_ms,
                       std::function<void(GstElement*)> set_null_fn) {
     if (!set_null_fn) set_null_fn = default_set_null;
-    return run_bounded(pipeline, budget_ms, std::move(set_null_fn));
+    return run_bounded(pipeline, budget_ms, std::move(set_null_fn), "set-null");
+}
+
+bool set_playing_bounded(GstElement* pipeline, int budget_ms,
+                         std::function<void(GstElement*)> set_playing_fn) {
+    if (!set_playing_fn) set_playing_fn = default_set_playing;
+    return run_bounded(pipeline, budget_ms, std::move(set_playing_fn), "set-playing");
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +286,19 @@ void PipelineHealthMonitor::set_health_callback(HealthCallback cb) {
 
 void PipelineHealthMonitor::set_rebuild_callback(RebuildCallback cb) {
     rebuild_cb_ = std::move(cb);
+}
+
+void PipelineHealthMonitor::set_liveness_callback(std::function<void()> cb) {
+    liveness_cb_ = std::move(cb);
+}
+
+// Recovery checkpoint (Spec 32.5 缺陷 1): refresh liveness via the injected
+// callback (if registered) and emit a phase-boundary info log at the same
+// point (需求 2.9). Never called with mutex_ held.
+void PipelineHealthMonitor::liveness_checkpoint(const char* tag) {
+    if (liveness_cb_) liveness_cb_();
+    auto logger = spdlog::get("pipeline");
+    if (logger) logger->info("recovery checkpoint [{}]", tag);
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +598,11 @@ void PipelineHealthMonitor::attempt_recovery() {
         cb_copy(old_state, new_state);
     }
 
+    // CP1: recovery critical path entry (RECOVERING transition done). From here
+    // until CP6 the main loop is occupied by this callback and the CP0 liveness
+    // timer cannot run; checkpoints keep the watchdog liveness fresh instead.
+    liveness_checkpoint("CP1 recovery-enter");
+
     auto logger = spdlog::get("pipeline");
 
     // Try state reset first
@@ -605,6 +685,10 @@ void PipelineHealthMonitor::attempt_recovery() {
                           }, this);
         }
     }
+
+    // CP6: recovery critical path exit (success / failure / backoff scheduled).
+    // Control returns to the main loop, where the CP0 timer takes over.
+    liveness_checkpoint("CP6 recovery-exit");
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +705,12 @@ bool PipelineHealthMonitor::try_state_reset() {
     // we wait at most state_reset_timeout_ms. (Spec 32 需求 5 / 决策 B helper b)
     // Ownership NOT transferred here -- we want to reuse the same pipeline if NULL
     // is reached within budget.
-    if (!set_null_bounded(pipeline_, config_.state_reset_timeout_ms)) {
+    bool null_ok = set_null_bounded(pipeline_, config_.state_reset_timeout_ms);
+    // CP2: bounded-wait primitive returned. Invariant (design 决策点 1): every
+    // bounded wait inside try_state_reset is followed by a checkpoint, so any
+    // adjacent checkpoint gap stays <= 5s + eps < T_stale = 10s.
+    liveness_checkpoint("CP2 state-reset-null");
+    if (!null_ok) {
         // Timeout: NULL still in progress (kvssink stuck). Do not reuse a
         // half-NULL pipeline; return false so attempt_recovery goes to
         // full_rebuild, which takes ownership via release() + teardown_pipeline_bounded.
@@ -634,17 +723,39 @@ bool PipelineHealthMonitor::try_state_reset() {
         return false;
     }
 
-    // NULL reached within budget -> set PLAYING and reuse the same pipeline.
-    GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
-    if (ret == GST_STATE_CHANGE_FAILURE) {
-        if (logger) logger->warn("set_state(PLAYING) failed after reset");
-        return false;
-    }
+    // NULL reached within budget -> uplift to PLAYING on a worker thread.
+    // S6 blockade (Spec 32.5 取证定案调用点): the NULL_TO_READY re-init of kvssink
+    // synchronously destroys the old KVS producer (enters the KVS stream free
+    // chain, join-while-holding-lock), which froze the main loop for 2d8h in the
+    // 2026-09-03 incident. The main loop only does bounded waiting here. A
+    // FAILURE return from set_state(PLAYING) is picked up by the get_state
+    // confirmation below (unchanged ok-judgment).
+    bool playing_dispatched =
+        set_playing_bounded(pipeline_, config_.state_reset_timeout_ms);
+    // CP2.5: without this checkpoint, set_playing(<=5s) + get_state(<=5s) in
+    // series would exceed T_stale=10s and cause a liveness false-kill.
+    liveness_checkpoint("CP2.5 state-reset-playing");
 
-    GstState actual = GST_STATE_VOID_PENDING;
-    ret = gst_element_get_state(pipeline_, &actual, nullptr,
-                                static_cast<gint64>(config_.state_reset_timeout_ms) * GST_MSECOND);
-    bool ok = (ret != GST_STATE_CHANGE_FAILURE && actual == GST_STATE_PLAYING);
+    bool ok = false;
+    if (playing_dispatched) {
+        // Confirm PLAYING on the main loop: get_state only waits, it never
+        // enters the KVS free chain (取证维持排除).
+        GstState actual = GST_STATE_VOID_PENDING;
+        GstStateChangeReturn ret = gst_element_get_state(
+            pipeline_, &actual, nullptr,
+            static_cast<gint64>(config_.state_reset_timeout_ms) * GST_MSECOND);
+        // CP3: PLAYING get_state returned.
+        liveness_checkpoint("CP3 state-reset-confirm");
+        ok = (ret != GST_STATE_CHANGE_FAILURE && actual == GST_STATE_PLAYING);
+    } else {
+        // Timeout: treat the reset as failed; the detached PLAYING worker and
+        // the failure-branch NULL worker below may race, which is safe --
+        // gst_element_set_state is MT-safe and the S4 refs prevent UAF.
+        if (logger) {
+            logger->warn("set_state(PLAYING) not done within {}ms, treating state reset as failed",
+                         config_.state_reset_timeout_ms);
+        }
+    }
 
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
@@ -652,7 +763,13 @@ bool PipelineHealthMonitor::try_state_reset() {
         if (logger) logger->info("State reset recovery succeeded ({}ms)", ms);
     } else {
         if (logger) logger->warn("Pipeline did not reach PLAYING after reset ({}ms)", ms);
-        gst_element_set_state(pipeline_, GST_STATE_NULL);
+        // S1 blockade (design 决策点 4, 保守封堵): push the pipeline toward NULL
+        // on a worker thread (bounded, result ignored) instead of a bare
+        // synchronous set_state(NULL) on the main loop; still return false.
+        set_null_bounded(pipeline_, config_.state_reset_timeout_ms);
+        // CP3.5: without this checkpoint, failure-path set_null(<=5s) +
+        // teardown(<=5s) in series would exceed T_stale=10s.
+        liveness_checkpoint("CP3.5 state-reset-failure-null");
     }
     return ok;
 }

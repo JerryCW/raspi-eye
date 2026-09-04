@@ -25,6 +25,24 @@ static std::thread s_thread;
 static std::mutex s_health_mtx;
 static std::function<bool()> s_health_check;
 
+// --- Spec 32.5 缺陷 1：liveness 门控状态 ---
+// liveness 时间戳（steady_clock 毫秒；0 = 未刷新哨兵）。
+// 主循环 timer / 恢复检查点写，看门狗线程读——必须 lock-free 原子。
+// 阈值链约束（改任何参数必须重推，见 spec-32.5 design 决策点 1）：
+//   相邻检查点最大间隔 5s+ε < T_stale=10s < 喂狗间隔 15s < WatchdogSec=30s
+static std::atomic<int64_t> s_liveness_ms{0};
+static std::atomic<int64_t> s_stale_threshold_ms{10000};  // T_stale 默认 10s
+static_assert(std::atomic<int64_t>::is_always_lock_free,
+              "atomic<int64_t> must be lock-free on target platforms "
+              "(aarch64/x86_64) for watchdog-thread reads");
+
+// steady_clock 当前毫秒
+static int64_t steady_now_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 // --- notify 方法 ---
 
 void SdNotifier::notify_ready() {
@@ -77,11 +95,10 @@ void SdNotifier::start_watchdog_thread(int interval_sec) {
                 s_cv.wait_for(lock, std::chrono::seconds(interval_sec),
                               [] { return s_stop.load(); });
                 if (!s_stop.load()) {
-                    // 健康门控：非健康（FATAL）时跳过心跳，让 systemd WatchdogSec 兜底
+                    // 组合门控：health（FATAL）AND liveness（主循环活性）。
+                    // 跳过原因的 warn 日志由 watchdog_gate_open() 内部区分输出。
                     if (watchdog_gate_open()) {
                         notify_watchdog();
-                    } else {
-                        if (logger) logger->warn("watchdog: health gate closed, skipping WATCHDOG=1");
                     }
                 }
             }
@@ -118,11 +135,54 @@ void SdNotifier::set_health_check(std::function<bool()> is_healthy) {
 }
 
 bool SdNotifier::watchdog_gate_open() {
+    // health 维度：既有逻辑不动（未注册视为健康）
     std::function<bool()> check;
     {
         std::lock_guard<std::mutex> lk(s_health_mtx);
         check = s_health_check;
     }
-    if (!check) return true;  // 未注册：默认健康
-    return check();
+    const bool healthy = check ? check() : true;
+
+    // liveness 维度：读原子时间戳 + 取 now，交给纯函数判定（Spec 32.5 缺陷 1）
+    const int64_t last = s_liveness_ms.load(std::memory_order_relaxed);
+    const int64_t threshold = s_stale_threshold_ms.load(std::memory_order_relaxed);
+    const int64_t now = steady_now_ms();
+
+    const bool feed = should_feed_watchdog(now, last, threshold, healthy);
+    if (!feed) {
+        auto logger = spdlog::get("app");
+        if (logger) {
+            if (!healthy) {
+                logger->warn("watchdog: health gate closed, skipping WATCHDOG=1");
+            } else {
+                logger->warn(
+                    "watchdog: liveness stale, skipping WATCHDOG=1 "
+                    "(age={}ms threshold={}ms)",
+                    now - last, threshold);
+            }
+        }
+    }
+    return feed;
+}
+
+// --- Spec 32.5 缺陷 1：liveness 原语 ---
+
+void SdNotifier::refresh_liveness() {
+    s_liveness_ms.store(steady_now_ms(), std::memory_order_relaxed);
+}
+
+bool SdNotifier::should_feed_watchdog(int64_t now_ms, int64_t last_liveness_ms,
+                                      int64_t stale_threshold_ms, bool healthy) {
+    if (!healthy) return false;          // FATAL 门控短路（spec-32 语义保留）
+    if (last_liveness_ms == 0) return true;  // 未刷新哨兵：liveness 门控视为开
+    return (now_ms - last_liveness_ms) <= stale_threshold_ms;
+}
+
+void SdNotifier::set_liveness_stale_threshold_ms(int64_t ms) {
+    s_stale_threshold_ms.store(ms, std::memory_order_relaxed);
+}
+
+void SdNotifier::reset_liveness_for_test() {
+    s_liveness_ms.store(0, std::memory_order_relaxed);
+    s_stale_threshold_ms.store(10000, std::memory_order_relaxed);
 }
